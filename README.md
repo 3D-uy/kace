@@ -8,7 +8,7 @@
   <a href="https://github.com/3D-uy/kace/actions/workflows/ci.yml">
     <img src="https://github.com/3D-uy/kace/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI">
   </a>
-  <img src="https://img.shields.io/badge/version-v1.0.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v0.9.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/configs%20validated-192-brightgreen?style=flat-square" alt="Configs Validated">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Raspberry%20Pi-green?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/github/license/3D-uy/KACE?style=flat-square" alt="License">
