@@ -176,8 +176,9 @@ def run_wizard():
             ).ask()
             
             if ans is None:
-                step -= 1
-                continue
+                # User cancelled (Ctrl+C mid-autocomplete) — exit cleanly.
+                # Do NOT decrement step: that would send step to -1 and break the loop.
+                sys.exit(0)
                 
             user_data["printer_profile"] = "Custom / Scratch Build" if ans == custom_choice_str else ans
 

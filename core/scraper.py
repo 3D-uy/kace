@@ -64,7 +64,7 @@ def fetch_config_list():
     url = "https://api.github.com/repos/Klipper3d/klipper/contents/config"
     req = urllib.request.Request(url, headers={'User-Agent': 'KACE-App'})
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode())
             configs = [item['name'] for item in data if item['name'].startswith('generic-') or item['name'].startswith('printer-')]
             
@@ -79,7 +79,7 @@ def fetch_config_list():
         try:
             tree_url = "https://github.com/Klipper3d/klipper/tree/master/config"
             req_html = urllib.request.Request(tree_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) KACE-App'})
-            with urllib.request.urlopen(req_html) as response:
+            with urllib.request.urlopen(req_html, timeout=10) as response:
                 html = response.read().decode('utf-8', errors='ignore')
                 
                 # Extract from React JSON payload or standard hrefs
@@ -131,7 +131,7 @@ def fetch_raw_config(filename):
     url = f"https://raw.githubusercontent.com/Klipper3d/klipper/master/config/{filename}"
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 KACE-App'})
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             content = response.read().decode('utf-8', errors='ignore')
             # Save to cache
             try:

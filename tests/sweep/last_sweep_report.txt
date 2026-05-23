@@ -1,0 +1,235 @@
+
+================================================================
+  KACE — Full Klipper Config Sweep
+  Run at: 2026-05-23 19:33:59
+================================================================
+
+  Found 192 config files. Processing...
+
+  [  1/192] [PASS]                  generic-I3DBEEZ9.cfg
+  [  2/192] [PASS]                  generic-alligator-r2.cfg
+  [  3/192] [PASS]                  generic-alligator-r3.cfg
+  [  4/192] [PASS]                  generic-archim2.cfg
+  [  5/192] [PASS]                  generic-azteeg-x5-mini-v3.cfg
+  [  6/192] [PASS]                  generic-bigtreetech-e3-rrf-v1.1.cfg
+  [  7/192] [PASS]                  generic-bigtreetech-gtr.cfg
+  [  8/192] [UNSUPPORTED]           generic-bigtreetech-manta-e3ez.cfg  (Unsupported/experimental sections present)  [!gen]
+  [  9/192] [UNSUPPORTED]           generic-bigtreetech-manta-m4p.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 10/192] [UNSUPPORTED]           generic-bigtreetech-manta-m5p.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 11/192] [UNSUPPORTED]           generic-bigtreetech-manta-m8p-v1.0.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 12/192] [UNSUPPORTED]           generic-bigtreetech-manta-m8p-v1.1.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 13/192] [UNSUPPORTED]           generic-bigtreetech-octopus-max-ez.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 14/192] [UNSUPPORTED]           generic-bigtreetech-octopus-pro-v1.0.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 15/192] [UNSUPPORTED]           generic-bigtreetech-octopus-pro-v1.1.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 16/192] [UNSUPPORTED]           generic-bigtreetech-octopus-v1.1.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 17/192] [PASS]                  generic-bigtreetech-skr-2.cfg
+  [ 18/192] [PASS]                  generic-bigtreetech-skr-3.cfg
+  [ 19/192] [PASS]                  generic-bigtreetech-skr-cr6-v1.0.cfg
+  [ 20/192] [PASS]                  generic-bigtreetech-skr-e3-dip.cfg
+  [ 21/192] [PASS]                  generic-bigtreetech-skr-e3-turbo.cfg
+  [ 22/192] [PASS]                  generic-bigtreetech-skr-mini-e3-v1.0.cfg
+  [ 23/192] [PASS]                  generic-bigtreetech-skr-mini-e3-v1.2.cfg
+  [ 24/192] [PASS]                  generic-bigtreetech-skr-mini-e3-v2.0.cfg
+  [ 25/192] [PASS]                  generic-bigtreetech-skr-mini-e3-v3.0.cfg
+  [ 26/192] [UNSUPPORTED]           generic-bigtreetech-skr-mini-mz.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 27/192] [PASS]                  generic-bigtreetech-skr-mini.cfg
+  [ 28/192] [UNSUPPORTED]           generic-bigtreetech-skr-pico-v1.0.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 29/192] [PASS]                  generic-bigtreetech-skr-pro.cfg
+  [ 30/192] [PASS]                  generic-bigtreetech-skr-v1.1.cfg
+  [ 31/192] [PASS]                  generic-bigtreetech-skr-v1.3.cfg
+  [ 32/192] [PASS]                  generic-bigtreetech-skr-v1.4.cfg
+  [ 33/192] [PASS]                  generic-cramps.cfg
+  [ 34/192] [UNSUPPORTED]           generic-creality-v4.2.10.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 35/192] [PASS]                  generic-creality-v4.2.7.cfg
+  [ 36/192] [UNSUPPORTED]           generic-duet2-duex.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 37/192] [PASS]                  generic-duet2-maestro.cfg
+  [ 38/192] [PASS]                  generic-duet2.cfg
+  [ 39/192] [PASS]                  generic-duet3-6hc.cfg
+  [ 40/192] [PASS]                  generic-duet3-6xd.cfg
+  [ 41/192] [PASS]                  generic-duet3-mini.cfg
+  [ 42/192] [PASS]                  generic-einsy-rambo.cfg
+  [ 43/192] [PASS]                  generic-flyboard.cfg
+  [ 44/192] [PASS]                  generic-fysetc-cheetah-v1.1.cfg
+  [ 45/192] [PASS]                  generic-fysetc-cheetah-v1.2.cfg
+  [ 46/192] [PASS]                  generic-fysetc-cheetah-v2.0.cfg
+  [ 47/192] [PASS]                  generic-fysetc-f6.cfg
+  [ 48/192] [PASS]                  generic-fysetc-s6-v2.cfg
+  [ 49/192] [PASS]                  generic-fysetc-s6.cfg
+  [ 50/192] [PASS]                  generic-fysetc-spider.cfg
+  [ 51/192] [PASS]                  generic-gt2560.cfg
+  [ 52/192] [UNSUPPORTED]           generic-ldo-leviathan-v1.2.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 53/192] [UNSUPPORTED]           generic-mellow-fly-cdy-v3.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 54/192] [PASS]                  generic-mellow-fly-e3-v2.cfg
+  [ 55/192] [PASS]                  generic-mellow-fly-gemini-v1.cfg
+  [ 56/192] [PASS]                  generic-mellow-fly-gemini-v2.cfg
+  [ 57/192] [UNSUPPORTED]           generic-mellow-super-infinty-hv.cfg  (Unsupported/experimental sections present)  [!gen]
+  [ 58/192] [PASS]                  generic-melzi.cfg
+  [ 59/192] [PASS]                  generic-mightyboard.cfg
+  [ 60/192] [PASS]                  generic-mini-rambo.cfg
+  [ 61/192] [PASS]                  generic-minitronics1.cfg
+  [ 62/192] [PASS]                  generic-mks-monster8.cfg
+  [ 63/192] [PASS]                  generic-mks-robin-e3.cfg
+  [ 64/192] [PASS]                  generic-mks-robin-nano-v1.cfg
+  [ 65/192] [PASS]                  generic-mks-robin-nano-v2.cfg
+  [ 66/192] [PASS]                  generic-mks-robin-nano-v3.cfg
+  [ 67/192] [PASS]                  generic-mks-rumba32-v1.0.cfg
+  [ 68/192] [PASS]                  generic-mks-sgenl.cfg
+  [ 69/192] [PASS]                  generic-printrboard-g2.cfg
+  [ 70/192] [PASS]                  generic-printrboard.cfg
+  [ 71/192] [PASS]                  generic-prusa-buddy.cfg
+  [ 72/192] [PASS]                  generic-radds.cfg
+  [ 73/192] [PASS]                  generic-rambo.cfg
+  [ 74/192] [PASS]                  generic-ramps.cfg
+  [ 75/192] [PASS]                  generic-re-arm.cfg
+  [ 76/192] [PASS]                  generic-remram.cfg
+  [ 77/192] [PASS]                  generic-replicape.cfg
+  [ 78/192] [PASS]                  generic-rumba.cfg
+  [ 79/192] [PASS]                  generic-ruramps-v1.3.cfg
+  [ 80/192] [PASS]                  generic-simulavr.cfg
+  [ 81/192] [PASS]                  generic-smoothieboard.cfg
+  [ 82/192] [PASS]                  generic-th3d-ezboard-lite-v1.2.cfg
+  [ 83/192] [PASS]                  generic-th3d-ezboard-v2.0.cfg
+  [ 84/192] [PASS]                  generic-ultimaker-ultimainboard-v2.cfg
+  [ 85/192] [PASS]                  printer-adimlab-2018.cfg
+  [ 86/192] [PASS]                  printer-alfawise-u30-2018.cfg
+  [ 87/192] [PASS]                  printer-anet-a4-2018.cfg  [!gen]
+  [ 88/192] [PASS]                  printer-anet-a8-2017.cfg
+  [ 89/192] [PASS]                  printer-anet-a8-2019.cfg
+  [ 90/192] [PASS]                  printer-anet-e10-2018.cfg
+  [ 91/192] [PASS]                  printer-anet-e16-2019.cfg
+  [ 92/192] [PASS]                  printer-anycubic-4max-2018.cfg
+  [ 93/192] [PASS]                  printer-anycubic-4maxpro-2.0-2021.cfg
+  [ 94/192] [PASS]                  printer-anycubic-i3-mega-2017.cfg
+  [ 95/192] [PASS]                  printer-anycubic-kobra-go-2022.cfg
+  [ 96/192] [PASS]                  printer-anycubic-kobra-plus-2022.cfg
+  [ 97/192] [PASS]                  printer-anycubic-kossel-2016.cfg  [!gen]
+  [ 98/192] [PASS]                  printer-anycubic-kossel-plus-2017.cfg  [!gen]
+  [ 99/192] [PASS]                  printer-anycubic-vyper-2021.cfg
+  [100/192] [PASS]                  printer-artillery-genius-pro-2022.cfg
+  [101/192] [UNSUPPORTED]           printer-artillery-sidewinder-x2-2022.cfg  (Unsupported/experimental sections present)  [!gen]
+  [102/192] [UNSUPPORTED]           printer-artillery-sidewinder-x3-plus-2024.cfg  (Unsupported/experimental sections present)  [!gen]
+  [103/192] [PASS]                  printer-biqu-b1-se-plus-2022.cfg
+  [104/192] [UNSUPPORTED]           printer-biqu-bx-2021.cfg  (Unsupported/experimental sections present)  [!gen]
+  [105/192] [PASS]                  printer-bq-hephestos-2014.cfg
+  [106/192] [PASS]                  printer-creality-cr10-2017.cfg
+  [107/192] [PASS]                  printer-creality-cr10-smart-pro-2022.cfg
+  [108/192] [PASS]                  printer-creality-cr10-v3-2020.cfg
+  [109/192] [PASS]                  printer-creality-cr10mini-2017.cfg
+  [110/192] [PASS]                  printer-creality-cr10s-2017.cfg
+  [111/192] [PASS]                  printer-creality-cr10s-pro-v2-2020.cfg
+  [112/192] [PASS]                  printer-creality-cr20-2018.cfg
+  [113/192] [PASS]                  printer-creality-cr20-pro-2019.cfg
+  [114/192] [UNSUPPORTED]           printer-creality-cr30-2021.cfg  (Unsupported/experimental sections present)  [!gen]
+  [115/192] [PASS]                  printer-creality-cr5pro-ht-2022.cfg
+  [116/192] [PASS]                  printer-creality-cr6se-2020.cfg
+  [117/192] [PASS]                  printer-creality-cr6se-2021.cfg
+  [118/192] [PASS]                  printer-creality-ender2-2017.cfg
+  [119/192] [PASS]                  printer-creality-ender2pro-2021.cfg
+  [120/192] [PASS]                  printer-creality-ender2pro-hc32-2022.cfg
+  [121/192] [PASS]                  printer-creality-ender3-2018.cfg
+  [122/192] [PASS]                  printer-creality-ender3-s1-2021.cfg
+  [123/192] [PASS]                  printer-creality-ender3-s1plus-2022.cfg
+  [124/192] [PASS]                  printer-creality-ender3-v2-2020.cfg
+  [125/192] [PASS]                  printer-creality-ender3-v2-neo-2022.cfg
+  [126/192] [PASS]                  printer-creality-ender3max-2021.cfg
+  [127/192] [PASS]                  printer-creality-ender3pro-2020.cfg
+  [128/192] [PASS]                  printer-creality-ender5-2019.cfg
+  [129/192] [PASS]                  printer-creality-ender5-s1-2023.cfg
+  [130/192] [PASS]                  printer-creality-ender5plus-2019.cfg
+  [131/192] [PASS]                  printer-creality-ender5pro-2020.cfg
+  [132/192] [PASS]                  printer-creality-ender6-2020.cfg
+  [133/192] [PASS]                  printer-creality-sermoonD1-2021.cfg
+  [134/192] [PASS]                  printer-creality-sermoonV1-2022.cfg
+  [135/192] [PASS]                  printer-elegoo-neptune2-2021.cfg
+  [136/192] [PASS]                  printer-elegoo-neptune3-pro-2023.cfg
+  [137/192] [PASS]                  printer-eryone-er20-2021.cfg
+  [138/192] [PASS]                  printer-eryone-thinker-series-v2-2020.cfg
+  [139/192] [PASS]                  printer-flashforge-creator-pro-2018.cfg
+  [140/192] [PASS]                  printer-flsun-q5-2020.cfg  [!gen]
+  [141/192] [PASS]                  printer-flsun-qqs-2020.cfg  [!gen]
+  [142/192] [PASS]                  printer-fokoos-odin5-f3-2021.cfg
+  [143/192] [PASS]                  printer-geeetech-301-2019.cfg  [!gen]
+  [144/192] [PASS]                  printer-geeetech-A10T-A20T-2021.cfg
+  [145/192] [PASS]                  printer-hiprecy-leo-2019.cfg
+  [146/192] [PASS]                  printer-kingroon-kp3s-2020.cfg
+  [147/192] [PASS]                  printer-longer-lk4-pro-2019.cfg
+  [148/192] [PASS]                  printer-longer-lk4x-2022.cfg
+  [149/192] [PASS]                  printer-lulzbot-mini1-2016.cfg
+  [150/192] [PASS]                  printer-lulzbot-mini2-2018.cfg
+  [151/192] [PASS]                  printer-lulzbot-taz6-2017.cfg
+  [152/192] [PASS]                  printer-lulzbot-taz6-dual-v3-2017.cfg
+  [153/192] [PASS]                  printer-makergear-m2-2012.cfg
+  [154/192] [PASS]                  printer-makergear-m2-2016.cfg
+  [155/192] [PASS]                  printer-micromake-d1-2016.cfg  [!gen]
+  [156/192] [PASS]                  printer-modix-big60-2020.cfg
+  [157/192] [PASS]                  printer-monoprice-mini-delta-2017.cfg  [!gen]
+  [158/192] [PASS]                  printer-monoprice-select-mini-v1-2016.cfg
+  [159/192] [PASS]                  printer-monoprice-select-mini-v2-2018.cfg
+  [160/192] [PASS]                  printer-mtw-create-2015.cfg
+  [161/192] [PASS]                  printer-prusa-mini-plus-2020.cfg
+  [162/192] [PASS]                  printer-ratrig-v-minion-2021.cfg
+  [163/192] [PASS]                  printer-robo3d-r2-2017.cfg
+  [164/192] [PASS]                  printer-seemecnc-rostock-max-v2-2015.cfg  [!gen]
+  [165/192] [PASS]                  printer-sovol-sv01-2020.cfg
+  [166/192] [PASS]                  printer-sovol-sv05-2022.cfg
+  [167/192] [PASS]                  printer-sovol-sv06-2022.cfg
+  [168/192] [PASS]                  printer-sovol-sv06-plus-2023.cfg
+  [169/192] [PASS]                  printer-sunlu-s8-2020.cfg
+  [170/192] [PASS]                  printer-sunlu-t3-2022.cfg
+  [171/192] [PASS]                  printer-tevo-flash-2018.cfg
+  [172/192] [PASS]                  printer-tevo-tarantula-pro-2020.cfg
+  [173/192] [PASS]                  printer-tronxy-crux1-2022.cfg
+  [174/192] [PASS]                  printer-tronxy-p802e-2020.cfg
+  [175/192] [PASS]                  printer-tronxy-p802m-2020.cfg
+  [176/192] [PASS]                  printer-tronxy-x5s-2018.cfg
+  [177/192] [PASS]                  printer-tronxy-x5sa-pro-2020.cfg
+  [178/192] [PASS]                  printer-tronxy-x5sa-v6-2019.cfg
+  [179/192] [PASS]                  printer-tronxy-x8-2018.cfg
+  [180/192] [PASS]                  printer-tronxy-xy-2-Pro-2020.cfg
+  [181/192] [PASS]                  printer-twotrees-sapphire-plus-sp-5-v1-2020.cfg
+  [182/192] [PASS]                  printer-twotrees-sapphire-plus-sp-5-v1.1-2021.cfg
+  [183/192] [PASS]                  printer-twotrees-sapphire-pro-sp-3-2020.cfg
+  [184/192] [PASS]                  printer-velleman-k8200-2013.cfg
+  [185/192] [PASS]                  printer-velleman-k8800-2017.cfg  [!gen]
+  [186/192] [PASS]                  printer-voxelab-aquila-2021.cfg
+  [187/192] [PASS]                  printer-wanhao-duplicator-6-2016.cfg
+  [188/192] [PASS]                  printer-wanhao-duplicator-9-2018.cfg
+  [189/192] [PASS]                  printer-wanhao-duplicator-i3-mini-2017.cfg
+  [190/192] [PASS]                  printer-wanhao-duplicator-i3-plus-2017.cfg
+  [191/192] [PASS]                  printer-wanhao-duplicator-i3-plus-mark2-2019.cfg
+  [192/192] [PASS]                  printer-wanhao-duplicator-i3-v2.1-2017.cfg
+
+  Sweep completed in 10.0s
+
+================================================================
+  KACE — Full Klipper Config Sweep Report
+================================================================
+  Total configs processed  : 192
+  [PASS]                  : 172
+  [SAFE_ABORT]            : 0
+  [UNSUPPORTED]           : 20
+  [FAILURE]               : 0
+  Generation warnings      : 10
+================================================================
+
+[WARN] GENERATION WARNINGS (parsed OK but output had issues):
+  [!]  printer-anet-a4-2018.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-anycubic-kossel-2016.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-anycubic-kossel-plus-2017.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-flsun-q5-2020.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-flsun-qqs-2020.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-geeetech-301-2019.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-micromake-d1-2016.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-monoprice-mini-delta-2017.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-seemecnc-rostock-max-v2-2015.cfg
+       generate_config hit sys.exit (TODO pins in output)
+  [!]  printer-velleman-k8800-2017.cfg
+       generate_config hit sys.exit (TODO pins in output)

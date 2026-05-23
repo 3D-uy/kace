@@ -21,6 +21,17 @@ from core.style import custom_style
 from core.translations import t, set_lang
 from core.banner import print_kace_banner
 
+# Read version once at module load (same logic as kace.py)
+def _read_version() -> str:
+    try:
+        _vf = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'VERSION')
+        with open(_vf, 'r', encoding='utf-8') as _f:
+            return 'v' + _f.read().strip()
+    except Exception:
+        return 'v0.1.0'
+
+_KACE_VERSION = _read_version()
+
 # ── Detection path constants (KACE / Klipper defaults) ──────────
 # Centralised here so future configurability is one-line change.
 _PATH_KLIPPER     = os.path.expanduser("~/klipper")
@@ -210,7 +221,7 @@ def run_dashboard(state: dict) -> str:
     # Draw banner + status panel once, then ask for language.
     # The language selection happens BEFORE the action menu so all
     # subsequent prompts are in the user's chosen language.
-    print_kace_banner("Klipper Automated Configuration Ecosystem")
+    print_kace_banner("Klipper Automated Configuration Ecosystem", _KACE_VERSION)
     _render_status_panel(state)
 
     _select_language()
@@ -221,7 +232,7 @@ def run_dashboard(state: dict) -> str:
     while True:
         # Redraw banner + status on every loop iteration so the screen
         # stays fresh after returning from the manage view.
-        print_kace_banner("Klipper Automated Configuration Ecosystem")
+        print_kace_banner("Klipper Automated Configuration Ecosystem", _KACE_VERSION)
 
         _render_status_panel(state)
         suggestions = get_suggestions(state)

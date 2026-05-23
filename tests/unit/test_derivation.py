@@ -70,7 +70,9 @@ mcu_firmware:
   - pattern: "stm32f103"  # Shadowed by stm32f above
     arch: stm32
 """
-        bad_path = "data/bad_boards.yaml"
+        bad_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'bad_boards_test.yaml')
+        )
         with open(bad_path, "w") as f:
             f.write(bad_yaml)
 

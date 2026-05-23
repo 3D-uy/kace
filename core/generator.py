@@ -108,7 +108,9 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         os.makedirs(base_path, exist_ok=True)
         cfg_file = os.path.join(base_path, 'printer.cfg')
     else:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        parent = os.path.dirname(os.path.abspath(output_path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         cfg_file = output_path
         
     with open(cfg_file, 'w', encoding='utf-8') as f:

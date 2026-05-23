@@ -8,7 +8,7 @@
   <a href="https://github.com/3D-uy/kace/actions/workflows/ci.yml">
     <img src="https://github.com/3D-uy/kace/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI">
   </a>
-  <img src="https://img.shields.io/badge/versão-v0.1.0-blue?style=flat-square" alt="Versão">
+  <img src="https://img.shields.io/badge/vers%C3%A3o-v1.0.0-blue?style=flat-square" alt="Versão">
   <img src="https://img.shields.io/badge/configs%20validadas-192-brightgreen?style=flat-square" alt="Configs Validadas">
   <img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20Raspberry%20Pi-green?style=flat-square" alt="Plataforma">
   <img src="https://img.shields.io/github/license/3D-uy/KACE?style=flat-square" alt="Licença">
@@ -76,6 +76,7 @@ bash <(curl -s https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
 | Compatibilidade de Displays 🖥️ | [`docs/pt/DISPLAYS.md`](DISPLAYS.md) |
 | Configuração Pi Imager 🇧🇷 | [`docs/pt/pi_imager.md`](pi_imager.md) |
 | Instalação Klipper 🇧🇷 | [`docs/pt/Klipper_install.md`](Klipper_install.md) |
+| **Resultados do Sweep Completo 📊** | [`SWEEP_RESULTS.md`](../../SWEEP_RESULTS.md) |
 | English 🇺🇸 | [`README.md`](../../README.md) |
 | Español 🇪🇸 | [`docs/es/README.md`](../es/README.md) |
 
@@ -85,22 +86,26 @@ bash <(curl -s https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
 
 O KACE foi validado contra a **biblioteca completa de configurações oficiais do Klipper** usando seu framework de regressão automatizado.
 
-**Último sweep completo — 192 configs:**
+**Último sweep completo — 192 configs testadas contra [Klipper master](https://github.com/Klipper3d/klipper/tree/master/config):**
 
 | Resultado | Quantidade | Significado |
 |-----------|------------|-------------|
-| ✅ **PASS** | **172** | Parse + geração concluídos com sucesso |
-| 🟡 **UNSUPPORTED** | **20** | Config usa seções fora do escopo atual do KACE |
+| ✅ **PASS** | **172** | Parse + geração de config concluídos com sucesso |
+| 🔵 **UNSUPPORTED** | **20** | Config usa seções fora do escopo atual do KACE (neopixel, adxl345) |
 | 🟠 **SAFE\_ABORT** | **0** | — |
-| 🔴 **FAILURE** | **0** | — |
+| 🔴 **FAILURE** | **0** | **Zero crashes** |
 
-- **Zero crashes de Python** em 192 configs oficiais
-- **Zero falhas de template** — todas as configs parseáveis geram corretamente
-- **Zero regressões do parser** — determinístico em cada execução
+- **Zero exceções Python** em todas as 192 configs oficiais
+- **Zero falhas de template** — todas as configs parséaveis geram corretamente
+- **Zero regressões do parser** — output determinístico em cada execução
+- **10 avisos de geração** — todas impressoras delta onde o próprio Klipper inclui pinos `TODO` por design
 
 As configs não suportadas contêm funcionalidades fora do escopo atual do KACE:
-controladores RGB/neopixel, expansores GPIO SX1509 ou cinemáticas não convencionais.
+controladores RGB/neopixel, expansores GPIO SX1509 ou acelerômetros ADXL345.
 O KACE **reporta esses casos de forma elegante** ao invés de falhar.
+
+📄 **[Ver os resultados completos do sweep → SWEEP_RESULTS.md](../../SWEEP_RESULTS.md)**  
+Inclui o detalhamento por config de todas as 192 placas, impressoras e displays.
 
 > Execute o sweep você mesmo: `python3 tests/run_tests.py --full-klipper-sweep`
 
@@ -119,7 +124,7 @@ O KACE inclui um framework de testes de nível produção construído sobre a bi
 | Pipeline CI | GitHub Actions — 5 estágios, cancelamento de concorrência, bloqueio de merge |
 
 ```
-Status atual: 21/21 testes passando ✅
+Status atual: 59/59 testes passando ✅
 ```
 
 ```bash

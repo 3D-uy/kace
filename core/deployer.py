@@ -1,4 +1,6 @@
 import os
+import platform
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -21,8 +23,11 @@ def _require_paramiko():
         try:
             # Use check_output instead of check_call to capture errors silently on success,
             # but show them on failure.
+            pip_cmd = [sys.executable, "-m", "pip", "install", "paramiko==3.4.0"]
+            if platform.system() != "Windows":
+                pip_cmd.append("--break-system-packages")
             subprocess.check_output(
-                [sys.executable, "-m", "pip", "install", "paramiko==3.4.0", "--break-system-packages"],
+                pip_cmd,
                 stderr=subprocess.STDOUT
             )
             import paramiko  # noqa: PLC0415
@@ -73,9 +78,14 @@ def deploy_config(user_data):
             # Simple expansion for common Klipper setups
             dest = dest.replace('~/', f"/home/{user_data['user']}/")
 
-        print(f"Uploading printer.cfg to {dest}...")
+        # Ensure dest is a full file path — if it ends with '/', it's a directory
+        if dest.endswith('/') or not dest.endswith('.cfg'):
+            dest_file = posixpath.join(dest.rstrip('/'), 'printer.cfg')
+        else:
+            dest_file = dest
+        print(f"Uploading printer.cfg to {dest_file}...")
         cfg_path = os.path.expanduser('~/kace/printer.cfg')
-        sftp.put(cfg_path, dest)
+        sftp.put(cfg_path, dest_file)
 
         sftp.close()
         ssh.close()
