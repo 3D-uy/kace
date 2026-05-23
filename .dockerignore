@@ -1,0 +1,10 @@
+.git
+.github
+.vscode
+__pycache__
+*.pyc
+tests/fixtures
+tests/sweep
+tests/sweep/last_sweep_report.txt
+*.log
+.coverage
