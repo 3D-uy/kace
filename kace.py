@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 
-import os as _os
-def _read_version():
-    """Read version from VERSION file (single source of truth)."""
-    try:
-        _vfile = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'VERSION')
-        with open(_vfile, 'r', encoding='utf-8') as _f:
-            return 'v' + _f.read().strip()
-    except Exception:
-        return 'v0.1.0'
-
+from core.loader import read_version as _read_version
 __version__ = _read_version()
 
 import os
@@ -29,12 +20,13 @@ if len(sys.argv) > 1:
     if sys.argv[1] in ("--version", "-v"):
         print(f"KACE {__version__}")
         sys.exit(0)
-    
+
     for i, arg in enumerate(sys.argv):
         if arg == "--auto":
             os.environ["KACE_AUTO"] = "1"
 
 import questionary
+from core.validators import questionary_pin_validator
 
 if os.environ.get("KACE_AUTO") == "1":
     print("\n\033[93m[AUTO MODE]\033[0m User interactions disabled. Using safe defaults for all prompts.", flush=True)
@@ -76,130 +68,20 @@ if os.environ.get("KACE_AUTO") == "1":
     questionary.password = mock_password
 
 from core.scraper import fetch_raw_config, parse_config
-from core.wizard import run_wizard
+from core.wizard import run_wizard, make_pin_validator_with_collision_check
+from core.exceptions import WizardExit, GenerationError
 from core.style import custom_style
 from core.generator import generate_config, has_todo_pins
 from core.deployer import deploy_config, deploy_usb, deploy_local, deploy_avrdude, deploy_moonraker
 from core.banner import print_kace_banner
 from core.translations import t
 from core.display_checker import check_display_compatibility
+from core.summary import print_summary
+from core.display_warning import print_display_warning
 
-def print_summary(user_data: dict):
-    """Print final summary with output paths and next steps."""
-    G = "\033[92m"
-    Y = "\033[93m"
-    C = "\033[96m"
-    B = "\033[1m"
-    R = "\033[0m"
-    M = "\033[95m"   # magenta for section headers
-
-    fw_path = user_data.get('firmware_path', '~/kace/klipper.bin')
-    cfg_path = os.path.expanduser('~/kace/printer.cfg')
-
-    col_w = 22   # label column width (padded)
-
-    def _row(label: str, value: str, color: str = Y) -> str:
-        pad = " " * max(0, col_w - len(label))
-        return f"  {B}{label}{R}{pad} {color}{value}{R}"
-
-    print("")
-    print(f"  {G}══════════════════════════════════════════{R}")
-    print(f"  {B}{G}  ✅ {t('summary.title')}{R}")
-    print(f"  {G}══════════════════════════════════════════{R}")
-    print("")
-    print(_row(t('summary.firmware'), fw_path))
-    print(_row(t('summary.config'),   cfg_path))
-    print("")
-    print(f"  {M}{B}── {t('summary.generation_details')} ──{R}")
-    print(_row(t('summary.printer_profile'), user_data.get('printer_profile') or 'Custom / Scratch Build'))
-    print(_row(t('summary.board_config'),    user_data.get('board') or '-'))
-    print(_row(t('summary.kinematics'),      user_data.get('kinematics') or '-'))
-    print(_row(t('summary.hotend_thermistor'), user_data.get('hotend_thermistor') or '-'))
-    print(_row(t('summary.bed_thermistor'),    user_data.get('bed_thermistor') or '-'))
-    print("")
-    print(f"  {B}{C}{t('summary.next_steps')}{R}")
-    print(f"  {C}1.{R} {t('summary.step1')}")
-    print(f"  {C}2.{R} {t('summary.step2')}")
-    print(f"  {C}3.{R} {t('summary.step3')}")
-    print("")
-    print(f"  {G}──────────────────────────────────────────{R}")
-    print("")
+# print_summary has been refactored into core.summary to improve testability.
 
 
-def _print_display_warning(findings: list) -> bool:
-    """Print a formatted ANSI display compatibility warning block.
-
-    For findings with status 'partial' or 'unsupported', prompts the user
-    to confirm before continuing. Returns True to continue, False to abort.
-    Skips the confirmation prompt entirely for 'supported' and 'untested'.
-    """
-    Y  = "\033[93m"   # amber / warning
-    R  = "\033[91m"   # red / error
-    C  = "\033[96m"   # cyan / info
-    G  = "\033[92m"   # green / ok
-    B  = "\033[1m"    # bold
-    RS = "\033[0m"    # reset
-    W  = "\033[97m"   # bright white
-    M  = "\033[95m"   # magenta
-
-    _STATUS_COLORS = {
-        "supported":   G,
-        "partial":     Y,
-        "unsupported": R,
-        "untested":    C,
-    }
-
-    needs_confirmation = any(
-        f["status"] in ("partial", "unsupported") for f in findings
-    )
-
-    border_color = R if any(f["status"] == "unsupported" for f in findings) else Y
-
-    print("")
-    print(f"  {border_color}{B}{'═' * 52}{RS}")
-    print(f"  {border_color}{B}  {t('display.warning_header')}{RS}")
-    print(f"  {border_color}{B}{'═' * 52}{RS}")
-    print("")
-    print(f"  {W}{t('display.oem_explanation')}{RS}")
-    print("")
-
-    for finding in findings:
-        status    = finding.get("status", "untested")
-        section   = finding.get("section", "?")
-        rec       = finding.get("recommendation", "none")
-        notes     = finding.get("notes", [])
-        sc        = _STATUS_COLORS.get(status, C)
-
-        status_key = f"display.status_{status}"
-        status_str = t(status_key)
-
-        print(f"  {B}{t('display.section_label')}:{RS} [{section}]   {sc}{B}{status_str}{RS}")
-
-        for note in notes:
-            print(f"    {C}•{RS} {note}")
-
-        if rec == "disconnect":
-            print(f"    {R}{B}{t('display.recommendation_disconnect')}{RS}")
-        elif rec == "optional":
-            print(f"    {Y}{t('display.recommendation_optional')}{RS}")
-
-        print("")
-
-    print(f"  {M}{t('display.web_ui_hint')}{RS}")
-    print(f"  {C}{t('display.docs_hint')}{RS}")
-    print(f"  {border_color}{B}{'─' * 52}{RS}")
-    print("")
-
-    if needs_confirmation:
-        ans = questionary.confirm(
-            t("display.continue_prompt"),
-            default=True,
-            style=custom_style
-        ).ask()
-        if ans is None or not ans:
-            return False
-
-    return True
 
 
 def main():
@@ -208,15 +90,21 @@ def main():
     # ── Dashboard (bypassed in CI / auto / dev modes) ─────────
     _bypassed = os.environ.get("KACE_AUTO") == "1"
     if not _bypassed:
+        # Deferred import to optimize startup performance on slow Raspberry Pi hardware
         from core.dashboard import detect_system_state, run_dashboard
         _state = detect_system_state()
         _action = run_dashboard(_state)
         if _action == "quit":
             sys.exit(0)
     
-    # Interactive Wizard
+    # Interactive Wizard & Phase 1 Execution Loop
+    user_data = None
+    
     try:
-        user_data = run_wizard()
+        user_data = run_wizard(user_data)
+    except WizardExit:
+        print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+        sys.exit(0)
     except (KeyboardInterrupt, EOFError):
         print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
         sys.exit(0)
@@ -228,125 +116,114 @@ def main():
     # ==========================================
     # PHASE 1: CONFIGURATION FETCH & DRIVER SETUP
     # ==========================================
-    raw_cfg = fetch_raw_config(user_data['board'])
+    parsed_data = user_data.get("board_parsed")
+    if not parsed_data:
+        raw_cfg = fetch_raw_config(user_data['board'])
+        if not raw_cfg:
+            print(f"\n\033[91m[!] Board configuration could not be fetched for: '{user_data['board']}'\033[0m")
+            print(f"\033[93m    This may indicate an invalid board selection or a network error.\033[0m")
+            print(f"\033[93m    Please re-run KACE and select a valid board configuration.\033[0m")
+            print(f"\033[2m[!] Aborting — cannot generate a configuration without board data.\033[0m")
+            sys.exit(1)
+        parsed_data = parse_config(raw_cfg, user_data['board'], keep_comments=True)
+        user_data["board_parsed"] = parsed_data
 
-    # ── Validation Gate 1: Board config fetch ───────────────────────────
-    # If fetch returns nothing, there is no point continuing. This can happen
-    # if the board name is invalid, the network is unavailable, or the board
-    # was set to a printer profile that failed to load earlier.
-    if not raw_cfg:
-        print(f"\n\033[91m[!] Board configuration could not be fetched for: '{user_data['board']}'\033[0m")
-        print(f"\033[93m    This may indicate an invalid board selection or a network error.\033[0m")
-        print(f"\033[93m    Please re-run KACE and select a valid board configuration.\033[0m")
-        print(f"\033[2m[!] Aborting — cannot generate a configuration without board data.\033[0m")
-        sys.exit(1)
+    # ── Validation Gate 1b: BLTouch pin resolution ──────────────────────
+    # When the user selected BLTouch/CR-Touch but the board has no mapped
+    # pins in the database, the template would emit '^TODO'/'TODO' into
+    # active config lines and trigger a GenerationError.  Catch this early
+    # and ask for the pins interactively so the workflow succeeds.
+    _probe_choice = user_data.get("probe", "None")
+    if _probe_choice in ("BLTouch", "CR-Touch"):
+        _blt = parsed_data.setdefault("bltouch", {})
+        if user_data.get("bltouch_sensor_pin"):
+            _blt["sensor_pin"] = user_data["bltouch_sensor_pin"]
+        if user_data.get("bltouch_control_pin"):
+            _blt["control_pin"] = user_data["bltouch_control_pin"]
 
-    parsed_data = parse_config(raw_cfg, user_data['board'])
+        def _is_missing(p):
+            if not p:
+                return True
+            p_clean = str(p).strip().upper().lstrip('^!~')
+            return p_clean == "TODO" or p_clean == ""
+
+        _missing_sensor  = _is_missing(_blt.get("sensor_pin"))
+        _missing_control = _is_missing(_blt.get("control_pin"))
+        if _missing_sensor or _missing_control:
+            print(f"\n\033[93m[!] BLTouch/CR-Touch selected but pin mapping is unknown or incomplete for:\033[0m")
+            print(f"\033[93m    {user_data['board']}\033[0m")
+            print(f"\033[96m    Enter the pins manually below (check your board's wiring diagram).\033[0m")
+            print(f"\033[2m    Example — Octopus Pro: sensor_pin=^PB7  control_pin=PB6\033[0m\n")
+
+            pin_validator = make_pin_validator_with_collision_check(user_data)
+
+            if _missing_sensor:
+                _sp = questionary.text(
+                    "BLTouch sensor_pin (e.g. ^PB7 or ^PC5):",
+                    validate=pin_validator,
+                    style=custom_style
+                ).ask()
+                if not _sp:
+                    print(f"\n\033[91m[!] No sensor_pin provided — aborting.\033[0m")
+                    sys.exit(1)
+                _blt["sensor_pin"] = _sp.strip()
+            if _missing_control:
+                _cp = questionary.text(
+                    "BLTouch control_pin (e.g. PB6 or PE5):",
+                    validate=pin_validator,
+                    style=custom_style
+                ).ask()
+                if not _cp:
+                    print(f"\n\033[91m[!] No control_pin provided — aborting.\033[0m")
+                    sys.exit(1)
+                _blt["control_pin"] = _cp.strip()
 
     # ── Display Compatibility Check ───────────────────────────────────────────
     # Run before generation so users can make an informed decision about
     # their display. Non-invasive: never modifies the parsed config.
-    _display_findings = check_display_compatibility(
-        parsed_data,
-        printer_filename=user_data.get('printer_profile', ''),
-        board_filename=user_data.get('board', ''),
+    #
+    # Conditional logic:
+    #   display_choice == "none"         → skip entirely (user opted out of display)
+    #   display_choice starts with "recommended:" and risk_accepted → skip
+    #     (user already saw board-aware recommendations in the wizard)
+    #   display_choice starts with "manual:" or "override:" → run check, but
+    #     the wizard already showed the full risk panel; confirm only if new findings
+    #   display_choice is None (auto/CI) → run full check as before
+    _display_choice      = user_data.get("display_choice")
+    _display_risk_accepted = user_data.get("display_risk_accepted", False)
+
+    _skip_display_check = (
+        _display_choice == "none"
+        or (
+            _display_choice is not None
+            and _display_choice.startswith("recommended:")
+            and _display_risk_accepted
+        )
     )
-    if _display_findings:
-        _should_continue = _print_display_warning(_display_findings)
-        if not _should_continue:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            sys.exit(0)
 
-    # --- Multi-Z Pin Verification ---
-    z_motors = int(user_data.get('z_motors', 1))
-    if z_motors > 1:
-        available_driver_keys = sorted([k for k in parsed_data.keys() if k.startswith("extruder") and k != "extruder"])
-        for i in range(2, z_motors + 1):
-            motor_name = f"stepper_z{i - 1}"
+    if not _skip_display_check:
+        _display_findings = check_display_compatibility(
+            parsed_data,
+            printer_filename=user_data.get('printer_profile', ''),
+            board_filename=user_data.get('board', ''),
+        )
 
-            if motor_name in parsed_data:
-                continue
+        # If the user made a manual/override selection in the wizard, filter findings
+        # to only show truly new issues not already covered by the wizard risk panel.
+        if _display_choice and (_display_choice.startswith("manual:") or _display_choice.startswith("override:")):
+            chosen_section = _display_choice.split(":", 1)[1] if ":" in _display_choice else None
+            if chosen_section:
+                # Suppress findings for the chosen section if risk was already accepted
+                _display_findings = [
+                    f for f in _display_findings
+                    if not (f.get("section") == chosen_section and _display_risk_accepted)
+                ]
 
-            print(f"\n\033[96m{t('wizard.mapping_pins', motor=motor_name)}\033[0m")
-            if not available_driver_keys:
-                print(f"\033[93m{t('wizard.no_drivers_warning')}\033[0m")
-
-            driver_choices = []
-            for dk in available_driver_keys:
-                label = dk.replace("extruder", "E")
-                if dk == "extruder1":
-                    label = "E1 (recommended)"
-                driver_choices.append({"name": label, "value": dk})
-
-            driver_choices.append({"name": t("choice.custom_pins"), "value": "custom"})
-            driver_choices.append({"name": t("choice.quit_setup"), "value": "quit"})
-
-            selected_driver = questionary.select(
-                t("wizard.select_driver_z", motor=motor_name.upper()),
-                choices=driver_choices,
-                style=custom_style
-            ).ask()
-
-            if selected_driver == "quit" or selected_driver is None:
-                print(f"\n\033[91m{t('kace.abort_missing_pins')}\033[0m")
-                sys.exit(1)
-
-            if selected_driver == "custom":
-                print(f"\nAssigning custom pins for {motor_name}:")
-                step_pin = questionary.text(t("wizard.custom_step_pin"), style=custom_style).ask()
-                dir_pin = questionary.text(t("wizard.custom_dir_pin"), style=custom_style).ask()
-                en_pin = questionary.text(t("wizard.custom_en_pin"), style=custom_style).ask()
-
-                if not step_pin or not dir_pin or not en_pin:
-                    print(f"\n\033[91m{t('kace.abort_valid_pins')}\033[0m")
-                    sys.exit(1)
-
-                parsed_data[motor_name] = {
-                    "step_pin": step_pin,
-                    "dir_pin": dir_pin,
-                    "enable_pin": en_pin
-                }
-
-                driver_type = user_data.get("driver_type", "None (Standard)")
-                driver_mode = user_data.get("driver_mode", "")
-                if "TMC" in driver_type and driver_mode in ["UART", "SPI"]:
-                    uart_pin = questionary.text(
-                        t("wizard.custom_uart_pin", mode=driver_mode.lower(), motor=motor_name),
-                        style=custom_style
-                    ).ask()
-                    if not uart_pin:
-                        print(f"\n\033[91m{t('kace.abort_no_uart', mode=driver_mode)}\033[0m")
-                        sys.exit(1)
-                    tmc_section = f"{driver_type.lower()} {motor_name}"
-                    pin_key = "uart_pin" if driver_mode == "UART" else "cs_pin"
-                    parsed_data[tmc_section] = {pin_key: uart_pin, "run_current": "0.650"}
-            else:
-                src_data = parsed_data[selected_driver]
-                parsed_data[motor_name] = {
-                    "step_pin": src_data.get("step_pin", ""),
-                    "dir_pin": src_data.get("dir_pin", ""),
-                    "enable_pin": src_data.get("enable_pin", "")
-                }
-
-                driver_type = user_data.get("driver_type", "None (Standard)")
-                driver_mode = user_data.get("driver_mode", "")
-                if "TMC" in driver_type:
-                    dest_tmc = f"{driver_type.lower()} {motor_name}"
-                    found_tmc = False
-                    for possible_tmc in ["tmc2209", "tmc2208", "tmc2130", "tmc5160", "tmc2225", "tmc2240"]:
-                        src_tmc = f"{possible_tmc} {selected_driver}"
-                        if src_tmc in parsed_data:
-                            parsed_data[dest_tmc] = parsed_data[src_tmc].copy()
-                            del parsed_data[src_tmc]
-                            found_tmc = True
-                            break
-                    if not found_tmc and driver_mode in ["UART", "SPI"]:
-                        print(f"\n\033[91m{t('kace.abort_no_tmc_map', mode=driver_mode, driver=selected_driver)}\033[0m")
-                        print(f"\033[93m{t('kace.abort_generation')}\033[0m")
-                        sys.exit(1)
-
-                del parsed_data[selected_driver]
-                available_driver_keys.remove(selected_driver)
+        if _display_findings:
+            _should_continue = print_display_warning(_display_findings)
+            if not _should_continue:
+                print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+                sys.exit(0)
 
     time.sleep(0.5)
     print(f"\033[92m[*]\033[0m {t('kace.fetching_cfg_done', board=user_data['board'])}")
@@ -374,63 +251,43 @@ def main():
             print(f"\033[93m    configure the missing pins manually in the generated printer.cfg.\033[0m")
             print(f"\033[2m[!] Skipping firmware compilation — configuration has unresolved TODO pins.\033[0m")
         else:
-            ans = questionary.confirm(t("kace.compile_prompt", mcu=prompt_mcu)).ask()
-            if ans:
-                from firmware.builder import build_firmware_orchestrator
-                print(f"\n\033[91m[*]\033[0m {t('kace.compiling')}", flush=True)
-                result = build_firmware_orchestrator(
-                    mcu_path=user_data.get('mcu_path'),
-                    derived_mcu=mcu,
-                    hint=hint,
-                    output_dir="~/kace"
-                )
-
-                if result.get("status") == "success":
-                    print(f"\033[92mSUCCESS:\033[0m {t('kace.firmware_success', path=result.get('path'))}")
-                    user_data['mcu_type'] = result.get('mcu')
-
-                    deploy_options = [
-                        {"name": f"✅  {t('kace.deploy_none')}",   "value": "none"},
-                        {"name": f"📁  {t('kace.deploy_local')}",  "value": "local"},
-                        {"name": f"💾  {t('kace.deploy_usb')}",    "value": "usb"},
-                    ]
-                    if result.get('firmware') == 'klipper.elf.hex':
-                        deploy_options.insert(1, {"name": f"⚡  {t('kace.deploy_avrdude')}", "value": "avrdude"})
-
-                    deploy_fw = questionary.select(
-                        f"\n{t('kace.deploy_firmware_prompt')}",
-                        choices=deploy_options,
-                        style=custom_style
-                    ).ask()
-
-                    if deploy_fw == "usb":
-                        deploy_usb(user_data, artifact_type="firmware")
-                    elif deploy_fw == "local":
-                        deploy_local(user_data, artifact_type="firmware")
-                    elif deploy_fw == "avrdude":
-                        deploy_avrdude(user_data, result.get("path"), result.get("mcu"))
-
-                else:
-                    print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=result.get('message'))}")
-    else:
-        print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
+            # Deferred import to optimize startup performance on slow Raspberry Pi hardware
+            from core.firmware_wizard import run_firmware_wizard
+            run_firmware_wizard(user_data)
 
     generate_macros = questionary.confirm(
         f"\n{t('kace.generate_macros_prompt')}",
         default=True,
         style=custom_style
     ).ask()
+    if generate_macros is None:
+        print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+        sys.exit(0)
+    user_data["macros_generated"] = generate_macros
 
     # ==========================================
     # PHASE 3: CONFIGURATION GENERATION
     # ==========================================
     print(f"\033[91m[*]\033[0m {t('kace.generating_cfg')}", end="", flush=True)
-    generate_config(parsed_data, user_data, include_macros=generate_macros)
+    try:
+        generate_config(parsed_data, user_data, include_macros=generate_macros)
+    except GenerationError as gen_err:
+        print(f"\r\033[91m[!]\033[0m {t('kace.generating_cfg')} FAILED")
+        print(f"\n\033[91mERROR:\033[0m {gen_err}")
+        if gen_err.todos:
+            print("\033[93m    Unresolved TODO pins:\033[0m")
+            for section, key in gen_err.todos:
+                print(f"\033[93m      • {section} → {key}\033[0m")
+        print("\033[93m    Resolve the missing pins and re-run KACE.\033[0m")
+        sys.exit(1)
     time.sleep(0.5)
     print(f"\r\033[92m[*]\033[0m {t('kace.generating_cfg_done')}")
     
     cfg_path = os.path.expanduser('~/kace/printer.cfg')
     print(f"\n\033[92mSUCCESS:\033[0m {t('kace.cfg_success', path=cfg_path)}")
+
+    # Print Configuration Summary before deployment
+    print_summary(user_data, parsed_data)
 
     # ==========================================
     # PHASE 4: CONFIGURATION DEPLOYMENT
@@ -447,22 +304,41 @@ def main():
         style=custom_style
     ).ask()
 
+    if deploy_cfg is None:
+        print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+        sys.exit(0)
+
     if deploy_cfg == "usb":
         deploy_usb(user_data, artifact_type="config")
     elif deploy_cfg == "local":
         deploy_local(user_data, artifact_type="config")
     elif deploy_cfg == "ssh":
-        user_data['host'] = questionary.text(t("kace.ssh_host_prompt"), style=custom_style).ask()
-        user_data['user'] = questionary.text(t("kace.ssh_user_prompt"), default="pi", style=custom_style).ask()
-        user_data['password'] = questionary.password(t("kace.ssh_pass_prompt"), style=custom_style).ask()
-        user_data['dest_path'] = questionary.text(t("kace.ssh_dest_prompt"), default="~/printer_data/config/", style=custom_style).ask()
-        if user_data['host'] and user_data['user'] and user_data['dest_path']:
+        host = questionary.text(t("kace.ssh_host_prompt"), style=custom_style).ask()
+        if host is None:
+            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+            sys.exit(0)
+        user = questionary.text(t("kace.ssh_user_prompt"), default="pi", style=custom_style).ask()
+        if user is None:
+            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+            sys.exit(0)
+        password = questionary.password(t("kace.ssh_pass_prompt"), style=custom_style).ask()
+        if password is None:
+            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+            sys.exit(0)
+        dest_path = questionary.text(t("kace.ssh_dest_prompt"), default="~/printer_data/config/", style=custom_style).ask()
+        if dest_path is None:
+            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+            sys.exit(0)
+
+        user_data['host'] = host
+        user_data['user'] = user
+        user_data['password'] = password
+        user_data['dest_path'] = dest_path
+        if host and user and dest_path:
             deploy_config(user_data)
     elif deploy_cfg == "moonraker":
         deploy_moonraker(user_data)
 
-    time.sleep(0.5)
-    print_summary(user_data)
     sys.exit(0)
 
 if __name__ == "__main__":

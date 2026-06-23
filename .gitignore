@@ -85,6 +85,12 @@ docs/en/ARCHITECTURE.md
 # Test results
 tests/results/
 tests/results_profiles/
+tests/sweep/out_cfg/
 
 # Dev scratch directory — not part of the public project
 scratch/
+
+# Build and test artifacts
+out/
+outp/
+*.log

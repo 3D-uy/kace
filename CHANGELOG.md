@@ -8,6 +8,28 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [main] — 2026-06-12
+
+### Added
+- Standardized Klipper pin validation (`core/validators.py`) using regex pattern `^[!^~]*[A-Za-z0-9_.]+$`.
+- Automated pre-commit hook to safeguard against hardcoded UI strings and local Windows paths (`scripts/pre-commit`).
+- Full unit tests for pin validation (`tests/unit/test_validators.py`), including explicit verification of prefix-only (`!^`, `~`), internal spaces (`PA 0`), and combined prefixes (`!^PA0`).
+- Moonraker plain HTTP API key transmission warning prompt requiring user confirmation (`core/deployer.py`).
+- API key propagation header (`X-Api-Key`) for all Moonraker REST request calls (`core/moonraker.py`).
+- Security/functional unit tests in `tests/unit/test_deployer.py` covering Moonraker HTTP warning triggers and parameter propagation.
+
+### Changed
+- Refactored eager-loading database databases to load lazily at runtime across `core/wizard.py`, `core/display_checker.py`, `firmware/derivation.py`, and `core/advanced_module_handler.py`.
+- Consolidated Z-motor configuration logic under `_step_z_socket_assignment` and removed duplicated code.
+- Cleaned up display warnings and interactive steps to utilize the central `t()` translation mechanism.
+- Upgraded GitHub Actions `actions/checkout@v5` and `docker/setup-buildx-action@v4` in `ci.yml` and configured runner to execute under Node.js 24 natively.
+
+---
+
+## [0.9.1] — 2026-06-12
+
 ### Added
 - Moonraker REST API deployment (`core/moonraker.py`) — upload `printer.cfg` and trigger `FIRMWARE_RESTART` or service restart without SSH
 - `deploy_moonraker()` in `core/deployer.py` — interactive deploy flow with reachability probe, SSH fallback, and restart selection
@@ -15,6 +37,18 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Optional Moonraker API key support in the deployment prompt
 - 15 new unit tests for `core/moonraker.py` (`tests/unit/test_moonraker.py`)
 - Full EN/ES/PT translations for all Moonraker deploy UI strings
+- Secure hash pinning for dependencies (`requirements.txt` and `requirements-ssh.txt`) with `--require-hashes` enforcement
+- Comprehensive unit tests for compiler ambiguity prompts and summary printing (`tests/unit/test_firmware_wizard.py` and `tests/unit/test_summary.py`)
+
+### Changed
+- Modularized `kace.py` by extracting summary and compilation wizard logic into `core/summary.py` and `core/firmware_wizard.py`
+- Pinned installer `install.sh` to tag `v0.9.1` and removed unsafe remote Python execution fallback
+- Gated scraper debug logging behind `KACE_DEBUG` environment variable
+- Optimized startup performance on slow hosts by lazy-loading the BLTouch database override dictionary
+
+### Fixed
+- Path traversal vulnerability in `core/scraper.py` by sanitizing cache filenames with `os.path.basename()`
+- Memory credential vulnerability in `core/deployer.py` by immediately purging `password` from memory post-extraction
 
 ---
 
@@ -70,6 +104,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ANSI colour-coded terminal UI with emoji icon menus
 - Validated against 192 official Klipper board configurations
 
-[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/3D-uy/kace/compare/main...HEAD
+[main]: https://github.com/3D-uy/kace/compare/v0.9.1...main
+[0.9.1]: https://github.com/3D-uy/kace/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/3D-uy/kace/compare/v0.1.0...v0.9.0
 [0.1.0]: https://github.com/3D-uy/kace/releases/tag/v0.1.0

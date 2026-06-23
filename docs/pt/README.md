@@ -8,7 +8,7 @@
   <a href="https://github.com/3D-uy/kace/actions/workflows/ci.yml">
     <img src="https://github.com/3D-uy/kace/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI">
   </a>
-  <img src="https://img.shields.io/badge/vers%C3%A3o-v0.9.0-blue?style=flat-square" alt="Versão">
+  <img src="https://img.shields.io/badge/versão-v0.9.2-blue?style=flat-square" alt="Versão">
   <img src="https://img.shields.io/badge/configs%20validadas-192-brightgreen?style=flat-square" alt="Configs Validadas">
   <img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20Raspberry%20Pi-green?style=flat-square" alt="Plataforma">
   <img src="https://img.shields.io/github/license/3D-uy/KACE?style=flat-square" alt="Licença">
@@ -90,8 +90,8 @@ O KACE foi validado contra a **biblioteca completa de configurações oficiais d
 
 | Resultado | Quantidade | Significado |
 |-----------|------------|-------------|
-| ✅ **PASS** | **172** | Parse + geração de config concluídos com sucesso |
-| 🔵 **UNSUPPORTED** | **20** | Config usa seções fora do escopo atual do KACE (neopixel, adxl345) |
+| ✅ **PASS** | **192** | Parse + geração de config concluídos com sucesso |
+| 🔵 **UNSUPPORTED** | **0** | — |
 | 🟠 **SAFE\_ABORT** | **0** | — |
 | 🔴 **FAILURE** | **0** | **Zero crashes** |
 
@@ -100,9 +100,7 @@ O KACE foi validado contra a **biblioteca completa de configurações oficiais d
 - **Zero regressões do parser** — output determinístico em cada execução
 - **10 avisos de geração** — todas impressoras delta onde o próprio Klipper inclui pinos `TODO` por design
 
-As configs não suportadas contêm funcionalidades fora do escopo atual do KACE:
-controladores RGB/neopixel, expansores GPIO SX1509 ou acelerômetros ADXL345.
-O KACE **reporta esses casos de forma elegante** ao invés de falhar.
+As configurações com recursos avançados (RGB/neopixel, SX1509, ADXL345) agora são totalmente suportadas por meio de blocos passthrough comentados no arquivo gerado.
 
 📄 **[Ver os resultados completos do sweep → SWEEP_RESULTS.md](../../SWEEP_RESULTS.md)**  
 Inclui o detalhamento por config de todas as 192 placas, impressoras e displays.
@@ -124,7 +122,7 @@ O KACE inclui um framework de testes de nível produção construído sobre a bi
 | Pipeline CI | GitHub Actions — 5 estágios, cancelamento de concorrência, bloqueio de merge |
 
 ```
-Status atual: 59/59 testes passando ✅
+Status atual: +300 testes passando ✅
 ```
 
 ```bash

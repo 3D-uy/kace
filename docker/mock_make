@@ -1,0 +1,28 @@
+#!/bin/bash
+# Mock make script to simulate Klipper firmware build toolchain.
+
+ARG1="$1"
+
+if [ "$ARG1" = "olddefconfig" ]; then
+    echo "[Mock Make] Resolving Klipper configuration (olddefconfig)..."
+    touch .config
+    exit 0
+fi
+
+if [ "$ARG1" = "clean" ]; then
+    echo "[Mock Make] Cleaning build directory (clean)..."
+    rm -rf out
+    exit 0
+fi
+
+# Simulate Klipper build
+echo "[Mock Make] Compiling simulated Klipper firmware..."
+mkdir -p out
+
+# Create dummy binaries to satisfy KACE builder detection
+echo "MOCK BINARY" > out/klipper.bin
+echo "MOCK UF2" > out/klipper.uf2
+echo "MOCK HEX" > out/klipper.elf.hex
+
+echo "[Mock Make] Build successful: generated mock binaries."
+exit 0

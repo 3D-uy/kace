@@ -1,0 +1,24 @@
+#!/bin/bash
+# Mock systemctl script to simulate systemd service states without running systemd.
+
+SERVICE=""
+for arg in "$@"; do
+    # Filter out known flags and command
+    if [ "$arg" != "is-active" ] && [ "$arg" != "--quiet" ] && [ "$arg" != "systemctl" ]; then
+        SERVICE="$arg"
+    fi
+done
+
+if [ -z "$SERVICE" ]; then
+    exit 3
+fi
+
+# Clean up service name (remove .service if appended)
+SERVICE="${SERVICE%.service}"
+
+# Check in /tmp/mock_services
+if [ -f /tmp/mock_services ] && grep -Fqx "$SERVICE" /tmp/mock_services; then
+    exit 0
+else
+    exit 3
+fi

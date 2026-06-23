@@ -3,7 +3,7 @@
 # Kinematics: cartesian
 # Stepper Drivers:  ()
 # Probe: BLTouch
-# Z Motors: 1
+# Z Drivers: 1
 
 # --------------------------------------------------
 # Includes
@@ -19,6 +19,7 @@ serial: /dev/serial/by-id/usb-Klipper_lpc1769_mock-if00 # Serial connection to t
 # --------------------------------------------------
 # Printer
 # --------------------------------------------------
+
 [printer]
 kinematics: cartesian                           # Printer kinematics type (cartesian, corexy, delta)
 max_velocity: 300                               # Maximum velocity (in mm/s) of the toolhead
@@ -29,6 +30,7 @@ max_z_accel: 100                                # Maximum acceleration (in mm/s^
 # --------------------------------------------------
 # Steppers
 # --------------------------------------------------
+
 [stepper_x]
 step_pin: P2.2                                  # Step pin for the X stepper driver
 dir_pin: !P2.6                                  # Direction pin. Add or remove "!" to invert motor direction
@@ -37,6 +39,7 @@ microsteps: 16                                  # Number of microsteps per full 
 rotation_distance: 40                           # Distance in mm the axis travels per full rotation of the motor
 endstop_pin: P1.29                              # Endstop pin. Add or remove "!" to invert logic
 position_endstop: 0                             # Location of the endstop (usually 0)
+position_min: 0                                 # Minimum valid X position
 position_max: 235                               # Maximum valid X position
 homing_speed: 50                                # Maximum velocity (in mm/s) of the stepper when homing
 
@@ -48,6 +51,7 @@ microsteps: 16                                  # Number of microsteps per full 
 rotation_distance: 40                           # Distance in mm the axis travels per full rotation of the motor
 endstop_pin: P1.28                              # Endstop pin. Add or remove "!" to invert logic
 position_endstop: 0                             # Location of the endstop (usually 0)
+position_min: 0                                 # Minimum valid Y position
 position_max: 235                               # Maximum valid Y position
 homing_speed: 50                                # Maximum velocity (in mm/s) of the stepper when homing
 
@@ -58,7 +62,8 @@ enable_pin: !P0.21                              # Enable pin for the stepper dri
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 8                            # Distance in mm the axis travels per full rotation of the motor
 endstop_pin: probe:z_virtual_endstop            # Endstop pin. Add or remove "!" to invert logic
-position_max: 250                               # Maximum valid Z position
+position_min: 0                                 # Minimum valid Z position
+position_max: 300                               # Maximum valid Z position
 
 [extruder]
 step_pin: P2.13                                 # Step pin for the extruder driver
@@ -77,15 +82,15 @@ pid_Ki: 1.08                                    # PID integral --- manual config
 pid_Kd: 114                                     # PID derivative --- manual configuration --- (run PID_CALIBRATE)
 min_temp: 0                                     # Minimum safe temperature
 max_temp: 250                                   # Maximum safe temperature
-
 # --------------------------------------------------
 # Probe & Bed Leveling
 # --------------------------------------------------
+
 [bltouch]
 sensor_pin: ^P0.10                              # Pin connected to the probe sensor
 control_pin: P2.0                               # Pin connected to the probe control
-x_offset: 0                                     # distance from nozzle to probe in X (mm) --- manual configuration --- (measure physically from nozzle to probe tip)
-y_offset: 0                                     # distance from nozzle to probe in Y (mm) --- manual configuration --- (measure physically from nozzle to probe tip)
+x_offset: 0                                     # distance from nozzle to probe in X (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
+y_offset: 0                                     # distance from nozzle to probe in Y (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
 z_offset: 0                                     # nozzle to bed distance (mm) --- manual configuration --- (set using PROBE_CALIBRATE)
 
 [safe_z_home]
@@ -94,12 +99,18 @@ speed: 50                                       # Speed at which the toolhead is
 z_hop: 10                                       # Distance (in mm) to lift the Z axis prior to homing
 z_hop_speed: 5                                  # Speed (in mm/s) at which the Z axis is lifted prior to homing
 
-# [bed_mesh]
-# speed: 120                                    # Probe speed in mm/s
-# horizontal_move_z: 5                          # Z height before moving to next probe point
-# mesh_min: 10, 10                              # probing area start (mm) --- manual configuration --- (must be inside bed limits)
-# mesh_max: 225, 225                            # probing area end (mm) --- manual configuration --- (must be inside bed limits)
-# probe_count: 5, 5                             # Probe grid size
+[bed_mesh]
+speed: 120                                      # Probe speed in mm/s
+horizontal_move_z: 5                            # Z height before moving to next probe point
+mesh_min: 10.0, 10.0                            # Probing area minimum (derived from physical limits)
+mesh_max: 225.0, 225.0                          # Probing area maximum (derived from physical limits)
+probe_count: 5, 5                               # Probe grid size (NxN derived from bed size)
+algorithm: bicubic                              # Interpolation algorithm
+bicubic_tension: 0.2                            # Tension of the bicubic curve
+mesh_pps: 2, 2                                  # Number of points to interpolate per segment
+fade_start: 1                                   # Z height at which to start fading mesh leveling
+fade_end: 10                                    # Z height at which mesh leveling is completely disabled
+fade_target: 0                                  # Target Z offset to fade towards
 
 # --------------------------------------------------
 # Part Cooling Fan
@@ -110,6 +121,7 @@ z_hop_speed: 5                                  # Speed (in mm/s) at which the Z
 # --------------------------------------------------
 # Heated Bed
 # --------------------------------------------------
+
 [heater_bed]
 heater_pin: P2.5                                # Pin connected to the heated bed solid state relay or MOSFET
 sensor_pin: P0.25                               # Pin connected to the heated bed thermistor
@@ -120,33 +132,24 @@ pid_Ki: 0.770                                   # bed PID integral --- manual co
 pid_Kd: 948.182                                 # bed PID derivative --- manual configuration --- (run PID_CALIBRATE)
 min_temp: 0                                     # Minimum safe temperature
 max_temp: 130                                   # Maximum safe temperature
-
 # --------------------------------------------------
 # TMC Drivers
 # --------------------------------------------------
+
 # [ stepper_x]
 # run_current: 0.800                            # motor current (A) --- manual configuration --- (check motor specs)
 # hold_current: 0.400                           # Motor hold current in amps
 # stealthchop_threshold: 999999                 # Set to 0 to use spreadCycle mode
-
-
-
 
 # [ stepper_y]
 # run_current: 0.800                            # motor current (A) --- manual configuration --- (check motor specs)
 # hold_current: 0.400                           # Motor hold current in amps
 # stealthchop_threshold: 999999                 # Set to 0 to use spreadCycle mode
 
-
-
-
 # [ stepper_z]
 # run_current: 0.650                            # motor current (A) --- manual configuration --- (check motor specs)
 # hold_current: 0.400                           # Motor hold current in amps
 # stealthchop_threshold: 999999                 # Set to 0 to use spreadCycle mode
-
-
-
 
 # [ extruder]
 # run_current: 0.650                            # motor current (A) --- manual configuration --- (check motor specs)

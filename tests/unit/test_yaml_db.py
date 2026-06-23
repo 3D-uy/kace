@@ -36,28 +36,20 @@ class TestYamlDb(unittest.TestCase):
 
     def test_yaml_parse_failure_recovery(self):
         """Simulate a broken YAML file and ensure it gracefully falls back without crashing."""
-        broken_path = "data/broken_boards.yaml"
-        with open(broken_path, "w") as f:
-            f.write("mcu_firmware: [unclosed list")
-
+        from unittest.mock import patch
         logs = []
         original_print = builtins.print
         def mock_print(*args, **kwargs):
             logs.append(" ".join(map(str, args)))
         builtins.print = mock_print
 
-        original_path = drv.os.path.join
-        drv.os.path.join = lambda *args: broken_path if "boards.yaml" in args[-1] else original_path(*args)
-
-        try:
-            fallback = drv._load_firmware_db()
-            self.assertEqual(fallback, _FW_DB_FALLBACK, "Failed to fall back on broken YAML")
-            self.assertTrue(any("Failed to load modular hardware database" in log for log in logs), "Missing warning log")
-        finally:
-            drv.os.path.join = original_path
-            builtins.print = original_print
-            if os.path.exists(broken_path):
-                os.remove(broken_path)
+        with patch("core.loader.load_boards_yaml", side_effect=Exception("Mock YAML parse error")):
+            try:
+                fallback = drv._load_firmware_db()
+                self.assertEqual(fallback, _FW_DB_FALLBACK, "Failed to fall back on broken YAML")
+                self.assertTrue(any("Failed to load modular hardware database" in log for log in logs), "Missing warning log")
+            finally:
+                builtins.print = original_print
 
 if __name__ == '__main__':
     unittest.main()

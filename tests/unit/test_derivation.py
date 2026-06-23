@@ -1,28 +1,10 @@
 import unittest
 import firmware.derivation as drv
-import firmware.prompts as prm
-import builtins
 import os
 from firmware.derivation import _FW_DB_FALLBACK
+from core.exceptions import DerivationAmbiguityError
 
 class TestDerivation(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(cls):
-        # Mock interactive prompts to avoid blocking tests
-        cls.orig_prompt_comm = drv.prompt_communication_interface
-        cls.orig_prompt_boot = drv.prompt_bootloader_offset
-        cls.orig_prompt_mcu = drv.prompt_mcu_family
-
-        drv.prompt_communication_interface = lambda mcu: 'USB'
-        drv.prompt_bootloader_offset = lambda mcu, opts: '0x8000'
-        drv.prompt_mcu_family = lambda: 'stm32'
-
-    @classmethod
-    def tearDownClass(cls):
-        drv.prompt_communication_interface = cls.orig_prompt_comm
-        drv.prompt_bootloader_offset = cls.orig_prompt_boot
-        drv.prompt_mcu_family = cls.orig_prompt_mcu
 
     def test_stm32f446xx(self):
         cfg = drv.derive_config('stm32f446xx', hint='usb')
@@ -61,39 +43,50 @@ class TestDerivation(unittest.TestCase):
         self.assertEqual(cfg['CONFIG_MCU'], '"linux"')
         self.assertNotIn('CONFIG_USB', cfg, "Linux should early-return before interface")
 
+    def test_ambiguity_errors(self):
+        # 1. No MCU -> prompts for family
+        with self.assertRaises(DerivationAmbiguityError) as ctx:
+            drv.derive_config(None)
+        self.assertEqual(ctx.exception.param, "mcu_family")
+        self.assertIn("stm32", ctx.exception.options)
+
+        # 2. Ambiguous bootloader offset (stm32 pattern has flash_start: None)
+        with self.assertRaises(DerivationAmbiguityError) as ctx:
+            drv.derive_config("stm32", hint="usb")
+        self.assertEqual(ctx.exception.param, "bootloader_offset")
+        self.assertIn("No bootloader (0x0)", ctx.exception.options)
+
+        # 3. Missing communication interface
+        with self.assertRaises(DerivationAmbiguityError) as ctx:
+            drv.derive_config("stm32f446xx", hint=None)
+        self.assertEqual(ctx.exception.param, "comm_interface")
+        self.assertIn("USB", ctx.exception.options)
+
     def test_precedence_validator_shadowing(self):
         """Simulate a shadowed pattern and ensure the validator catches it."""
-        bad_yaml = """
-mcu_firmware:
-  - pattern: "stm32f"
-    arch: stm32
-  - pattern: "stm32f103"  # Shadowed by stm32f above
-    arch: stm32
-"""
-        bad_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'bad_boards_test.yaml')
-        )
-        with open(bad_path, "w") as f:
-            f.write(bad_yaml)
+        import core.loader
+        original_loader = core.loader.load_boards_yaml
+        core.loader.load_boards_yaml = lambda: {
+            "mcu_firmware": [
+                {"pattern": "stm32f", "arch": "stm32"},
+                {"pattern": "stm32f103", "arch": "stm32"}
+            ]
+        }
 
         logs = []
+        import builtins
         original_print = builtins.print
         def mock_print(*args, **kwargs):
             logs.append(" ".join(map(str, args)))
         builtins.print = mock_print
-
-        original_path = drv.os.path.join
-        drv.os.path.join = lambda *args: bad_path if "boards.yaml" in args[-1] else original_path(*args)
 
         try:
             fallback = drv._load_firmware_db()
             self.assertEqual(fallback, _FW_DB_FALLBACK, "Validation failed to fall back on shadowed pattern")
             self.assertTrue(any("Invalid pattern precedence" in log for log in logs), "Missing warning log")
         finally:
-            drv.os.path.join = original_path
+            core.loader.load_boards_yaml = original_loader
             builtins.print = original_print
-            if os.path.exists(bad_path):
-                os.remove(bad_path)
 
 if __name__ == '__main__':
     unittest.main()

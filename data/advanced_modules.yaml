@@ -1,0 +1,125 @@
+# ============================================================
+#  KACE — Advanced Module Passthrough Database
+#  data/advanced_modules.yaml
+#
+#  Defines sections KACE cannot actively configure but can parse
+#  and re-emit as commented-out passthrough blocks in the
+#  generated printer.cfg.
+#
+#  Philosophy: parse → emit (commented) → inform → PASS.
+#  No section listed here is ever written as active config.
+#  The user must review, uncomment, and calibrate manually.
+#
+#  Fields per entry:
+#    section_prefix : Klipper section name prefix (lowercase).
+#                     Matched as a substring against parsed keys.
+#    passthrough    : true  → emit as commented block (PASS in sweep)
+#                     false → keep as UNSUPPORTED gate (no change)
+#    banner         : human-readable label for the comment header
+#    note           : one-line note shown above the commented block
+#    fields         : ordered field names to emit. Use ["*"] to emit all.
+# ============================================================
+
+advanced_modules:
+
+  # ── Neopixel / WS2812 LED strips ─────────────────────────────
+  - section_prefix: neopixel
+    passthrough: true
+    banner: "Neopixel / WS2812 LED"
+    note: >
+      Neopixel LED section detected. Pin data preserved below.
+      Review pin, chain_count, and color_order, then uncomment to enable.
+    fields:
+      - pin
+      - chain_count
+      - color_order
+      - initial_red
+      - initial_green
+      - initial_blue
+      - initial_white
+      - "*"
+
+  # ── DotStar / APA102 LED strips ──────────────────────────────
+  - section_prefix: dotstar
+    passthrough: true
+    banner: "DotStar / APA102 LED"
+    note: >
+      DotStar LED section detected. Pin data preserved below.
+      Review data_pin, clock_pin, and chain_count, then uncomment to enable.
+    fields:
+      - data_pin
+      - clock_pin
+      - chain_count
+      - initial_red
+      - initial_green
+      - initial_blue
+      - "*"
+
+  # ── ADXL345 accelerometer ─────────────────────────────────────
+  - section_prefix: adxl345
+    passthrough: true
+    banner: "ADXL345 Accelerometer (Input Shaper)"
+    note: >
+      ADXL345 accelerometer detected. SPI pin data preserved below.
+      After wiring, uncomment and run SHAPER_CALIBRATE for input shaper tuning.
+    fields:
+      - cs_pin
+      - spi_bus
+      - spi_software_sclk_pin
+      - spi_software_mosi_pin
+      - spi_software_miso_pin
+      - axes_map
+      - "*"
+
+  # ── PCA9685 PWM expander ──────────────────────────────────────
+  - section_prefix: pca9685
+    passthrough: true
+    banner: "PCA9685 PWM Expander"
+    note: >
+      PCA9685 PWM expander detected. I2C data preserved below.
+      Uncomment and verify i2c_address before enabling.
+    fields:
+      - i2c_bus
+      - i2c_address
+      - i2c_mcu
+      - cycle_time
+      - "*"
+
+  # ── SX1509 GPIO expander ──────────────────────────────────────
+  - section_prefix: sx1509
+    passthrough: true
+    banner: "SX1509 GPIO Expander"
+    note: >
+      SX1509 GPIO expander detected. I2C data preserved below.
+      This board uses SX1509 for extended GPIO (e.g. display I/O).
+      Uncomment and verify i2c_address before enabling.
+    fields:
+      - i2c_bus
+      - i2c_address
+      - i2c_mcu
+      - "*"
+
+  # ── Sections kept UNSUPPORTED (not promoted) ──────────────────
+  - section_prefix: resonance_tester
+    passthrough: false
+    banner: "Resonance Tester"
+    note: "Requires physical accelerometer wiring + calibration."
+    fields: ["*"]
+
+  - section_prefix: lis2dw
+    passthrough: false
+    banner: "LIS2DW Accelerometer"
+    note: "Alternative accelerometer — kept as UNSUPPORTED."
+    fields: ["*"]
+
+  - section_prefix: mpu9250
+    passthrough: false
+    banner: "MPU9250 Accelerometer"
+    note: "Alternative accelerometer — kept as UNSUPPORTED."
+    fields: ["*"]
+
+  - section_prefix: palette2
+    passthrough: false
+    banner: "Palette 2"
+    note: "Exotic multi-filament device — kept as UNSUPPORTED."
+    fields: ["*"]

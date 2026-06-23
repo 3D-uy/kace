@@ -2,7 +2,22 @@ import unittest
 import os
 from tests.kace_test_case import KaceTestCase
 from core.scraper import parse_config, extract_profile_defaults
-from core.generator import generate_config
+
+try:
+    import jinja2  # noqa: F401
+    _JINJA2_AVAILABLE = True
+except ImportError:
+    _JINJA2_AVAILABLE = False
+
+if _JINJA2_AVAILABLE:
+    from core.generator import generate_config
+else:
+    generate_config = None
+
+_skip_no_jinja2 = unittest.skipUnless(
+    _JINJA2_AVAILABLE,
+    "jinja2 not installed — regression tests run in Docker only",
+)
 
 
 # ── Mock raw configs ───────────────────────────────────────────────────────────
@@ -396,9 +411,10 @@ max_z_accel: 100
 """
 
 
-def _make_user_data(parsed, board_name, mcu_path, drivers="TMC2209", probe="None"):
+def _make_user_data(parsed, board_name, mcu_path, drivers="TMC2209", probe="None",
+                    probe_x_offset="0", probe_y_offset="0"):
     defaults = extract_profile_defaults(parsed)
-    return {
+    ud = {
         "mcu_path":          mcu_path,
         "kinematics":        defaults["kinematics"],
         "x_size":            defaults.get("x_size", "235"),
@@ -408,14 +424,23 @@ def _make_user_data(parsed, board_name, mcu_path, drivers="TMC2209", probe="None
         "hotend_thermistor": defaults["hotend_thermistor"],
         "bed_thermistor":    defaults["bed_thermistor"],
         "probe":             probe,
+        "probe_x_offset":    probe_x_offset,
+        "probe_y_offset":    probe_y_offset,
         "motors":            "4",
         "z_motors":          "1",
         "extruder":          "1",
         "runout":            "Yes",
         "language":          "en",
     }
+    for axis in ["x", "y", "z"]:
+        for key in ["position_min", "position_max", "position_endstop"]:
+            full_key = f"{axis}_{key}"
+            if full_key in defaults:
+                ud[full_key] = defaults[full_key]
+    return ud
 
 
+@_skip_no_jinja2
 class TestSnapshotExpansion(KaceTestCase):
     """Regression snapshots for 6 additional board families."""
 

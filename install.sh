@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================
 #  KACE — Klipper Automated Configuration Ecosystem
-#  Install Script v0.1.0
-#  Usage: bash <(curl -s https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+#  Install Script
+#
+#  Safe Usage (inspect & verify script):
+#    curl -sSL -o install.sh https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh
+#    # verify the installer before running: sha256sum install.sh
+#    bash install.sh
 # ============================================================
 
 set -e
@@ -15,29 +19,22 @@ R="\033[0m"    # Reset
 B="\033[1m"    # Bold
 E="\033[91m"   # Red (error)
 
-REPO_URL="https://github.com/3D-uy/KACE.git"
+REPO_URL="https://github.com/3D-uy/kace.git"
 INSTALL_DIR="$HOME/kace"
 KACE_BIN="/usr/local/bin/kace"
+INSTALL_TAG="v0.9.2"
 
 # ── Banner ───────────────────────────────────────────────────
 clear
-BANNER_URL="https://raw.githubusercontent.com/3D-uy/KACE/main/core/banner.py"
 SUBTITLE="KACE Installer"
-VERSION="v0.1.0"
+VERSION="v0.9.2"
 
-if [ -f "core/banner.py" ]; then
-    python3 core/banner.py "$SUBTITLE" "$VERSION"
-elif [ -f "$INSTALL_DIR/core/banner.py" ]; then
-    python3 "$INSTALL_DIR/core/banner.py" "$SUBTITLE" "$VERSION"
-else
-    python3 -c "$(curl -fsSL $BANNER_URL)" "$SUBTITLE" "$VERSION" 2>/dev/null || {
-        echo ""
-        echo -e "  ${C}──────────────────────────────────────────${R}"
-        echo -e "  ${B}${C}  $SUBTITLE $VERSION${R}"
-        echo -e "  ${C}──────────────────────────────────────────${R}"
-        echo ""
-    }
-fi
+# Cosmetic fallback banner for early install phase
+echo ""
+echo -e "  ${C}──────────────────────────────────────────${R}"
+echo -e "  ${B}${C}  $SUBTITLE $VERSION${R}"
+echo -e "  ${C}──────────────────────────────────────────${R}"
+echo ""
 
 # ── Step 1: System dependencies ──────────────────────────────
 echo -e "${C}[1/5]${R} Checking system dependencies..."
@@ -69,27 +66,36 @@ _git_supports_sparse() {
 
 echo -e "${C}[2/5]${R} Syncing KACE repository..."
 if [ -d "$INSTALL_DIR/.git" ]; then
-    echo -e "  Existing installation found — updating..."
-    git -C "$INSTALL_DIR" fetch origin main --depth=1 --quiet
-    git -C "$INSTALL_DIR" reset --hard FETCH_HEAD --quiet
-    echo -e "${G}  ✔ Repository updated${R}"
+    echo -e "  Existing installation found — updating to ${INSTALL_TAG}..."
+    git -C "$INSTALL_DIR" fetch origin tag "$INSTALL_TAG" --depth=1 --quiet
+    git -C "$INSTALL_DIR" checkout tags/"$INSTALL_TAG" --quiet
+    echo -e "${G}  ✔ Repository updated to ${INSTALL_TAG}${R}"
 else
-    echo -e "  Cloning KACE into ${Y}${INSTALL_DIR}${R}..."
+    echo -e "  Cloning KACE (${INSTALL_TAG}) into ${Y}${INSTALL_DIR}${R}..."
     if _git_supports_sparse; then
-        # Sparse shallow clone: skips docs/images — faster on slow Pi SD cards
-        git clone --depth 1 --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR" --quiet
+        git clone --depth 1 --branch "$INSTALL_TAG" --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR" --quiet
         git -C "$INSTALL_DIR" sparse-checkout set $_SPARSE_DIRS --quiet
-        echo -e "${G}  ✔ Repository cloned (optimized — docs excluded)${R}"
+        echo -e "${G}  ✔ Repository cloned (optimized — tag ${INSTALL_TAG} — docs excluded)${R}"
     else
-        # Fallback: shallow clone without sparse checkout (older Git)
-        git clone --depth 1 "$REPO_URL" "$INSTALL_DIR" --quiet
-        echo -e "${G}  ✔ Repository cloned (shallow)${R}"
+        git clone --depth 1 --branch "$INSTALL_TAG" "$REPO_URL" "$INSTALL_DIR" --quiet
+        echo -e "${G}  ✔ Repository cloned (tag ${INSTALL_TAG})${R}"
     fi
+fi
+
+# Load actual version dynamically post-clone
+if [ -f "$INSTALL_DIR/VERSION" ]; then
+    VERSION="v$(cat "$INSTALL_DIR/VERSION" | tr -d '\r\n')"
+fi
+
+# Show the real decorative banner from the cloned repository
+if [ -f "$INSTALL_DIR/core/banner.py" ]; then
+    python3 "$INSTALL_DIR/core/banner.py" "$SUBTITLE" "$VERSION"
 fi
 
 # ── Step 3: Install Python dependencies ──────────────────────
 echo -e "${C}[3/5]${R} Installing Python packages..."
-pip3 install -r "$INSTALL_DIR/requirements.txt" --break-system-packages -q
+# Enforce hashes to protect against PyPI substitution attacks
+pip3 install -r "$INSTALL_DIR/requirements.txt" --require-hashes --break-system-packages -q
 echo -e "${G}  ✔ Python dependencies verified${R}"
 
 # ── Step 4: Configure executable permissions ─────────────────

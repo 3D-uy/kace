@@ -22,7 +22,7 @@ custom_style = Style([
     ('cursor-line.selected', 'bg:default'),
 
     # --- Estructura ---
-    ('separator', 'fg:#cc5454'),
+    ('separator', 'fg:#00bcd4'),
     ('instruction', 'fg:#888888'),
     ('text', ''),
     ('disabled', 'fg:#858585 italic'),

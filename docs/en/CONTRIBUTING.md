@@ -3,6 +3,12 @@
 Thank you for considering a contribution to KACE.
 This guide explains how to add new boards, create snapshots, and submit safe PRs.
 
+## Repository Structure
+
+KACE is managed in the primary repository:
+
+- **`3D-uy/kace` (Production/Stable)**: The main stable, user-facing repository. Production installer scripts target this channel.
+
 ---
 
 ## Development Setup
@@ -20,6 +26,34 @@ python3 tests/run_tests.py --verbose
 ```
 
 All 21 tests must pass before any contribution is accepted.
+
+---
+
+## Dependency Management & Development Setup
+
+KACE enforces secure dependency installations via hash verification. The Python dependencies are defined in `.in` files and compiled to `.txt` files with hashes using `pip-tools`.
+
+- **Core Dependencies**: Defined in `requirements.in` and compiled to `requirements.txt`.
+- **Optional SSH Dependencies**: Defined in `requirements-ssh.in` and compiled to `requirements-ssh.txt` (which are lazily installed on-demand with hash checking).
+
+> [!IMPORTANT]
+> **Do NOT edit `requirements.txt` or `requirements-ssh.txt` directly.** Any manual edits will be overwritten the next time dependencies are compiled.
+
+To add or update a dependency:
+1. Edit `requirements.in` (for core dependencies) or `requirements-ssh.in` (for optional SSH dependencies).
+2. Install `pip-tools` if you haven't already:
+   ```bash
+   pip install pip-tools
+   ```
+3. Compile the dependencies to generate the pinned hash files:
+   ```bash
+   # Regenerate core dependencies
+   pip-compile --generate-hashes requirements.in
+   
+   # Regenerate SSH/optional dependencies
+   pip-compile --generate-hashes requirements-ssh.in
+   ```
+4. Commit both the `.in` file and the updated `.txt` file.
 
 ---
 

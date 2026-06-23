@@ -20,6 +20,12 @@ boards:
   - mcu: lpc1769
     search_terms:
       - skr-v1.4
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
     bltouch:
       skr-v1.4:
         sensor_pin: "^P0.10"
@@ -36,6 +42,12 @@ boards:
       - sgen-l
       - mks-sgenl
       - sbase
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
     bltouch:
       skr-v1.3:
         sensor_pin: "^P1.27"
@@ -46,6 +58,13 @@ boards:
       - creality-v4.2.2
       - creality-v4.2.7
       - skr-mini-e3
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
     bltouch:
       skr-mini-e3-v2.0:
         sensor_pin: "^PC14"
@@ -64,6 +83,13 @@ boards:
     search_terms:
       - mks-robin-nano-v3
       - skr-pro
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
     bltouch:
       mks-robin-nano:
         sensor_pin: "^PA11"
@@ -73,64 +99,183 @@ boards:
     search_terms:
       - skr-2
       - octopus-pro-v1.0
-    bltouch: {}
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
+    extra_driver_sockets: 6   # E0–E5 spare sockets reusable for multi-Z
+    bltouch:
+      # octopus-pro-v1.0 uses the dedicated BLTouch 5-pin header
+      octopus-pro-v1.0:
+        sensor_pin: "^PB7"
+        control_pin: "PB6"
+      # SKR-2 probe header (PROBE connector = PC0, SERVO = PA2)
+      skr-2:
+        sensor_pin: "^PC0"
+        control_pin: "PA2"
 
   - mcu: stm32f446
     search_terms:
       - octopus
       - spider
-    bltouch: {}
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
+    extra_driver_sockets: 6   # E0–E5 spare sockets reusable for multi-Z
+    bltouch:
+      # octopus-pro must come before octopus — more-specific key wins substring match
+      # Octopus Pro v1.1 dedicated BLTouch 5-pin header (PB7 sensor, PB6 control)
+      octopus-pro:
+        sensor_pin: "^PB7"
+        control_pin: "PB6"
+      # Plain Octopus v1.1 uses PROBE connector (PC5) + SERVO0 (PE5)
+      octopus:
+        sensor_pin: "^PC5"
+        control_pin: "PE5"
+      # Fysetc Spider v2.x probe port
+      spider:
+        sensor_pin: "^PA2"
+        control_pin: "PA3"
 
   - mcu: stm32g0b1
     search_terms:
       - manta
       - skr-mini-e3-v3.0
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
     bltouch: {}
 
   - mcu: stm32h723
     search_terms:
       - octopus-max-ez
-    bltouch: {}
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
+    extra_driver_sockets: 9   # E0–E8 spare sockets (EZ variant has more slots)
+    bltouch:
+      # Octopus MAX EZ dedicated BLTouch header
+      octopus-max-ez:
+        sensor_pin: "^PB7"
+        control_pin: "PB6"
 
   - mcu: stm32f042
     search_terms:
       - cheetah-v2.0
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
     bltouch: {}
 
   - mcu: rp2040
     search_terms:
       - skr-pico
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_only"  # RP2040 GPIO is NOT 5V tolerant
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+    bltouch: {}
+
+  - mcu: esp32
+    search_terms:
+      - mks-tinybee
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_only"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
     bltouch: {}
 
   - mcu: atmega2560
     search_terms:
       - ramps
       - mega2560
+    voltage: "5V"
+    gpio_voltage_tolerance: "5V_native"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
     bltouch: {}
 
   - mcu: atmega1284p
     search_terms:
       - melzi
+    voltage: "5V"
+    gpio_voltage_tolerance: "5V_native"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
+      - UART
     bltouch: {}
 
   - mcu: at90usb1286
     search_terms:
       - printrboard
+    voltage: "5V"
+    gpio_voltage_tolerance: "5V_native"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
     bltouch: {}
 
   - mcu: sam4e8e
     search_terms:
       - duet2
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - SPI
+      - I2C
+      - UART
+      # NOTE: Duet2 does NOT have standard EXP1/EXP2 connectors
+      # Display connection requires custom adapter wiring
     bltouch: {}
 
   - mcu: samd51
     search_terms:
       - duet3-mini
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - SPI
+      - I2C
+      - UART
     bltouch: {}
 
   - mcu: mks-sgen-l
     search_terms:
       - mks-sgen-l
+    voltage: "3.3V"
+    gpio_voltage_tolerance: "3.3V_tolerant"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
     bltouch:
       mks-sgen-l:
         sensor_pin: "^P1.27"
@@ -139,6 +284,12 @@ boards:
   - mcu: mks-gen-l
     search_terms:
       - mks-gen-l
+    voltage: "5V"
+    gpio_voltage_tolerance: "5V_native"
+    display_interfaces:
+      - EXP1_EXP2
+      - SPI
+      - I2C
     bltouch:
       mks-gen-l:
         sensor_pin: "^D18"
@@ -228,7 +379,12 @@ mcu_firmware:
   # ── RP2040 ─────────────────────────────────────────────────
   - pattern: "rp2040"
     arch: rp2040
-    mach: RP2040
+    mach: RPXXXX
+
+  # ── ESP32 ──────────────────────────────────────────────────
+  - pattern: "esp32"
+    arch: esp32
+    mach: ESP32
 
   # ── AVR ────────────────────────────────────────────────────
   # atmega2560 must come before atmega (more specific)

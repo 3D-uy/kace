@@ -1,232 +1,710 @@
 # ============================================================
-#  KACE — Display Compatibility Database
+#  KACE — Hardware Display Compatibility Database
 #  data/displays.yaml
 #
-#  This file defines the display compatibility layer for KACE.
-#  It classifies known display section types and printer models
-#  so KACE can detect risky configurations and warn users before
-#  configuration generation.
+#  HARDWARE SAFETY VALIDATION DATABASE
+#  Grounded in official Klipper documentation and source:
+#    - klippy/extras/display/display.py (LCD_chips registry)
+#    - config/sample-lcd.cfg (EXP wiring reference)
+#    - docs/Config_Reference.md ([display] section)
 #
-#  Philosophy: detect → classify → inform → recommend.
-#  KACE never automatically modifies or disables display sections.
+#  Philosophy: hardware safety over convenience.
+#    Detect → classify → explain risks → warn explicitly → block unsafe.
 #
-#  status values:
-#    supported    — Known working natively under Klipper
-#    partial      — Works with limitations; reduced functionality expected
-#    unsupported  — Not compatible; may cause black screen / boot failure
-#    untested     — No data; outcome unknown
+#  compatibility_class values:
+#    fully_compatible        — Plug-and-play. No modifications needed.
+#    compatible_with_adapter — Works with a specific adapter/modification.
+#    experimental            — Community data only; outcome uncertain.
+#    unsafe                  — High risk of permanent hardware damage.
 #
-#  recommendation values:
-#    disconnect   — Strongly recommended to physically disconnect display
-#    optional     — User may choose to keep, with awareness of limitations
-#    none         — No action needed
+#  interface_required values:
+#    EXP1_EXP2  — Standard 10-pin RepRap EXP1/EXP2 ribbon connectors
+#    SPI        — Hardware or software SPI bus
+#    I2C        — I2C bus (address configurable)
+#    UART       — Serial UART (OEM protocols, e.g. DGUS)
+#    USB        — USB serial bridge (e.g. BTT TFT touch mode)
+#    none       — No external interface (software/virtual only)
 #
-#  Adding a new entry: add to the appropriate section below.
-#  No Python changes required.
+#  voltage_logic values:
+#    5V              — Requires 5V logic levels
+#    3.3V            — Requires 3.3V logic levels
+#    3.3V_tolerant   — Accepts both 3.3V and 5V (most RepRap LCDs)
+#    any             — No specific voltage requirement
+#
+#  damage_risks:
+#    List of components that can be permanently damaged if misused.
+#    Be explicit — name the actual chips/ICs at risk.
+#
+#  required_modifications:
+#    Ordered list of steps needed to make the combination safe/functional.
+#
 # ============================================================
 
 
 # ── Section-based detection ────────────────────────────────────────────────────
 # Keyed by Klipper config section name (lowercased).
-# These are matched against parsed config section keys from printer.cfg.
+# Cross-referenced against board voltage and interface data at runtime.
 
 display_configs:
 
-  # ── Standard / fully supported displays ─────────────────────
+  # ══════════════════════════════════════════════════════════════
+  #  FULLY COMPATIBLE — Native Klipper support, plug-and-play
+  # ══════════════════════════════════════════════════════════════
+
   display:
+    friendly_name: "Generic LCD (12864 Graphic / Character)"
+    compatibility_class: fully_compatible
     status: supported
     recommendation: none
+    interface_required: EXP1_EXP2
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
     notes:
       - "Standard 12864 graphic and character LCDs are natively supported by Klipper"
-      - "Includes: RepRapDiscount Smart LCD, mini12864, Ender 3 stock LCD"
-      - "No compatibility concerns"
+      - "Officially registered in Klipper's LCD_chips driver registry (display.py)"
+      - "Covers: RepRapDiscount Smart LCD (st7920), mini12864 (uc1701), HD44780 (2004)"
+      - "Connects via standard EXP1/EXP2 10-pin ribbon headers"
+      - "Most RepRap LCDs are 3.3V-tolerant — safe with STM32 and LPC176x boards"
+      - "Verify ribbon connector orientation — reversed EXP cables destroy GPIO"
 
   lcd_menu:
+    friendly_name: "LCD Menu (software, no hardware needed)"
+    compatibility_class: fully_compatible
     status: supported
     recommendation: none
+    interface_required: none
+    voltage_logic: any
+    damage_risks: []
+    required_modifications: []
     notes:
-      - "lcd_menu is a native Klipper feature — fully supported"
-      - "Used alongside standard [display] sections for menu navigation"
+      - "lcd_menu is a native Klipper software feature — no hardware interface"
+      - "Used alongside [display] sections for menu navigation logic"
 
   display_status:
+    friendly_name: "Display Status (virtual object, no hardware)"
+    compatibility_class: fully_compatible
     status: supported
     recommendation: none
+    interface_required: none
+    voltage_logic: any
+    damage_risks: []
+    required_modifications: []
     notes:
-      - "display_status is a standard Klipper object — no compatibility concerns"
+      - "display_status is a standard Klipper virtual object — no compatibility concerns"
 
   display_template:
+    friendly_name: "Display Template (virtual object, no hardware)"
+    compatibility_class: fully_compatible
     status: supported
     recommendation: none
+    interface_required: none
+    voltage_logic: any
+    damage_risks: []
+    required_modifications: []
     notes:
       - "display_template is a native Klipper templating feature — fully supported"
 
   display_data:
+    friendly_name: "Display Data (virtual object, no hardware)"
+    compatibility_class: fully_compatible
     status: supported
     recommendation: none
+    interface_required: none
+    voltage_logic: any
+    damage_risks: []
+    required_modifications: []
     notes:
-      - "display_data is a native Klipper feature — fully supported"
+      - "display_data is a native Klipper data binding feature — fully supported"
 
-  # ── DGUS / DWIN serial touchscreens ─────────────────────────
-  t5uid1:
-    status: unsupported
-    recommendation: disconnect
+  hd44780:
+    friendly_name: "HD44780 Character LCD (RepRapDiscount 2004)"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: EXP1_EXP2
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
     notes:
-      - "OEM DGUS touchscreen protocol — designed for Creality Marlin firmware"
-      - "Klipper has no built-in t5uid1 / DGUS support without community plugins"
-      - "Expected outcome without patching: black screen or boot loop"
-      - "Community plugin 'klipper-dgus' exists but is not installed by KACE"
-      - "Web UI (Mainsail/Fluidd) provides full printer control without the screen"
+      - "HD44780 character displays natively supported (registered in LCD_chips)"
+      - "RepRapDiscount 2004 Smart Controller uses this driver"
+      - "Operates via 4-bit parallel interface over EXP1"
+      - "5V-tolerant inputs — safe with 3.3V boards (STM32, LPC176x)"
+
+  hd44780_spi:
+    friendly_name: "HD44780 via SPI Bridge"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: SPI
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
+    notes:
+      - "HD44780 via SPI bridge — natively supported in Klipper (LCD_chips)"
+      - "Requires SPI bus — verify board exposes hardware or software SPI"
+      - "Avoids EXP1/EXP2 wiring complexity"
+
+  st7920:
+    friendly_name: "ST7920 Graphic LCD (RepRapDiscount Full Graphic / Ender 3 stock)"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: EXP1_EXP2
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
+    notes:
+      - "ST7920 natively supported (registered in LCD_chips as 'st7920')"
+      - "RepRapDiscount Full Graphic Smart Controller uses this chip"
+      - "Ender 3 stock display uses ST7920 with Creality EXP pinout"
+      - "ST7920 inputs are 5V tolerant — works with 3.3V GPIO"
+      - "EXP1/EXP2 ribbon connectors — check orientation before plugging in"
+
+  emulated_st7920:
+    friendly_name: "ST7920 Emulated (Software SPI mode)"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: SPI
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
+    notes:
+      - "Software-emulated ST7920 SPI mode — supported in Klipper"
+      - "Useful when hardware SPI conflicts with other peripherals"
+
+  uc1701:
+    friendly_name: "UC1701 Mini12864 (Fysetc / BTT mini12864, Voron panels)"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: SPI
+    voltage_logic: 3.3V
+    damage_risks: []
+    required_modifications: []
+    notes:
+      - "UC1701 natively supported in Klipper (LCD_chips registry)"
+      - "Used in mini12864 displays (Fysetc, BigTreeTech, etc.)"
+      - "SPI interface — does NOT use EXP1/EXP2 directly (uses EXP1 as SPI source)"
+      - "Operates at 3.3V logic — fully compatible with STM32/LPC176x/RP2040"
+      - "Requires RGB LED section separately if display has RGB backlight"
+
+  ssd1306:
+    friendly_name: "SSD1306 OLED (I2C, 128x64)"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: I2C
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
+    notes:
+      - "SSD1306 OLED natively supported in Klipper (LCD_chips as 'ssd1306')"
+      - "I2C interface (address: 0x3C or 0x3D)"
+      - "Accepts both 3.3V and 5V VCC — verify display module specs"
+      - "Logic levels follow VCC — use 3.3V VCC on 3.3V boards"
+
+  sh1106:
+    friendly_name: "SH1106 OLED (I2C or SPI, 128x64)"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: I2C
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
+    notes:
+      - "SH1106 OLED natively supported in Klipper (LCD_chips as 'sh1106')"
+      - "Pin-compatible with SSD1306 in most cases"
+      - "I2C or SPI interface (check your module)"
+
+  aip31068_spi:
+    friendly_name: "AIP31068 SPI Character LCD"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: SPI
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
+    notes:
+      - "AIP31068 SPI character LCD supported natively in Klipper"
+      - "Alternative to HD44780 using SPI instead of parallel interface"
+      - "Requires hardware or software SPI bus"
+
+
+  # ══════════════════════════════════════════════════════════════
+  #  COMPATIBLE WITH ADAPTER — Works but needs hardware changes
+  # ══════════════════════════════════════════════════════════════
+
+  tft_serial:
+    friendly_name: "Serial TFT (BTT TFT35 / MKS TFT / Marlin emulation mode)"
+    compatibility_class: compatible_with_adapter
+    status: partial
+    recommendation: optional
+    interface_required: UART
+    voltage_logic: 3.3V_tolerant
+    damage_risks:
+      - "UART serial conflicts may corrupt communication with other serial devices"
+      - "BTT TFT in 'emulated' mode only — touch functionality is non-operational"
+    required_modifications:
+      - "Set BTT TFT firmware to 'Marlin emulation' mode (not touch mode)"
+      - "Connect via UART TX/RX pins — not USB"
+      - "Configure [display] with lcd_type: hd44780 or st7920 for emulation"
+      - "Web UI (Mainsail/Fluidd) provides complete functionality without display"
+    notes:
+      - "Serial TFT displays (BTT TFT35, MKS TFT, Robin TFT) use Marlin bridge protocol"
+      - "Touch functionality is non-operational under Klipper"
+      - "BTT TFT35 can emulate a standard 12864 display in 'Marlin mode'"
+      - "UART baud rate must match firmware configuration (typically 250000)"
+      - "Web UI provides complete feature parity from phone/tablet/PC"
+      - "Recommend: use web UI instead of attempting serial TFT integration"
 
   dwin_set:
+    friendly_name: "DWIN Color LCD (Ender 3 V2 / DGUS community firmware)"
+    compatibility_class: compatible_with_adapter
     status: partial
     recommendation: disconnect
+    interface_required: UART
+    voltage_logic: 5V
+    damage_risks:
+      - "Firmware version mismatch can cause non-recoverable display brick"
+      - "UART conflicts if display shares serial bus with other devices"
+    required_modifications:
+      - "Install community 'klipper-dgus' plugin (NOT installed by KACE)"
+      - "Flash matching DGUS firmware to the display (version must match exactly)"
+      - "Configure UART connection with correct baud rate and pin mapping"
+      - "Alternatively: disconnect display and use web UI"
     notes:
       - "DWIN displays require firmware that exactly matches the display version"
       - "Community Klipper DWIN/DGUS plugins exist but are not installed by KACE"
-      - "Partial support is available only with matching community display firmware"
-      - "Mismatch causes: frozen UI, missing menus, or black screen"
+      - "Flashing wrong firmware version can brick the display permanently"
+      - "Mismatch symptoms: frozen UI, missing menus, blank screen"
 
-  # ── Serial TFT bridge displays (Artillery, MKS TFT, etc.) ───
-  tft_serial:
+
+  # ══════════════════════════════════════════════════════════════
+  #  EXPERIMENTAL — Community reports only; outcome uncertain
+  # ══════════════════════════════════════════════════════════════
+
+  btt_tft35:
+    friendly_name: "BTT TFT35 (12864 emulation mode only)"
+    compatibility_class: experimental
     status: partial
     recommendation: optional
+    interface_required: UART
+    voltage_logic: 3.3V_tolerant
+    damage_risks:
+      - "Incorrect cable orientation can damage the display driver IC"
+      - "12864 ribbon cables are NOT keyed — reversed connection destroys GPIO"
+    required_modifications:
+      - "Flash BTT TFT35 firmware to 'Marlin emulation' mode"
+      - "Verify cable orientation (pin 1 alignment) before powering on"
+      - "Set display firmware to 12864 emulation mode via firmware menu"
+      - "Configure [display] section with appropriate lcd_type in printer.cfg"
     notes:
-      - "Serial TFT displays use a bridge protocol designed for Marlin"
-      - "May conflict with Klipper's UART/serial communication on some boards"
-      - "Menu functionality is typically limited or absent under Klipper"
-      - "Klipper serial TFT support is incomplete compared to Marlin"
-      - "Web UI (Mainsail/Fluidd) provides full feature parity from any device"
+      - "BTT TFT35 has dual-mode firmware: touch mode (Marlin/Klipper-incompatible) and emulation mode"
+      - "Only '12864 emulation' mode works partially under Klipper"
+      - "Community reports are mixed — menu responsiveness is slower than native LCD"
+      - "BTT TFT cable orientation varies by revision — check pinout carefully"
 
-  # ── Neopixel / RGB — outside KACE scope ─────────────────────
-  neopixel:
-    status: unsupported
-    recommendation: none
+  mks_mini12864:
+    friendly_name: "MKS Mini12864 (V1/V2 SPI — NOT V3 FSMC)"
+    compatibility_class: experimental
+    status: partial
+    recommendation: optional
+    interface_required: SPI
+    voltage_logic: 3.3V
+    damage_risks:
+      - "MKS mini12864 V3 uses FSMC interface on MKS boards — not SPI"
+      - "Connecting V3 to BTT/SKR SPI boards without firmware change causes no-display or visual corruption"
+    required_modifications:
+      - "Verify MKS mini12864 hardware revision (V1/V2 vs V3)"
+      - "V1/V2: standard SPI, compatible with most boards"
+      - "V3: requires FSMC mode flag in firmware — incompatible with standard SPI boards"
+      - "Alternatively use Fysetc mini12864 which uses standard SPI universally"
     notes:
-      - "Neopixel/WS2812 LED sections are outside KACE's current scope"
-      - "KACE classifies configs with only neopixel display sections as UNSUPPORTED"
-      - "Neopixel can still be manually configured after generation"
+      - "MKS mini12864 V3 introduced FSMC (Flexible Static Memory Controller) interface"
+      - "FSMC is specific to STM32F4 hardware — not available on SKR, Octopus etc."
+      - "MKS V1/V2 use standard SPI and are broadly compatible"
+      - "Check PCB revision markings before purchasing/installing"
+
+
+  # ══════════════════════════════════════════════════════════════
+  #  UNSAFE — High risk of permanent hardware damage
+  # ══════════════════════════════════════════════════════════════
+
+  t5uid1:
+    friendly_name: "DGUS / t5uid1 Touchscreen (Creality CR-6, Ender 6 — UNSAFE)"
+    compatibility_class: unsafe
+    status: unsupported
+    recommendation: disconnect
+    interface_required: UART
+    voltage_logic: 3.3V_tolerant
+    damage_risks:
+      - "Sending Klipper UART traffic to t5uid1 controller can corrupt display EEPROM"
+      - "Boot loop caused by incompatible protocol can stress MCU power delivery"
+      - "No path to make this functional without replacing display firmware entirely"
+    required_modifications:
+      - "DISCONNECT the display before running Klipper for the first time"
+      - "Use Mainsail or Fluidd web interface for all printer control"
+      - "Optional: flash community 'klipper-dgus' compatible firmware to display"
+      - "Community resource: search 'Klipper DGUS display firmware' for your model"
+    notes:
+      - "t5uid1 is Creality's proprietary DGUS touchscreen protocol"
+      - "Designed exclusively for Creality's Marlin-based firmware — incompatible with Klipper"
+      - "Expected outcome with Klipper: black screen, boot loop, or display freeze"
+      - "No native Klipper driver — community plugins require display firmware replacement"
+      - "CR-6 SE, Ender 6, and some CR-10 Smart units ship with t5uid1 displays"
+
+  # ── Neopixel / RGB / GPIO expanders — passthrough (not display-critical) ─────
+  neopixel:
+    friendly_name: "Neopixel / WS2812 RGB LEDs"
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    interface_required: SPI
+    voltage_logic: 5V
+    damage_risks:
+      - "WS2812/WS2812B data lines expect 5V logic — connecting 3.3V MCU directly can cause unreliable operation"
+      - "Some RP2040 boards use level shifters — verify your specific board"
+    required_modifications:
+      - "For 3.3V MCUs (STM32, RP2040): use a 74AHCT125 or similar 3.3V→5V level shifter on the data line"
+      - "For 5V MCUs (ATmega): direct connection is fine"
+    notes:
+      - "Neopixel/WS2812 LED sections are natively supported by Klipper"
+      - "KACE handles neopixel as passthrough — generates commented config block"
+      - "Data line voltage requirement: WS2812B expects ≥0.7*VCC ≈ 3.5V minimum for 5V VCC"
+      - "Many 3.3V MCU boards work reliably in practice due to high noise margins"
 
   dotstar:
-    status: unsupported
+    friendly_name: "Dotstar / APA102 RGB LEDs"
+    compatibility_class: fully_compatible
+    status: supported
     recommendation: none
+    interface_required: SPI
+    voltage_logic: 5V
+    damage_risks: []
+    required_modifications: []
     notes:
-      - "Dotstar/APA102 LED sections are outside KACE's current scope"
-      - "Can be manually added after generation"
+      - "Dotstar/APA102 LEDs use SPI interface — natively supported by Klipper"
+      - "KACE handles dotstar as passthrough — generates commented config block"
+      - "APA102 data lines tolerate 3.3V input from most boards"
 
-  # ── SX1509 GPIO expander — exotic hardware ───────────────────
   sx1509:
-    status: unsupported
-    recommendation: none
-    notes:
-      - "SX1509 GPIO expander is not supported by KACE's configuration engine"
-      - "Boards using SX1509 for display I/O will not have display support"
-
-  # ── HD44780 character displays ───────────────────────────────
-  hd44780:
+    friendly_name: "SX1509 I2C GPIO Expander"
+    compatibility_class: compatible_with_adapter
     status: supported
     recommendation: none
+    interface_required: I2C
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications:
+      - "Ensure I2C address is correctly configured (0x3E default)"
+      - "KACE generates commented passthrough block — manual pin mapping required"
     notes:
-      - "HD44780 character displays are natively supported by Klipper"
-      - "No compatibility concerns"
+      - "SX1509 I2C GPIO expander is natively supported by Klipper"
+      - "KACE handles sx1509 as passthrough — generates commented config block"
+      - "Used on some BigTreeTech boards to expand available GPIO pins"
 
-  # ── SSD1306 OLED ─────────────────────────────────────────────
-  ssd1306:
+  pca9685:
+    friendly_name: "PCA9685 I2C PWM Controller"
+    compatibility_class: fully_compatible
     status: supported
     recommendation: none
+    interface_required: I2C
+    voltage_logic: 3.3V_tolerant
+    damage_risks: []
+    required_modifications: []
     notes:
-      - "SSD1306 OLED displays are natively supported by Klipper"
-      - "No compatibility concerns"
-
-  # ── UC1701 / ST7920 ──────────────────────────────────────────
-  uc1701:
-    status: supported
-    recommendation: none
-    notes:
-      - "UC1701 displays (e.g., mini12864) are natively supported by Klipper"
-
-  st7920:
-    status: supported
-    recommendation: none
-    notes:
-      - "ST7920 displays (e.g., RepRapDiscount Smart LCD) are natively supported"
+      - "PCA9685 PWM controller is natively supported by Klipper"
+      - "KACE handles pca9685 as passthrough — generates commented config block"
 
 
 # ── Printer model-based detection ─────────────────────────────────────────────
 # Keyed by lowercase substring of the printer config filename.
-# These catch OEM printers where the display issue is tied to the full
-# printer ecosystem (proprietary touchscreen firmware, serial bridge behavior)
-# rather than the MCU board alone.
-#
-# Checked FIRST before display_configs — printer profile takes precedence.
+# Checked FIRST — printer profile takes precedence over generic display_configs.
 
 printer_display_profiles:
 
-  # ── Creality CR-6 SE ─────────────────────────────────────────
+  # ── Creality CR-6 SE ────────────────────────────────────────
   cr6-se:
     display_type: t5uid1
+    compatibility_class: unsafe
     status: unsupported
     recommendation: disconnect
     notes:
-      - "The CR-6 SE uses a proprietary DGUS/t5uid1 touchscreen with Creality OEM firmware"
-      - "This display is not compatible with Klipper without a community firmware patch"
-      - "Users have reported black screen and boot issues when display remains connected"
-      - "Recommended: disconnect display and use Mainsail or Fluidd web interface"
-      - "Community resource: search 'CR-6 SE Klipper DGUS' for patch firmware"
+      - "CR-6 SE uses a proprietary DGUS/t5uid1 touchscreen designed for Creality Marlin OEM firmware"
+      - "Klipper has NO native t5uid1/DGUS driver — the display protocol is completely incompatible"
+      - "Keeping display connected while running Klipper: black screen, boot loop, EEPROM corruption risk"
+      - "Recommended: disconnect display cable BEFORE first Klipper boot"
+      - "Use Mainsail or Fluidd web interface for all printer control"
+      - "Community option: flash klipper-dgus compatible firmware to the display (advanced users only)"
+    damage_risks:
+      - "Incompatible UART traffic from Klipper MCU may corrupt display EEPROM"
+      - "Persistent boot loop stresses MCU power delivery (VReg thermal cycling)"
+    required_modifications:
+      - "Step 1: Physically disconnect the display ribbon cable from the board"
+      - "Step 2: Boot Klipper — all control via web interface"
+      - "Step 3 (optional): Flash 'klipper-dgus' compatible firmware to display for partial support"
 
-  # ── Artillery Sidewinder ──────────────────────────────────────
-  artillery-sidewinder:
-    display_type: tft_serial
+  # ── Ender 3 Pro / Ender 3 V2 ────────────────────────────────
+  ender-3:
+    display_type: st7920
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    notes:
+      - "Ender 3 / Ender 3 Pro uses a stock Creality ST7920 display (12864 graphic LCD)"
+      - "Fully supported by Klipper — native st7920 driver"
+      - "Uses Creality's EXP1 pinout (slightly different from RepRapDiscount pinout)"
+      - "Use the 'Creality Ender3' display config section, NOT the generic RepRapDiscount config"
+      - "Klipper config: lcd_type: st7920, cs_pin: PB12, sclk_pin: PB13, sid_pin: PB15"
+    damage_risks: []
+    required_modifications: []
+
+  # ── Ender 3 V2 (differs from Ender 3 Pro) ──────────────────
+  ender-3-v2:
+    display_type: dwin_set
+    compatibility_class: experimental
     status: partial
     recommendation: optional
     notes:
-      - "Artillery Sidewinder uses a serial TFT display designed for Marlin"
-      - "Serial TFT menus are typically non-functional or limited under Klipper"
-      - "Display may show partial information but control menus will not work correctly"
-      - "Web UI (Mainsail/Fluidd) provides full printer control from phone/tablet/PC"
+      - "Ender 3 V2 ships with a DWIN color LCD — NOT the same as Ender 3 Pro stock display"
+      - "DWIN displays require community firmware and are not directly compatible with Klipper"
+      - "Community project 'Klipper DWIN' provides partial support with custom display firmware"
+      - "Alternative: ignore display and use Mainsail/Fluidd exclusively"
+      - "Some users replace the DWIN display with a mini12864 for full Klipper compatibility"
+    damage_risks:
+      - "Flashing incorrect DWIN firmware can non-recoverably brick the display"
+    required_modifications:
+      - "Option A: Disconnect display, use web UI exclusively"
+      - "Option B: Flash community Klipper DWIN firmware to display (advanced, risky)"
+      - "Option C: Replace display with mini12864 (fully compatible with Klipper)"
 
-  # ── Artillery Genius ─────────────────────────────────────────
-  artillery-genius:
-    display_type: tft_serial
-    status: partial
-    recommendation: optional
-    notes:
-      - "Artillery Genius uses a serial TFT display designed for Marlin"
-      - "Serial TFT menus are typically non-functional or limited under Klipper"
-      - "Web UI (Mainsail/Fluidd) is the recommended interface"
-
-  # ── Artillery Hornet ─────────────────────────────────────────
-  artillery-hornet:
-    display_type: tft_serial
-    status: partial
-    recommendation: optional
-    notes:
-      - "Artillery Hornet uses a serial TFT display designed for Marlin"
-      - "Serial TFT menus are typically non-functional or limited under Klipper"
-
-  # ── Creality CR-10 Smart ──────────────────────────────────────
+  # ── Creality CR-10 Smart ─────────────────────────────────────
   cr10-smart:
     display_type: tft_serial
+    compatibility_class: compatible_with_adapter
     status: partial
     recommendation: optional
     notes:
-      - "CR-10 Smart uses a serial TFT display; limited functionality under Klipper"
-      - "Use web UI for full control"
+      - "CR-10 Smart uses a serial TFT display designed for Marlin's touch interface"
+      - "Touch interface menus will NOT function under Klipper"
+      - "Partial display-only functionality may work in emulation mode"
+      - "Web UI provides complete printer control"
+    damage_risks: []
+    required_modifications:
+      - "Configure display firmware to emulation/12864 mode if available"
+      - "Use web UI (Mainsail/Fluidd) for all printer control"
 
-  # ── Creality Ender 6 ─────────────────────────────────────────
+  # ── Creality Ender 6 ────────────────────────────────────────
   ender-6:
     display_type: tft_serial
+    compatibility_class: compatible_with_adapter
     status: partial
     recommendation: optional
     notes:
       - "Ender 6 uses a serial TFT display with limited Klipper compatibility"
       - "Web UI is the recommended interface"
+    damage_risks: []
+    required_modifications:
+      - "Use web UI (Mainsail/Fluidd) for all printer control"
 
-  # ── MKS Robin-based printers (MKS TFT variants) ──────────────
+  # ── Artillery Sidewinder ─────────────────────────────────────
+  artillery-sidewinder:
+    display_type: tft_serial
+    compatibility_class: compatible_with_adapter
+    status: partial
+    recommendation: optional
+    notes:
+      - "Artillery Sidewinder uses a serial TFT display designed for Marlin"
+      - "Touch menus are non-functional under Klipper"
+      - "Display may show printer status information in 12864 emulation mode"
+      - "Web UI provides complete printer control from phone/tablet/PC"
+    damage_risks: []
+    required_modifications:
+      - "Set TFT firmware to 12864 emulation mode"
+      - "Use web UI for primary printer control"
+
+  # ── Artillery Genius ─────────────────────────────────────────
+  artillery-genius:
+    display_type: tft_serial
+    compatibility_class: compatible_with_adapter
+    status: partial
+    recommendation: optional
+    notes:
+      - "Artillery Genius uses a serial TFT display designed for Marlin"
+      - "Serial TFT menus are non-functional under Klipper"
+      - "Web UI is the recommended interface"
+    damage_risks: []
+    required_modifications:
+      - "Use web UI (Mainsail/Fluidd) for all printer control"
+
+  # ── Artillery Hornet ─────────────────────────────────────────
+  artillery-hornet:
+    display_type: tft_serial
+    compatibility_class: compatible_with_adapter
+    status: partial
+    recommendation: optional
+    notes:
+      - "Artillery Hornet uses a serial TFT display designed for Marlin"
+      - "Serial TFT menus are non-functional under Klipper"
+    damage_risks: []
+    required_modifications:
+      - "Use web UI (Mainsail/Fluidd) for all printer control"
+
+  # ── MKS Robin-based printers ─────────────────────────────────
   mks-robin:
     display_type: tft_serial
+    compatibility_class: compatible_with_adapter
     status: partial
     recommendation: optional
     notes:
       - "MKS Robin boards often ship with MKS TFT serial displays"
       - "MKS TFT menus have limited compatibility with Klipper"
       - "Web UI recommended for full control"
+    damage_risks: []
+    required_modifications:
+      - "Use web UI (Mainsail/Fluidd) for all printer control"
+
+  # ── Voron 2.4 / Voron Trident ────────────────────────────────
+  voron:
+    display_type: uc1701
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    notes:
+      - "Voron printers typically use mini12864 displays (Fysetc or BTT) with UC1701 driver"
+      - "Fully supported by Klipper — native uc1701 driver"
+      - "BTT mini12864 and Fysetc mini12864 use standard SPI — plug-and-play with BTT Octopus/SKR"
+      - "Voron mini12864 includes RGB backlight — configure [neopixel] or [led] section separately"
+      - "Standard pinout: EXP1 connector on Octopus/Spider boards"
+    damage_risks: []
+    required_modifications: []
+
+  # ── BigTreeTech Octopus / SKR boards ─────────────────────────
+  octopus:
+    display_type: uc1701
+    compatibility_class: fully_compatible
+    status: supported
+    recommendation: none
+    notes:
+      - "BTT Octopus boards expose EXP1/EXP2 headers compatible with mini12864 and RepRap LCDs"
+      - "STM32F446 MCU — 3.3V GPIO, compatible with all 3.3V-tolerant displays"
+      - "Recommended display: BTT mini12864 V1.0 or Fysetc mini12864 (both use UC1701)"
+      - "Wiring: EXP1 and EXP2 headers with standard 10-pin ribbon cables"
+    damage_risks: []
+    required_modifications: []
+
+
+# ══════════════════════════════════════════════════════════════
+#  BOARD-DISPLAY CROSS-REFERENCE MATRIX
+#  Specific known combinations — overrides generic rules.
+#  Format: board_substring → display_substring → {class, notes}
+# ══════════════════════════════════════════════════════════════
+
+board_display_matrix:
+
+  # ── RP2040-based boards (SKR Pico etc.) ─────────────────────
+  # RP2040 GPIO is NOT 5V tolerant — most critical voltage constraint
+  skr-pico:
+    reprapdiscount:
+      compatibility_class: compatible_with_adapter
+      notes:
+        - "SKR Pico (RP2040) operates at 3.3V — most RepRap LCDs are 3.3V-tolerant on data lines"
+        - "ST7920 and HD44780 data inputs are typically 5V-tolerant (VIH ≥ 0.7*VCC)"
+        - "Verify VCC is connected to 5V (not 3.3V) to meet LCD contrast requirements"
+        - "LCD backlight may require 5V — use board's 5V rail if available"
+        - "RP2040 GPIO pins are 3.3V output — do NOT connect to any 5V-only input"
+    mini12864:
+      compatibility_class: fully_compatible
+      notes:
+        - "mini12864 (UC1701) operates at 3.3V — fully compatible with RP2040 3.3V GPIO"
+        - "No voltage level issues — safe plug-and-play"
+
+  # ── Duet2 boards (SAM4E 3.3V) ────────────────────────────────
+  duet2:
+    reprapdiscount:
+      compatibility_class: compatible_with_adapter
+      notes:
+        - "Duet2 (SAM4E 3.3V) can drive most RepRap LCDs at 3.3V data levels"
+        - "ST7920 and HD44780 are typically 5V-tolerant — verify your specific display"
+        - "Duet2 does not use standard EXP1/EXP2 connectors — custom wiring required"
+        - "No standard RepRap EXP header on Duet2 — adapter board needed"
+      required_modifications:
+        - "Step 1: Purchase or build a Duet2-to-EXP adapter board"
+        - "Step 2: Map Duet2 SPI/GPIO pins to display data lines manually"
+        - "Step 3: Configure [display] section with explicit pin names (not EXP aliases)"
+
+  # ── ATmega (RAMPS, 5V) ───────────────────────────────────────
+  ramps:
+    reprapdiscount:
+      compatibility_class: fully_compatible
+      notes:
+        - "RAMPS/ATmega2560 board operates at 5V — perfect match for 5V RepRap LCDs"
+        - "Standard EXP1/EXP2 connectors — direct plug-and-play"
+        - "RepRapDiscount Full Graphic (ST7920) and 2004 (HD44780) are natively compatible"
+    mini12864:
+      compatibility_class: compatible_with_adapter
+      notes:
+        - "mini12864 (UC1701) operates at 3.3V — ATmega 5V GPIO may exceed absolute max ratings"
+        - "UC1701 VIH max is typically 3.6V — 5V GPIO output risks display driver damage"
+        - "Level shifter on DATA, CLK, CS lines strongly recommended"
+      damage_risks:
+        - "5V GPIO signals may exceed UC1701 absolute maximum VIH (typically 3.6V)"
+        - "Repeated overvoltage degrades and eventually destroys the UC1701 display driver"
+      required_modifications:
+        - "Step 1: Install a 74AHCT125 or SN74LVC125 level shifter (5V→3.3V) on DATA, CLK, CS lines"
+        - "Step 2: Power mini12864 from 3.3V rail"
+        - "Step 3: Configure [display] with software SPI to allow remapped level-shifted pins"
+
+
+# ════════════════════════════════════════════════════════════
+#  DISPLAY WIZARD CATALOG
+#  Maps user-facing category choices → display_configs section keys.
+#  Used by core/display_wizard.py to group recommendations.
+#  Order within members[] determines display order in the wizard UI.
+#
+#  Rule: unsafe-only displays (t5uid1) are excluded from basic_lcd/touchscreen
+#        and only appear when the user explicitly enters Manual/Advanced mode.
+# ════════════════════════════════════════════════════════════
+
+display_catalog:
+
+  basic_lcd:
+    label: "Basic LCD (12864 Graphic / Character)"
+    description: "Classic monochrome graphic and character LCDs. Most common for RepRap-style printers. Connect via EXP1/EXP2."
+    members:
+      - display
+      - st7920
+      - hd44780
+      - hd44780_spi
+      - emulated_st7920
+      - aip31068_spi
+
+  touchscreen:
+    label: "Touchscreen / TFT (serial bridge mode)"
+    description: "Serial TFT displays like BTT TFT35 or MKS TFT. Touch menus do NOT work under Klipper. Emulation mode required."
+    members:
+      - tft_serial
+      - btt_tft35
+      - dwin_set
+
+  oled_mini:
+    label: "OLED / Mini Display (SPI or I2C)"
+    description: "Compact graphic displays. Mini12864 (UC1701) is popular for Voron builds. SSD1306/SH1106 for small OLED panels."
+    members:
+      - uc1701
+      - mks_mini12864
+      - ssd1306
+      - sh1106
+
+  # Note: unsafe category is surfaced ONLY in Manual/Advanced mode.
+  # Do not add t5uid1 to the above categories.
+  unsafe_reference:
+    label: "Proprietary / Unsafe (Manual Override only)"
+    description: "Displays with known hardware damage risk or complete Klipper incompatibility. Shown only in advanced mode."
+    members:
+      - t5uid1

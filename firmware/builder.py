@@ -1,137 +1,68 @@
 import os
+import time
 import shutil
 import subprocess
 from .derivation import derive_config
-from .generator import generate_firmware_config
+from .firmware_generator import generate_firmware_config
 from .validator import validate_config
+from .build_mode import (
+    print_build_mode_banner,
+    print_mock_warning,
+    print_size_warning,
+    FIRMWARE_MINIMUM_SIZE_BYTES,
+)
 from core.translations import t
+from core.exceptions import DerivationAmbiguityError
 
-def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klipper_path="~/klipper", output_dir="~/kace"):
+
+
+def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klipper_path="~/klipper", output_dir="~/kace", config_dict=None):
     """
     Orchestrates the firmware derivation, generation, validation, and build process.
-    Returns a structured dictionary with results.
+    Runs headlessly without questionary prompts.
     """
     klipper_path = os.path.expanduser(klipper_path)
     output_dir = os.path.expanduser(output_dir)
 
-    # 1. Derive Configuration
-    try:
-        config_dict = derive_config(derived_mcu, hint)
-    except Exception as e:
-        return {"status": "error", "message": t("builder.derivation_failed", error=str(e))}
-        
-    # --- Summary & Confirmation Segment ---
-    import questionary
-    from core.style import custom_style
+    # 1. Derive Configuration if not provided
+    if config_dict is None:
+        try:
+            config_dict = derive_config(derived_mcu, hint)
+        except Exception as e:
+            return {"status": "error", "message": t("builder.derivation_failed", error=str(e))}
 
-    def format_flash(f):
-        mapping = {
-            "0x0": t("builder.boot_no"),
-            "0x2000": t("builder.boot_8k"),
-            "0x4000": t("builder.boot_16k"),
-            "0x7000": t("builder.boot_28k"),
-            "0x8000": t("builder.boot_32k"),
-            "0x10000": t("builder.boot_64k"),
-            "0x20000": t("builder.boot_128k")
-        }
-        return f"{mapping[f]} ({f})" if f in mapping else f
+    # Clean stale build binaries in the out path first to prevent old files from being copied
+    out_path = os.path.join(klipper_path, "out")
+    expected_outputs = ["klipper.bin", "klipper.uf2", "klipper.elf.hex"]
+    if os.path.exists(out_path):
+        for binary in expected_outputs:
+            p = os.path.join(out_path, binary)
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
-    # ANSI color helpers (local scope)
-    _G  = "\033[92m"    # green
-    _Y  = "\033[93m"    # yellow
-    _C  = "\033[96m"    # cyan
-    _M  = "\033[95m"    # magenta
-    _R  = "\033[0m"     # reset
-    _B  = "\033[1m"     # bold
-    _RE = "\033[91m"    # red
+    # Record the build start time
+    build_start_time = time.time()
 
-    while True:
-        arch  = config_dict.get("CONFIG_MCU", "Unknown").replace('"', '')
-        model = derived_mcu if derived_mcu else "Unknown"
-        flash = config_dict.get("CONFIG_FLASH_START", "0x0")
-        comm  = "USB" if config_dict.get("CONFIG_USB") == "y" else \
-               "CAN" if config_dict.get("CONFIG_CANBUS") == "y" else \
-               "UART" if config_dict.get("CONFIG_SERIAL") == "y" else \
-               "SPI" if config_dict.get("CONFIG_SPI") == "y" else "Unknown"
+    # ── Build-mode banner: shown once at the start of every compile run ──
+    print_build_mode_banner()
 
-        _SEP = "═" * 47
-
-        def _fw_row(label, value):
-            pad = " " * max(0, 25 - len(label))
-            return f"  {_B}{_C}{label}{_R}{pad}: {_Y}{value}{_R}"
-
-        print(f"\n  {_C}{_SEP}{_R}")
-        print(f"  {_B}{_M}  {t('builder.summary_title')}{_R}")
-        print(f"  {_C}{_SEP}{_R}")
-        print(_fw_row(t("builder.architecture"),           arch.upper()))
-        print(_fw_row(t("builder.processor"),              model.upper()))
-        print(_fw_row(t("builder.bootloader"),             format_flash(flash)))
-        print(_fw_row(t("builder.comm_interface"),         comm))
-
-        clock = config_dict.get("CONFIG_CLOCK_FREQ")
-        if clock:
-            print(_fw_row(t("builder.clock"), f"{int(clock)//1000000} MHz"))
-
-        print(_fw_row(t("builder.usb_path"),    mcu_path if mcu_path else t("builder.not_detected")))
-        print(f"  {_C}{_SEP}{_R}\n")
-
-        choices = [
-            t("builder.compile_now"),
-            t("builder.edit_arch"),
-            t("builder.edit_proc"),
-            t("builder.edit_boot"),
-            t("builder.edit_comm"),
-        ]
-        if clock:
-            choices.append(t("builder.edit_clock"))
-        choices.append(t("builder.abort"))
-
-        ans = questionary.select(t("builder.config_correct"), choices=choices, style=custom_style).ask()
-
-        if ans == t("builder.compile_now"):
-            break
-        elif ans == t("builder.abort") or ans is None:
-            return {"status": "error", "message": t("builder.compilation_aborted")}
-        elif ans == t("builder.edit_arch"):
-            new_arch = questionary.text(t("builder.enter_arch"), default=arch, style=custom_style).ask()
-            if new_arch: config_dict["CONFIG_MCU"] = f'"{new_arch}"'
-        elif ans == t("builder.edit_proc"):
-            new_model = questionary.text(t("builder.enter_proc"), default=model, style=custom_style).ask()
-            if new_model: derived_mcu = new_model
-        elif ans == t("builder.edit_boot"):
-            opts = [
-                f"{t('builder.boot_no')} (0x0)", f"{t('builder.boot_8k')} (0x2000)", f"{t('builder.boot_16k')} (0x4000)",
-                f"{t('builder.boot_28k')} (0x7000)", f"{t('builder.boot_32k')} (0x8000)", f"{t('builder.boot_64k')} (0x10000)",
-                f"{t('builder.boot_128k')} (0x20000)", t("builder.enter_manual")
-            ]
-            f_ans = questionary.select(t("builder.select_boot"), choices=opts, style=custom_style).ask()
-            if f_ans == t("builder.enter_manual"):
-                f_ans = questionary.text(t("builder.enter_hex"), default=flash, style=custom_style).ask()
-                if f_ans: config_dict["CONFIG_FLASH_START"] = f_ans
-            elif f_ans:
-                config_dict["CONFIG_FLASH_START"] = f_ans.split(" (")[1].replace(")", "")
-        elif ans == t("builder.edit_comm"):
-            c_ans = questionary.select(t("builder.select_interface"), choices=["USB", "UART", "CAN", "SPI"], style=custom_style).ask()
-            if c_ans:
-                config_dict["CONFIG_USB"]    = "y" if c_ans == "USB"  else "n"
-                config_dict["CONFIG_SERIAL"] = "y" if c_ans == "UART" else "n"
-                config_dict["CONFIG_CANBUS"] = "y" if c_ans == "CAN"  else "n"
-                config_dict["CONFIG_SPI"]    = "y" if c_ans == "SPI"  else "n"
-        elif ans == t("builder.edit_clock"):
-            clk = questionary.text(t("builder.enter_clock"), default=clock, style=custom_style).ask()
-            if clk: config_dict["CONFIG_CLOCK_FREQ"] = clk
-    # ──────────────────────────────────────────────────────────────
-
-        
     # 2. Generate minimal .config
     success, msg = generate_firmware_config(config_dict, klipper_path)
     if not success:
          return {"status": "error", "message": msg}
 
+    # Resolve the correct make binary. On a real system (Pi) this resolves
+    # correctly via PATH. In Docker, the mock make at /usr/local/bin/make
+    # intercepts calls — which is the intended dev-mode behaviour.
+    _make = "make"
+
     try:
         # 3. Resolve full configuration with olddefconfig
         subprocess.run(
-            ["make", "olddefconfig"],
+            [_make, "olddefconfig"],
             cwd=klipper_path,
             check=True,
             capture_output=True,
@@ -145,19 +76,19 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
         
         # 5. Clean and Compile
         subprocess.run(
-            ["make", "clean"],
+            [_make, "clean"],
             cwd=klipper_path,
             check=True,
             capture_output=True,
             text=True
         )
-        
-        build_cmd = ["make"]
+
+        build_cmd = [_make]
         try:
             nproc = subprocess.check_output(["nproc"]).decode().strip()
             build_cmd.append(f"-j{nproc}")
         except Exception:
-            pass # Fallback if nproc is not available
+            pass  # Fallback if nproc is not available
 
         subprocess.run(
             build_cmd,
@@ -166,25 +97,67 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
             capture_output=True,
             text=True
         )
+
+        # After compile: show mock warning if applicable
+        print_mock_warning()
             
-        # 6. Locate output artifact and copy
-        out_path = os.path.join(klipper_path, "out")
-        expected_outputs = ["klipper.bin", "klipper.uf2", "klipper.elf.hex"]
-        
+        # 6. Locate output artifact, verify its timestamp is fresh, and copy
         os.makedirs(output_dir, exist_ok=True)
             
-        for binary in expected_outputs:
+        # Determine the expected output artifact based on the CONFIG_MCU architecture
+        # We try to read CONFIG_MCU from the generated .config file first, falling back to config_dict
+        mcu_arch = ""
+        config_path = os.path.expanduser(os.path.join(klipper_path, ".config"))
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("CONFIG_MCU="):
+                            mcu_arch = line.split("=", 1)[1].strip().replace('"', '')
+                            break
+            except Exception:
+                pass
+        
+        if not mcu_arch and config_dict:
+            mcu_arch = config_dict.get("CONFIG_MCU", "").replace('"', '').strip()
+
+        # If the architecture is unrecognized or missing, fall back to the heuristic sequential scan
+        if mcu_arch == "avr":
+            target_binaries = ["klipper.elf.hex"]
+        elif mcu_arch == "rp2040":
+            target_binaries = ["klipper.uf2"]
+        elif mcu_arch in ("stm32", "lpc176x", "esp32"):
+            target_binaries = ["klipper.bin"]
+        else:
+            target_binaries = expected_outputs
+
+        for binary in target_binaries:
             p = os.path.join(out_path, binary)
             if os.path.exists(p):
-                dest = os.path.join(output_dir, binary)
-                shutil.copy2(p, dest)
-                return {
-                    "status": "success",
-                    "mcu": derived_mcu,
-                    "firmware": binary,
-                    "path": dest
-                }
-                
+                # Check modification time to guarantee it was compiled during this run
+                # 2-second buffer for file system time resolution tolerances
+                if os.path.getmtime(p) >= (build_start_time - 2.0):
+                    dest = os.path.join(output_dir, binary)
+                    shutil.copy2(p, dest)
+
+                    # ── Firmware size gate ─────────────────────────────────
+                    # Emit a warning (not a failure) when the artifact is
+                    # suspiciously small — the centralized threshold lives in
+                    # build_mode.FIRMWARE_MINIMUM_SIZE_BYTES.
+                    artifact_size = os.path.getsize(dest)
+                    size_warning = artifact_size < FIRMWARE_MINIMUM_SIZE_BYTES
+                    if size_warning:
+                        print_size_warning(dest, artifact_size)
+
+                    return {
+                        "status": "success",
+                        "mcu": derived_mcu,
+                        "firmware": binary,
+                        "path": dest,
+                        "size_warning": size_warning,
+                        "size_bytes": artifact_size,
+                    }
+
         return {"status": "error", "message": t("builder.no_binary")}
         
     except subprocess.CalledProcessError as e:

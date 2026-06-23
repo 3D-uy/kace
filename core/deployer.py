@@ -21,9 +21,10 @@ def _require_paramiko():
         print("\033[93m[*] SSH support requires the 'paramiko' library.\033[0m")
         print("\033[93m[*] Downloading and installing (this may take a moment)...\033[0m")
         try:
-            # Use check_output instead of check_call to capture errors silently on success,
-            # but show them on failure.
-            pip_cmd = [sys.executable, "-m", "pip", "install", "paramiko==3.4.0"]
+            # Locate requirements-ssh.txt relative to this file to enforce hash verification
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            req_path = os.path.abspath(os.path.join(current_dir, "..", "requirements-ssh.txt"))
+            pip_cmd = [sys.executable, "-m", "pip", "install", "-r", req_path, "--require-hashes"]
             if platform.system() != "Windows":
                 pip_cmd.append("--break-system-packages")
             subprocess.check_output(
@@ -31,7 +32,7 @@ def _require_paramiko():
                 stderr=subprocess.STDOUT
             )
             import paramiko  # noqa: PLC0415
-            print("\033[92m[✔] paramiko installed successfully.\033[0m\n")
+            print("\033[92m[OK] paramiko installed successfully.\033[0m\n")
             return paramiko
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8', errors='ignore') if e.output else ""
@@ -53,21 +54,100 @@ def _require_paramiko():
             return None
 
 
+class _InteractiveHostKeyPolicy:
+    """Paramiko MissingHostKeyPolicy that asks the user before connecting.
+
+    WarningPolicy prints a warning and proceeds silently — the user has no
+    chance to abort. This policy shows the key fingerprint and requires an
+    explicit yes before the connection is made.
+
+    On acceptance the key is saved to ~/.ssh/known_hosts so the prompt
+    only appears once per host (standard SSH behaviour).
+    """
+
+    def missing_host_key(self, client, hostname, key):
+        import questionary
+        from core.style import custom_style
+
+        algo = key.get_name()
+        # Format fingerprint as colon-separated hex pairs (e.g. ab:cd:ef:...)
+        raw = key.get_fingerprint()
+        fingerprint = ':'.join(f'{b:02x}' for b in raw)
+
+        print(f"\n\033[93m[!] Unknown host key for {hostname}\033[0m")
+        print(f"    Algorithm  : {algo}")
+        print(f"    Fingerprint: {fingerprint}")
+        print(f"\033[93m    Verify this fingerprint matches your Pi before continuing.\033[0m\n")
+
+        trust = questionary.confirm(
+            f"Trust and connect to {hostname}?",
+            default=False,
+            style=custom_style,
+        ).ask()
+
+        if not trust:
+            # Raising SSHException aborts the connection cleanly
+            paramiko = _require_paramiko()
+            raise paramiko.SSHException(
+                f"Connection to {hostname} rejected — unknown host key not trusted."
+            )
+
+        # Save to known_hosts so the prompt doesn't repeat next time
+        client.get_host_keys().add(hostname, algo, key)
+        try:
+            known_hosts = os.path.expanduser("~/.ssh/known_hosts")
+            client.save_host_keys(known_hosts)
+        except Exception:
+            pass  # Non-fatal — key is still trusted for this session
+
+
 def deploy_config(user_data):
     """Deploys the generated printer.cfg to the Klipper host via SSH/SCP."""
+    # Wipes password from user_data immediately to reduce the credential exposure window
+    password = user_data.pop('password', '')
+    password_for_reconnect = password
     paramiko = _require_paramiko()
     if paramiko is None:
         return  # error already printed by _require_paramiko
 
+    # BUG-007: Verify the config file exists locally before attempting upload.
+    # sftp.put() raises a cryptic FileNotFoundError that the broad except below
+    # would swallow without telling the user the real cause.
+    cfg_path = os.path.expanduser('~/kace/printer.cfg')
+    if not os.path.isfile(cfg_path):
+        print(f"\033[91m[!] Deployment aborted: printer.cfg not found at {cfg_path}\033[0m")
+        print("\033[93m    Run 'Generate new config' first to create the file.\033[0m")
+        return
+
+    # RES-01 fix: declare handles as None so the finally block can safely test
+    # whether each resource was successfully created before attempting to close it.
+    # This prevents a connect() failure from trying to close an sftp that was
+    # never opened, and guarantees cleanup on every exception path.
+    ssh = None
+    sftp = None
+    printer_backup_created = False
+    macros_backup_created = False
+    deployed_successfully = False
+    mr_ok = False
+    host = user_data.get('host', '')
+    port = 7125
+    dest_file = ""
+    dest_macros = ""
+    macros_uploaded = False
+
     try:
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # UNSAFE-002: WarningPolicy warns the user on unknown host keys instead
+        # of silently accepting them (AutoAddPolicy is MITM-vulnerable).
+        # Known hosts are still loaded from ~/.ssh/known_hosts for verification.
+        ssh.load_system_host_keys()
+        ssh.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
 
         print(f"Connecting to {user_data['host']}...")
         ssh.connect(
             user_data['host'],
             username=user_data['user'],
-            password=user_data['password']
+            password=password
         )
 
         sftp = ssh.open_sftp()
@@ -83,14 +163,242 @@ def deploy_config(user_data):
             dest_file = posixpath.join(dest.rstrip('/'), 'printer.cfg')
         else:
             dest_file = dest
+
+        # Check if remote printer.cfg exists for backup
+        try:
+            sftp.stat(dest_file)
+            sftp.rename(dest_file, dest_file + ".bak")
+            printer_backup_created = True
+        except FileNotFoundError:
+            # File doesn't exist, no backup needed
+            pass
+        except Exception as e:
+            print(f"\033[93mWarning: Failed to backup remote printer.cfg: {e}\033[0m")
+
+        # Check if remote macros.cfg exists for backup
+        macros_path = os.path.expanduser('~/kace/macros.cfg')
+        dest_macros = posixpath.join(posixpath.dirname(dest_file), 'macros.cfg')
+        if os.path.exists(macros_path):
+            try:
+                sftp.stat(dest_macros)
+                sftp.rename(dest_macros, dest_macros + ".bak")
+                macros_backup_created = True
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                print(f"\033[93mWarning: Failed to backup remote macros.cfg: {e}\033[0m")
+
+        # Upload printer.cfg
         print(f"Uploading printer.cfg to {dest_file}...")
-        cfg_path = os.path.expanduser('~/kace/printer.cfg')
         sftp.put(cfg_path, dest_file)
 
-        sftp.close()
-        ssh.close()
+        # Upload macros.cfg if it exists
+        if os.path.exists(macros_path):
+            print(f"Uploading macros.cfg to {dest_macros}...")
+            sftp.put(macros_path, dest_macros)
+            macros_uploaded = True
+
+        # Trigger restart via Moonraker API if available, else via SSH
+        from core.moonraker import check_moonraker, check_klipper_ready, restart_klipper_service, verify_remote_file_exists
+        
+        mr_ok, _ = check_moonraker(host, port)
+        if mr_ok:
+            print("\033[96m[*]\033[0m Restarting Klipper via Moonraker API...")
+            restart_klipper_service(host, port)
+        else:
+            print("\033[96m[*]\033[0m Restarting Klipper via SSH command...")
+            ssh.exec_command(
+                "sudo -n systemctl restart klipper || systemctl --user restart klipper || systemctl restart klipper",
+                timeout=10
+            )
+
+        # ── Verification Loop ──────────────────────────────────────
+        print("\033[96m[*]\033[0m Verifying Klipper startup status...")
+        import time
+        verified = False
+        err_msg = ""
+        
+        for attempt in range(10):
+            time.sleep(1)
+            if mr_ok:
+                ready_ok, ready_msg = check_klipper_ready(host, port)
+                files_exist = verify_remote_file_exists(host, port, "printer.cfg")
+                if macros_uploaded:
+                    files_exist = files_exist and verify_remote_file_exists(host, port, "macros.cfg")
+                if ready_ok and files_exist:
+                    verified = True
+                    break
+                else:
+                    err_msg = ready_msg if not ready_ok else "Uploaded config files missing on server"
+            else:
+                # Fallback to systemd checks over SSH — use sudo -n to avoid password hangs
+                _, stdout_active, _ = ssh.exec_command(
+                    "sudo -n systemctl is-active klipper || systemctl --user is-active klipper || systemctl is-active klipper",
+                    timeout=10
+                )
+                active_status = stdout_active.read().decode("utf-8").strip()
+                
+                # Check if file exists via SFTP
+                files_exist = True
+                try:
+                    sftp.stat(dest_file)
+                    if macros_uploaded:
+                        sftp.stat(dest_macros)
+                except Exception:
+                    files_exist = False
+                    
+                if active_status == "active" and files_exist:
+                    verified = True
+                    break
+                else:
+                    err_msg = f"Klipper status is '{active_status}'"
+                    if not files_exist:
+                        err_msg += " (uploaded files missing on remote)"
+
+        if verified:
+            print("\033[92m[OK] Post-deployment verification successful! Klipper is running.\033[0m")
+            deployed_successfully = True
+            # Cleanup remote backups
+            if printer_backup_created:
+                try:
+                    sftp.remove(dest_file + ".bak")
+                except Exception:
+                    pass
+            if macros_backup_created:
+                try:
+                    sftp.remove(dest_macros + ".bak")
+                except Exception:
+                    pass
+        else:
+            print(f"\033[91m[!] Verification FAILED: {err_msg}\033[0m")
+            
+            # Print failed status and journalctl logs
+            if not mr_ok:
+                _, stdout_failed, _ = ssh.exec_command(
+                    "sudo -n systemctl is-failed klipper || systemctl --user is-failed klipper || systemctl is-failed klipper",
+                    timeout=10
+                )
+                failed_status = stdout_failed.read().decode("utf-8").strip()
+                print(f"Klipper systemd failed status: {failed_status}")
+                
+                print("\033[93m[!] Fetching recent Klipper logs via journalctl...\033[0m")
+                _, stdout_journal, _ = ssh.exec_command(
+                    "sudo -n journalctl -u klipper -n 50 --no-pager || journalctl --user -u klipper -n 50 --no-pager || journalctl -u klipper -n 50 --no-pager",
+                    timeout=15
+                )
+                journal_logs = stdout_journal.read().decode("utf-8")
+                print(journal_logs)
+
+            raise RuntimeError(f"Post-deployment verification failed: {err_msg}")
+
+    except paramiko.AuthenticationException as e:
+        print(f"\033[91mDeployment failed: Authentication error — check username and password. Details: {e}\033[0m")
+    except TimeoutError as e:
+        print(f"\033[91mDeployment failed: Connection timed out — is the Pi powered on and reachable? Details: {e}\033[0m")
+    except OSError as e:
+        print(f"\033[91mDeployment failed: Network error — {e}\033[0m")
     except Exception as e:
         print(f"\033[91mDeployment failed: {e}\033[0m")
+    finally:
+        # Perform rollback if backups exist and deployment wasn't successful
+        if (printer_backup_created or macros_backup_created) and not deployed_successfully:
+            print("\033[93m[!] Initiating automatic rollback of configurations...\033[0m")
+            
+            # Check if SFTP session is still alive
+            sftp_alive = False
+            if sftp is not None:
+                try:
+                    sftp.stat(dest_file or ".")
+                    sftp_alive = True
+                except Exception:
+                    pass
+
+            if not sftp_alive:
+                print("\033[93m[!] SSH/SFTP connection is dead. Attempting automatic reconnection for rollback...\033[0m")
+                try:
+                    if sftp is not None:
+                        try:
+                            sftp.close()
+                        except Exception:
+                            pass
+                    if ssh is not None:
+                        try:
+                            ssh.close()
+                        except Exception:
+                            pass
+                    
+                    ssh = paramiko.SSHClient()
+                    ssh.load_system_host_keys()
+                    ssh.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
+                    ssh.connect(
+                        user_data['host'],
+                        username=user_data['user'],
+                        password=password_for_reconnect,
+                        timeout=10
+                    )
+                    sftp = ssh.open_sftp()
+                    print("\033[92m[OK] Reconnection successful. Proceeding with rollback...\033[0m")
+                except Exception as reconnect_err:
+                    print(f"\033[91m[!] Reconnection failed: {reconnect_err}. Automatic rollback aborted.\033[0m")
+                    sftp = None
+
+            if sftp is not None:
+                if printer_backup_created:
+                    try:
+                        sftp.remove(dest_file)
+                    except Exception:
+                        pass
+                    try:
+                        sftp.rename(dest_file + ".bak", dest_file)
+                        print("[OK] Restored printer.cfg")
+                    except Exception as e:
+                        print(f"Failed to restore printer.cfg from backup: {e}")
+                if macros_backup_created:
+                    try:
+                        sftp.remove(dest_macros)
+                    except Exception:
+                        pass
+                    try:
+                        sftp.rename(dest_macros + ".bak", dest_macros)
+                        print("[OK] Restored macros.cfg")
+                    except Exception as e:
+                        print(f"Failed to restore macros.cfg from backup: {e}")
+                        
+                # Restart Klipper to restore configuration state after rollback
+                if mr_ok:
+                    try:
+                        restart_klipper_service(host, port)
+                    except Exception:
+                        try:
+                            ssh.exec_command(
+                                "sudo -n systemctl restart klipper || systemctl --user restart klipper || systemctl restart klipper",
+                                timeout=10
+                            )
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        ssh.exec_command(
+                            "sudo -n systemctl restart klipper || systemctl --user restart klipper || systemctl restart klipper",
+                            timeout=10
+                        )
+                    except Exception:
+                        pass
+                print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")
+
+        # Guarantee socket and SFTP channel release on every code path.
+        # Inner try/except guards prevent a broken close() from masking the
+        # original exception that already fired in the except branches above.
+        if sftp is not None:
+            try:
+                sftp.close()
+            except Exception:
+                pass
+        if ssh is not None:
+            try:
+                ssh.close()
+            except Exception:
+                pass
 
 
 def deploy_usb(user_data, artifact_type="all"):
@@ -102,10 +410,26 @@ def deploy_usb(user_data, artifact_type="all"):
         name_prompt = "Configuration (printer.cfg)" if artifact_type == "config" else \
                       "Firmware (klipper.bin/.uf2)" if artifact_type == "firmware" else "Configuration and Firmware"
                       
-        dest = questionary.text(
-            f"Enter USB/SD Card mount path for {name_prompt} (e.g. D:\\ or /media/usb):",
-            style=custom_style
-        ).ask()
+        is_non_windows = platform.system() != "Windows"
+        is_docker = os.path.exists('/.dockerenv') or os.environ.get('KACE_DOCKER') == '1'
+        
+        while True:
+            dest = questionary.text(
+                f"Enter USB/SD Card mount path for {name_prompt} (e.g. D:\\ or /media/usb):",
+                style=custom_style
+            ).ask()
+            
+            if not dest:
+                return
+                
+            if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
+                if is_docker:
+                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not accessible inside Docker.\033[0m")
+                    print("\033[93m        To write to your Windows machine, please use /workspace (e.g., /workspace/outputs).\033[0m\n")
+                else:
+                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not supported on non-Windows platforms.\033[0m\n")
+                continue
+            break
         
         if not dest or not os.path.isdir(dest):
             print(f"\033[91mDeployment failed: Invalid path or directory does not exist: {dest}\033[0m")
@@ -119,14 +443,28 @@ def deploy_usb(user_data, artifact_type="all"):
                 print(f"Copying printer.cfg to {dest}...")
                 shutil.copy2(cfg_path, os.path.join(dest, 'printer.cfg'))
                 success = True
+            
+            # Copy macros.cfg if it exists
+            macros_path = os.path.expanduser('~/kace/macros.cfg')
+            if os.path.exists(macros_path):
+                print(f"Copying macros.cfg to {dest}...")
+                shutil.copy2(macros_path, os.path.join(dest, 'macros.cfg'))
         
         if artifact_type in ["firmware", "all"]:
-            for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
-                firmware_bin = os.path.expanduser(f'~/kace/{ext}')
-                if os.path.exists(firmware_bin):
-                    print(f"Copying firmware {ext} to {dest}...")
-                    shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                    success = True
+            fw_path = user_data.get("firmware_path")
+            if fw_path and os.path.exists(os.path.expanduser(fw_path)):
+                firmware_bin = os.path.expanduser(fw_path)
+                ext = os.path.basename(firmware_bin)
+                print(f"Copying firmware {ext} to {dest}...")
+                shutil.copy2(firmware_bin, os.path.join(dest, ext))
+                success = True
+            else:
+                for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
+                    firmware_bin = os.path.expanduser(f'~/kace/{ext}')
+                    if os.path.exists(firmware_bin):
+                        print(f"Copying firmware {ext} to {dest}...")
+                        shutil.copy2(firmware_bin, os.path.join(dest, ext))
+                        success = True
                     
         if success:
             print("\033[92mUSB Deployment Successful!\033[0m")
@@ -145,13 +483,26 @@ def deploy_local(user_data, artifact_type="all"):
         name_prompt = "Configuration (printer.cfg)" if artifact_type == "config" else \
                       "Firmware (klipper.bin/.uf2)" if artifact_type == "firmware" else "Configuration and Firmware"
                       
-        dest = questionary.text(
-            f"Enter local destination folder path for {name_prompt} (e.g. C:\\3DPrinter or ~/Documents):",
-            style=custom_style
-        ).ask()
+        is_non_windows = platform.system() != "Windows"
+        is_docker = os.path.exists('/.dockerenv') or os.environ.get('KACE_DOCKER') == '1'
         
-        if not dest:
-            return
+        while True:
+            dest = questionary.text(
+                f"Enter local destination folder path for {name_prompt} (e.g. C:\\3DPrinter or ~/Documents):",
+                style=custom_style
+            ).ask()
+            
+            if not dest:
+                return
+
+            if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
+                if is_docker:
+                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not accessible inside Docker.\033[0m")
+                    print("\033[93m        To write to your Windows machine, please use /workspace (e.g., /workspace/outputs).\033[0m\n")
+                else:
+                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not supported on non-Windows platforms.\033[0m\n")
+                continue
+            break
 
         dest = os.path.expanduser(dest)
         
@@ -166,14 +517,28 @@ def deploy_local(user_data, artifact_type="all"):
                 print(f"Copying printer.cfg to {dest}...")
                 shutil.copy2(cfg_path, os.path.join(dest, 'printer.cfg'))
                 success = True
+            
+            # Copy macros.cfg if it exists
+            macros_path = os.path.expanduser('~/kace/macros.cfg')
+            if os.path.exists(macros_path):
+                print(f"Copying macros.cfg to {dest}...")
+                shutil.copy2(macros_path, os.path.join(dest, 'macros.cfg'))
         
         if artifact_type in ["firmware", "all"]:
-            for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
-                firmware_bin = os.path.expanduser(f'~/kace/{ext}')
-                if os.path.exists(firmware_bin):
-                    print(f"Copying firmware {ext} to {dest}...")
-                    shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                    success = True
+            fw_path = user_data.get("firmware_path")
+            if fw_path and os.path.exists(os.path.expanduser(fw_path)):
+                firmware_bin = os.path.expanduser(fw_path)
+                ext = os.path.basename(firmware_bin)
+                print(f"Copying firmware {ext} to {dest}...")
+                shutil.copy2(firmware_bin, os.path.join(dest, ext))
+                success = True
+            else:
+                for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
+                    firmware_bin = os.path.expanduser(f'~/kace/{ext}')
+                    if os.path.exists(firmware_bin):
+                        print(f"Copying firmware {ext} to {dest}...")
+                        shutil.copy2(firmware_bin, os.path.join(dest, ext))
+                        success = True
                     
         if success:
             print(f"\033[92mSuccessfully saved to {dest}!\033[0m")
@@ -255,6 +620,9 @@ def deploy_moonraker(user_data):
         upload_printer_cfg,
         restart_firmware,
         restart_klipper_service,
+        download_printer_cfg,
+        check_klipper_ready,
+        verify_remote_file_exists,
     )
 
     # ── Step 1: Gather connection details ─────────────────────────
@@ -285,13 +653,24 @@ def deploy_moonraker(user_data):
         style=custom_style,
     ).ask() or ""
 
+    # Warn if using plain HTTP with an API key
+    if api_key and host.strip().lower().startswith("http://"):
+        warning_ok = questionary.confirm(
+            t("moonraker.http_warning"),
+            default=False,
+            style=custom_style,
+        ).ask()
+        if warning_ok is None or not warning_ok:
+            print(f"\n\033[91m[!] {t('moonraker.http_warning_cancelled')}\033[0m")
+            return
+
     # Persist for potential SSH fallback later
     user_data["moonraker_host"] = host
     user_data["moonraker_port"] = port
 
     # ── Step 2: Probe reachability ────────────────────────────────
     print(f"\n\033[96m[*]\033[0m {t('moonraker.connecting', host=host, port=port)}")
-    ok, info = check_moonraker(host, port)
+    ok, info = check_moonraker(host, port, api_key=api_key)
 
     if not ok:
         print(f"\033[91m[!] {t('moonraker.unreachable', host=host, port=port, error=info)}\033[0m")
@@ -303,46 +682,158 @@ def deploy_moonraker(user_data):
         ).ask()
         if fallback:
             user_data['host']      = host
-            user_data['user']      = questionary.text(t("kace.ssh_user_prompt"), default="pi", style=custom_style).ask()
-            user_data['password']  = questionary.password(t("kace.ssh_pass_prompt"), style=custom_style).ask()
-            user_data['dest_path'] = questionary.text(t("kace.ssh_dest_prompt"), default="~/printer_data/config/", style=custom_style).ask()
-            if user_data['host'] and user_data['user'] and user_data['dest_path']:
+            ssh_user = questionary.text(t("kace.ssh_user_prompt"), default="pi", style=custom_style).ask()
+            ssh_pass = questionary.password(t("kace.ssh_pass_prompt"), style=custom_style).ask()
+            ssh_dest = questionary.text(t("kace.ssh_dest_prompt"), default="~/printer_data/config/", style=custom_style).ask()
+            if user_data['host'] and ssh_user and ssh_dest:
+                user_data['user']      = ssh_user
+                user_data['dest_path'] = ssh_dest
+                user_data['password']  = ssh_pass   # deploy_config pops this immediately
                 deploy_config(user_data)
+            # ssh_pass goes out of scope here whether deploy ran or not
         return
 
-    print(f"\033[92m[✔] {t('moonraker.connected', version=info)}\033[0m")
+    print(f"\033[92m[OK] {t('moonraker.connected', version=info)}\033[0m")
 
-    # ── Step 3: Upload printer.cfg ────────────────────────────────
-    print(f"\033[96m[*]\033[0m {t('moonraker.uploading')}")
-    cfg_path = os.path.expanduser("~/kace/printer.cfg")
-    ok, result = upload_printer_cfg(host, port, cfg_path)
+    # ── Step 3: Backup existing configs ────────────────────────────
+    printer_cfg_backup = None
+    macros_cfg_backup = None
+    
+    if verify_remote_file_exists(host, port, "printer.cfg", api_key=api_key):
+        dl_ok, dl_data = download_printer_cfg(host, port, "printer.cfg", api_key=api_key)
+        if dl_ok:
+            printer_cfg_backup = dl_data
+            
+    if verify_remote_file_exists(host, port, "macros.cfg", api_key=api_key):
+        dl_ok, dl_data = download_printer_cfg(host, port, "macros.cfg", api_key=api_key)
+        if dl_ok:
+            macros_cfg_backup = dl_data
 
-    if not ok:
-        print(f"\033[91m[!] {t('moonraker.upload_fail', error=result)}\033[0m")
-        return
+    deployed_successfully = False
+    restart_choice = "skip"
+    macros_uploaded = False
 
-    print(f"\033[92m[✔] {t('moonraker.upload_ok')}\033[0m")
+    try:
+        # ── Step 4: Upload printer.cfg & macros.cfg ────────────────────────────────
+        print(f"\033[96m[*]\033[0m {t('moonraker.uploading')}")
+        cfg_path = os.path.expanduser("~/kace/printer.cfg")
+        ok, result = upload_printer_cfg(host, port, cfg_path, api_key=api_key)
 
-    # ── Step 4: Restart prompt ────────────────────────────────────
-    restart_choice = questionary.select(
-        t("moonraker.restart_prompt"),
-        choices=[
-            {"name": t("moonraker.restart_firmware"), "value": "firmware"},
-            {"name": t("moonraker.restart_service"),  "value": "service"},
-            {"name": t("moonraker.restart_skip"),     "value": "skip"},
-        ],
-        style=custom_style,
-    ).ask()
+        if not ok:
+            raise RuntimeError(t('moonraker.upload_fail', error=result))
 
-    if restart_choice == "firmware":
-        ok, msg = restart_firmware(host, port)
-    elif restart_choice == "service":
-        ok, msg = restart_klipper_service(host, port)
-    else:
-        return   # user skipped
+        # Upload macros.cfg if it exists
+        macros_path = os.path.expanduser("~/kace/macros.cfg")
+        if os.path.exists(macros_path):
+            print(f"\033[96m[*]\033[0m Uploading macros.cfg...")
+            ok_m, res_m = upload_printer_cfg(host, port, macros_path, api_key=api_key)
+            if ok_m:
+                macros_uploaded = True
+            else:
+                print(f"\033[91m[!] Failed to upload macros.cfg: {res_m}\033[0m")
 
-    if ok:
-        print(f"\033[92m[✔] {t('moonraker.restart_ok')}\033[0m")
-    else:
-        print(f"\033[91m[!] {t('moonraker.restart_fail', error=msg)}\033[0m")
+        print(f"\033[92m[OK] {t('moonraker.upload_ok')}\033[0m")
 
+        # ── Step 5: Restart prompt ────────────────────────────────────
+        restart_choice = questionary.select(
+            t("moonraker.restart_prompt"),
+            choices=[
+                {"name": t("moonraker.restart_firmware"), "value": "firmware"},
+                {"name": t("moonraker.restart_service"),  "value": "service"},
+                {"name": t("moonraker.restart_skip"),     "value": "skip"},
+            ],
+            style=custom_style,
+        ).ask()
+
+        if restart_choice is None:
+            restart_choice = "skip"
+
+        if restart_choice == "firmware":
+            restart_ok, restart_msg = restart_firmware(host, port, api_key=api_key)
+        elif restart_choice == "service":
+            restart_ok, restart_msg = restart_klipper_service(host, port, api_key=api_key)
+        else:
+            restart_ok, restart_msg = True, "skipped"
+
+        if restart_ok:
+            if restart_choice != "skip":
+                print(f"\033[92m[OK] {t('moonraker.restart_ok')}\033[0m")
+        else:
+            raise RuntimeError(t('moonraker.restart_fail', error=restart_msg))
+
+        # ── Step 6: Post-Deployment Verification ────────────────────
+        if restart_choice != "skip":
+            print("\033[96m[*]\033[0m Verifying Klipper startup status...")
+            import time
+            verified = False
+            klipper_err = ""
+            
+            for attempt in range(10):
+                time.sleep(1)
+                ready_ok, ready_msg = check_klipper_ready(host, port, api_key=api_key)
+                files_exist = verify_remote_file_exists(host, port, "printer.cfg", api_key=api_key)
+                if macros_uploaded:
+                    files_exist = files_exist and verify_remote_file_exists(host, port, "macros.cfg", api_key=api_key)
+                    
+                if ready_ok and files_exist:
+                    verified = True
+                    break
+                else:
+                    klipper_err = ready_msg if not ready_ok else "Uploaded config files missing on server"
+
+            if verified:
+                print("\033[92m[OK] Post-deployment verification successful! Klipper is Ready.\033[0m")
+                deployed_successfully = True
+            else:
+                raise RuntimeError(f"Verification FAILED: {klipper_err}")
+        else:
+            deployed_successfully = True
+
+    except Exception as e:
+        print(f"\033[91mMoonraker deployment failed: {e}\033[0m")
+    finally:
+        # Perform rollback if backups exist and deployment wasn't successful
+        if (printer_cfg_backup is not None or macros_cfg_backup is not None) and not deployed_successfully:
+            print("\033[93m[!] Initiating automatic rollback of configurations...\033[0m")
+            
+            import tempfile
+            if printer_cfg_backup is not None:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".cfg") as tmp:
+                    tmp.write(printer_cfg_backup)
+                    tmp_name = tmp.name
+                try:
+                    upload_printer_cfg(host, port, tmp_name, filename="printer.cfg", api_key=api_key)
+                    print("[OK] Restored printer.cfg")
+                except Exception as rollback_err:
+                    print(f"Failed to restore printer.cfg from backup: {rollback_err}")
+                finally:
+                    try:
+                        os.remove(tmp_name)
+                    except OSError:
+                        pass
+            
+            if macros_cfg_backup is not None:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".cfg") as tmp:
+                    tmp.write(macros_cfg_backup)
+                    tmp_name = tmp.name
+                try:
+                    upload_printer_cfg(host, port, tmp_name, filename="macros.cfg", api_key=api_key)
+                    print("[OK] Restored macros.cfg")
+                except Exception as rollback_err:
+                    print(f"Failed to restore macros.cfg from backup: {rollback_err}")
+                finally:
+                    try:
+                        os.remove(tmp_name)
+                    except OSError:
+                        pass
+            
+            # Restart Klipper after restoring configuration
+            try:
+                if restart_choice == "firmware":
+                    restart_firmware(host, port, api_key=api_key)
+                else:
+                    restart_klipper_service(host, port, api_key=api_key)
+            except Exception as restart_err:
+                print(f"Failed to restart Klipper during rollback: {restart_err}")
+                
+            print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")

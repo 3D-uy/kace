@@ -119,8 +119,8 @@ class TestCheckMoonraker(unittest.TestCase):
 
 class TestUploadPrinterCfg(unittest.TestCase):
 
-    def _write_tmp_cfg(self, tmp_dir):
-        path = os.path.join(tmp_dir, "printer.cfg")
+    def _write_tmp_cfg(self, tmp_dir, name="printer.cfg"):
+        path = os.path.join(tmp_dir, name)
         with open(path, "w") as f:
             f.write("[printer]\nmax_velocity: 300\n")
         return path
@@ -137,6 +137,36 @@ class TestUploadPrinterCfg(unittest.TestCase):
             ok, result = upload_printer_cfg("mypi", 7125, cfg)
         self.assertTrue(ok)
         self.assertEqual(result, "printer.cfg")
+
+    @patch("urllib.request.urlopen")
+    def test_upload_explicit_filename(self, mock_urlopen):
+        """Specifying an explicit filename should use it in the multipart header."""
+        import tempfile
+        mock_urlopen.return_value = _fake_response(
+            {"result": {"item": {"path": "custom.cfg"}}}
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._write_tmp_cfg(tmp, "printer.cfg")
+            ok, result = upload_printer_cfg("mypi", 7125, cfg, filename="custom.cfg")
+        self.assertTrue(ok)
+        self.assertEqual(result, "custom.cfg")
+        called_req = mock_urlopen.call_args[0][0]
+        self.assertIn(b'filename="custom.cfg"', called_req.data)
+
+    @patch("urllib.request.urlopen")
+    def test_upload_default_basename(self, mock_urlopen):
+        """Omitting filename should default to the file's basename (e.g. macros.cfg)."""
+        import tempfile
+        mock_urlopen.return_value = _fake_response(
+            {"result": {"item": {"path": "macros.cfg"}}}
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._write_tmp_cfg(tmp, "macros.cfg")
+            ok, result = upload_printer_cfg("mypi", 7125, cfg)
+        self.assertTrue(ok)
+        self.assertEqual(result, "macros.cfg")
+        called_req = mock_urlopen.call_args[0][0]
+        self.assertIn(b'filename="macros.cfg"', called_req.data)
 
     @patch("urllib.request.urlopen")
     def test_upload_http_error_returns_false(self, mock_urlopen):

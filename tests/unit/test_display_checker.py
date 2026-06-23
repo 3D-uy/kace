@@ -121,7 +121,7 @@ class TestGetDisplayCompat(unittest.TestCase):
 
     def test_section_lookup_fallback_when_no_printer_match(self):
         """If printer filename doesn't match any profile, falls back to section lookup."""
-        result = get_display_compat("neopixel", printer_filename="printer-voron-0.cfg")
+        result = get_display_compat("t5uid1", printer_filename="printer-generic-custom.cfg")
         self.assertIsNotNone(result)
         self.assertEqual(result["source"], "display_config")
         self.assertEqual(result["status"], "unsupported")
@@ -254,12 +254,20 @@ class TestFallbackDatabase(unittest.TestCase):
 class TestYamlLoadFallback(unittest.TestCase):
     """Verify the module works when displays.yaml is unavailable."""
 
+    def setUp(self):
+        import core.loader
+        core.loader._DISPLAYS_CACHE = None
+
+    def tearDown(self):
+        import core.loader
+        core.loader._DISPLAYS_CACHE = None
+
     def test_module_works_without_yaml(self):
         """Simulate missing YAML by patching open() to raise FileNotFoundError."""
         with patch("builtins.open", side_effect=FileNotFoundError("no file")):
             # Re-import _load_display_db with patched open
             from core import display_checker
-            configs, profiles = display_checker._load_display_db()
+            configs, profiles, matrix, catalog = display_checker._load_display_db()
             self.assertEqual(configs, _DISPLAY_CONFIGS_FALLBACK)
             self.assertEqual(profiles, _PRINTER_PROFILES_FALLBACK)
 
@@ -269,7 +277,7 @@ class TestYamlLoadFallback(unittest.TestCase):
         corrupt_content = "this: {is: [corrupt yaml"
         with patch("builtins.open", return_value=io.StringIO(corrupt_content)):
             from core import display_checker
-            configs, profiles = display_checker._load_display_db()
+            configs, profiles, matrix, catalog = display_checker._load_display_db()
             # Should fall back without raising
             self.assertIsInstance(configs, dict)
             self.assertIsInstance(profiles, dict)

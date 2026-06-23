@@ -1,5 +1,4 @@
 import os
-from .prompts import prompt_communication_interface, prompt_bootloader_offset, prompt_mcu_family
 
 # ── Firmware configuration database ───────────────────────────────────────────
 # Loaded from data/boards.yaml (mcu_firmware section).
@@ -30,7 +29,9 @@ _FW_DB_FALLBACK = [
     {"pattern": "lpc1768",    "arch": "lpc176x", "mach": "LPC176X", "flash_start": "0x4000", "clock_freq": 100000000, "set_mcu_flag": True},
     {"pattern": "lpc176",     "arch": "lpc176x", "mach": "LPC176X", "flash_start": "0x4000", "set_mcu_flag": True},
     # RP2040
-    {"pattern": "rp2040",     "arch": "rp2040",  "mach": "RP2040"},
+    {"pattern": "rp2040",     "arch": "rp2040",  "mach": "RPXXXX"},
+    # ESP32
+    {"pattern": "esp32",      "arch": "esp32",   "mach": "ESP32"},
     # AVR — most specific first
     {"pattern": "atmega2560", "arch": "avr",     "mach": "AVR",     "extra_flag": "CONFIG_MCU_ATMEGA2560"},
     {"pattern": "atmega",     "arch": "avr",     "mach": "AVR"},
@@ -50,15 +51,8 @@ def _load_firmware_db() -> list:
     must appear before generic ones (e.g. stm32f103 before stm32f1).
     """
     try:
-        import yaml
-        _db_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'boards.yaml')
-        _db_path = os.path.normpath(_db_path)
-        
-        if not os.path.exists(_db_path):
-            return _FW_DB_FALLBACK
-            
-        with open(_db_path, 'r', encoding='utf-8') as f:
-            db = yaml.safe_load(f)
+        from core.loader import load_boards_yaml
+        db = load_boards_yaml()
             
         entries = db.get('mcu_firmware', [])
         if not entries:
@@ -87,10 +81,16 @@ def _load_firmware_db() -> list:
         return _FW_DB_FALLBACK
 
 # Module-level cache — loaded once per process
-_FW_DB = _load_firmware_db()
+_FW_DB = None
+
+def _get_fw_db() -> list:
+    global _FW_DB
+    if _FW_DB is None:
+        _FW_DB = _load_firmware_db()
+    return _FW_DB
 
 
-def derive_config(mcu, hint=None):
+def derive_config(mcu, hint=None, flash_start=None):
     """Intelligently build Kconfig parameters for the given MCU string.
 
     Uses the modular hardware database (data/boards.yaml) with a hardcoded
@@ -99,6 +99,8 @@ def derive_config(mcu, hint=None):
     Pattern matching uses first-match-wins substring search, so the database
     must list more-specific patterns before generic ones.
     """
+    from core.exceptions import DerivationAmbiguityError
+
     config = {
         "CONFIG_LOW_LEVEL_OPTIONS": "y"
     }
@@ -108,15 +110,12 @@ def derive_config(mcu, hint=None):
 
     # ── 1. Derive architecture, family and bootloader offset ──────────────────
     if mcu is None:
-        # No MCU detected — prompt the user for the architecture manually
-        arch = prompt_mcu_family()
-        config["CONFIG_MCU"] = f'"{arch}"'
-        if arch != "linux":
-            print("Make sure to manually configure other specific settings like bootloader.")
+        # No MCU detected — raise error to let the caller handle prompt
+        raise DerivationAmbiguityError("mcu_family", ["stm32", "lpc176x", "rp2040", "avr", "linux"])
     else:
         # Find the first matching entry in the database
         matched = None
-        for entry in _FW_DB:
+        for entry in _get_fw_db():
             if entry["pattern"] in mcu:
                 matched = entry
                 break
@@ -142,23 +141,25 @@ def derive_config(mcu, hint=None):
 
         # Bootloader offset:
         #   key absent          → no flash config needed (e.g. rp2040, avr, linux)
-        #   flash_start = null  → ambiguous, prompt the user
+        #   flash_start = null  → ambiguous, raise error
         #   flash_start = "0x0" → explicitly no offset, skip CONFIG_FLASH_START
         #   flash_start = "0xN" → set CONFIG_FLASH_START
         if "flash_start" not in matched:
             pass  # no bootloader configuration needed for this architecture
         elif matched["flash_start"] is None:
-            options = {
-                "No bootloader (0x0)":        "0x0",
-                "8KiB bootloader (0x2000)":   "0x2000",
-                "28KiB bootloader (0x7000)":  "0x7000",
-                "32KiB bootloader (0x8000)":  "0x8000",
-                "64KiB bootloader (0x10000)": "0x10000",
-                "128KiB bootloader (0x20000)":"0x20000",
-            }
-            res = prompt_bootloader_offset(mcu, options)
-            if res != "0x0":
-                config["CONFIG_FLASH_START"] = res
+            if flash_start is not None:
+                if flash_start != "0x0":
+                    config["CONFIG_FLASH_START"] = flash_start
+            else:
+                options = {
+                    "No bootloader (0x0)":        "0x0",
+                    "8KiB bootloader (0x2000)":   "0x2000",
+                    "28KiB bootloader (0x7000)":  "0x7000",
+                    "32KiB bootloader (0x8000)":  "0x8000",
+                    "64KiB bootloader (0x10000)": "0x10000",
+                    "128KiB bootloader (0x20000)":"0x20000",
+                }
+                raise DerivationAmbiguityError("bootloader_offset", options, mcu)
         elif matched["flash_start"] != "0x0":
             config["CONFIG_FLASH_START"] = matched["flash_start"]
 
@@ -175,8 +176,7 @@ def derive_config(mcu, hint=None):
     # ── 2. Derive communication interface ─────────────────────────────────────
     comm = hint
     if not hint or hint not in ["usb", "uart", "can", "spi", "tty"]:
-        ans = prompt_communication_interface(mcu if mcu else "Board")
-        comm = ans.lower() if ans else "usb"
+        raise DerivationAmbiguityError("comm_interface", ["USB", "UART", "CAN", "SPI"], mcu or "Board")
 
     if comm == "usb":
         config["CONFIG_USB"]    = "y"
