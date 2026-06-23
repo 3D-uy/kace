@@ -74,7 +74,7 @@ else
     echo -e "  Cloning KACE (${INSTALL_TAG}) into ${Y}${INSTALL_DIR}${R}..."
     if _git_supports_sparse; then
         git clone --depth 1 --branch "$INSTALL_TAG" --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR" --quiet
-        git -C "$INSTALL_DIR" sparse-checkout set $_SPARSE_DIRS --quiet
+        git -C "$INSTALL_DIR" sparse-checkout set $_SPARSE_DIRS
         echo -e "${G}  ✔ Repository cloned (optimized — tag ${INSTALL_TAG} — docs excluded)${R}"
     else
         git clone --depth 1 --branch "$INSTALL_TAG" "$REPO_URL" "$INSTALL_DIR" --quiet
