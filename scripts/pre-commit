@@ -1,0 +1,64 @@
+#!/usr/bin/env python
+import sys
+import subprocess
+import re
+
+# Reconfigure stdout/stderr to utf-8 to avoid UnicodeEncodeErrors on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+try:
+    files = subprocess.check_output(["git", "diff", "--cached", "--name-only"], text=True).splitlines()
+except Exception as e:
+    print(f"Error running git diff: {e}")
+    sys.exit(0)
+
+errors = 0
+for f in files:
+    try:
+        with open(f, "r", encoding="utf-8") as file_obj:
+            content = file_obj.read()
+    except Exception:
+        continue
+
+    # 1. Check for local path leaks
+    path_patterns = [
+        r"(?i)c:[/\\]users",
+        r"(?i)d:[/\\]open\s+world"
+    ]
+    for pattern in path_patterns:
+        if re.search(pattern, content):
+            print(f"[PRE-COMMIT ERROR] Local path leak detected in '{f}' matching pattern '{pattern}'")
+            errors += 1
+
+    # 2. Check for hardcoded untranslated strings in Python files under core/ or main script
+    if f.endswith(".py") and ("core" in f or f == "kace.py") and "translations.py" not in f:
+        untranslated = [
+            r"\"✓  Continue\"",
+            r"\"⚙  Edit Profile\"",
+            r"\"◀  Back\"",
+            r"\"◀  Back \(discard\)\"",
+            r"\"What would you like to do\?\""
+        ]
+        for pattern in untranslated:
+            if re.search(pattern, content):
+                print(f"[PRE-COMMIT ERROR] Hardcoded string leak detected in '{f}': '{pattern}'")
+                errors += 1
+
+    # 3. Check for kace-dev GitHub repo URL references
+    #    Blocks any URL pointing at the dev staging repo from being committed.
+    #    Docker service names like 'docker-compose run --rm kace-dev' are not
+    #    matched because they don't contain a URL-shaped prefix.
+    kace_dev_url_pattern = r"(github\.com|raw\.githubusercontent\.com)/[^/\s]*?/kace-dev"
+    if re.search(kace_dev_url_pattern, content, re.IGNORECASE):
+        print(f"[PRE-COMMIT ERROR] kace-dev GitHub URL detected in '{f}'. "
+              f"All repo URLs must point to 3D-uy/kace (production).")
+        errors += 1
+
+if errors > 0:
+    print(f"\n[PRE-COMMIT] Rejected! Found {errors} security/i18n leak(s).")
+    sys.exit(1)
