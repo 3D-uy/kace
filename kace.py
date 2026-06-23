@@ -24,6 +24,8 @@ if len(sys.argv) > 1:
     for i, arg in enumerate(sys.argv):
         if arg == "--auto":
             os.environ["KACE_AUTO"] = "1"
+        elif arg == "--real-build":
+            os.environ["KACE_REAL_BUILD"] = "1"
 
 import questionary
 from core.validators import questionary_pin_validator

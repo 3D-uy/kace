@@ -43,6 +43,9 @@ _RE = "\033[91m"   # red
 
 def is_mock_build() -> bool:
     """Return True when the mock make script is active."""
+    if os.environ.get("KACE_REAL_BUILD") == "1":
+        return False
+
     if os.path.exists(_MOCK_MAKE_PATH):
         try:
             with open(_MOCK_MAKE_PATH, "r", encoding="utf-8", errors="ignore") as fh:

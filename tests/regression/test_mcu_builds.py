@@ -1,4 +1,5 @@
 import os
+os.environ["KACE_TESTING"] = "1"
 import shutil
 import subprocess
 import tempfile
