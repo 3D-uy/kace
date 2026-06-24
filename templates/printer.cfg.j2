@@ -208,86 +208,62 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 {%- set bx = user.x_size | int %}
 {%- set by = user.y_size | int %}
 
-# [z_tilt]                                      # --- opcional / optional / opcional ---
-# # ES: Nivelación automática del gantry cuando hay 2 o más motores Z independientes.
-# #     Klipper mueve cada motor Z por separado para inclinar el gantry hasta que quede paralelo a la cama.
-# #     Descomenta esta sección y ejecuta Z_TILT_ADJUST desde la consola de Klipper para usarla.
-# # EN: Automatic gantry leveling when 2 or more independent Z motors are present.
-# #     Klipper adjusts each Z motor individually to tilt the gantry parallel to the bed.
-# #     Uncomment this section and run Z_TILT_ADJUST from the Klipper console to use it.
-# # PT: Nivelamento automático do gantry quando há 2 ou mais motores Z independentes.
-# #     O Klipper move cada motor Z separadamente para inclinar o gantry até ficar paralelo à cama.
-# #     Descomente esta seção e execute Z_TILT_ADJUST no console do Klipper para usá-la.
-# #
-# # ES: IMPORTANTE — z_positions NO son coordenadas de movimiento del nozzle.
-# #     Son la ubicación física (XY) de cada tornillo Z o motor Z en el chasis de la impresora.
-# #     Mide con una regla dónde están los tornillos en relación al origen del eje.
-# #     Los valores pueden estar fuera del área de impresión (números negativos o > posición máxima).
-# # EN: IMPORTANT — z_positions are NOT nozzle travel coordinates.
-# #     They are the physical XY location of each Z screw or Z motor on the printer frame.
-# #     Measure with a ruler where the screws are relative to the axis origin.
-# #     Values may fall outside the print area (negative numbers or > max position).
-# # PT: IMPORTANTE — z_positions NÃO são coordenadas de movimento do bico.
-# #     São a localização física (XY) de cada parafuso Z ou motor Z no chassi da impressora.
-# #     Meça com uma régua onde estão os parafusos em relação à origem do eixo.
-# #     Os valores podem estar fora da área de impressão (números negativos ou > posição máxima).
-# z_positions:                                  # ES: Posición XY física de cada motor/tornillo Z en el frame | EN: Physical XY position of each Z motor/screw on the frame | PT: Posição XY física de cada motor/parafuso Z no frame
+# [z_tilt]                                      # --- optional ---
+# Automatic gantry leveling when 2 or more independent Z motors are present.
+# Klipper adjusts each Z motor individually to tilt the gantry parallel to the bed.
+# Uncomment this section and run Z_TILT_ADJUST from the Klipper console to use it.
+#
+# IMPORTANT — z_positions are NOT nozzle travel coordinates.
+# They are the physical XY location of each Z screw or Z motor on the printer frame.
+# Measure with a ruler where the screws are relative to the axis origin.
+# Values may fall outside the print area (negative numbers or > max position).
+# z_positions:                                  # Physical XY position of each Z motor/screw on the frame
 {%- if user.z_motors | int == 2 %}
-#   -30, {{ by // 2 }}                          # ES: Motor Z izquierdo (ajustar según tu impresora) | EN: Left Z motor (adjust for your printer) | PT: Motor Z esquerdo (ajuste conforme sua impressora)
-#   {{ bx + 30 }}, {{ by // 2 }}               # ES: Motor Z derecho (ajustar según tu impresora) | EN: Right Z motor (adjust for your printer) | PT: Motor Z direito (ajuste conforme sua impressora)
+#   -30, {{ by // 2 }}                          # Left Z motor (adjust for your printer)
+#   {{ bx + 30 }}, {{ by // 2 }}               # Right Z motor (adjust for your printer)
 {%- elif user.z_motors | int == 3 %}
-#   -30, 0                                      # ES: Motor Z frontal izquierdo | EN: Front-left Z motor | PT: Motor Z frontal esquerdo
-#   {{ bx + 30 }}, 0                           # ES: Motor Z frontal derecho | EN: Front-right Z motor | PT: Motor Z frontal direito
-#   {{ bx // 2 }}, {{ by + 30 }}               # ES: Motor Z trasero central | EN: Rear center Z motor | PT: Motor Z traseiro central
+#   -30, 0                                      # Front-left Z motor
+#   {{ bx + 30 }}, 0                           # Front-right Z motor
+#   {{ bx // 2 }}, {{ by + 30 }}               # Rear center Z motor
 {%- else %}
-#   -30, -30                                   # ES: Motor Z frontal izquierdo | EN: Front-left Z motor | PT: Motor Z frontal esquerdo
-#   {{ bx + 30 }}, -30                         # ES: Motor Z frontal derecho | EN: Front-right Z motor | PT: Motor Z frontal direito
-#   {{ bx + 30 }}, {{ by + 30 }}               # ES: Motor Z trasero derecho | EN: Rear-right Z motor | PT: Motor Z traseiro direito
-#   -30, {{ by + 30 }}                         # ES: Motor Z trasero izquierdo | EN: Rear-left Z motor | PT: Motor Z traseiro esquerdo
+#   -30, -30                                   # Front-left Z motor
+#   {{ bx + 30 }}, -30                         # Front-right Z motor
+#   {{ bx + 30 }}, {{ by + 30 }}               # Rear-right Z motor
+#   -30, {{ by + 30 }}                         # Rear-left Z motor
 {%- endif %}
-# points:                                       # ES: Coordenadas de boquilla donde el probe mide. Calculadas por KACE a partir del área alcanzable. | EN: Nozzle coordinates where the probe measures. Calculated by KACE from the reachable area. | PT: Coordenadas do bico onde o probe mede. Calculadas pelo KACE a partir da área alcançável.
+# points:                                       # Nozzle coordinates where the probe measures. Calculated by KACE from the reachable area.
 {%- for pt in user.leveling.z_tilt_points %}
 #   {{ pt[0] | round(1) }}, {{ pt[1] | round(1) }}
 {%- endfor %}
-# speed: 50                                     # ES: Velocidad de desplazamiento entre puntos de medición (mm/s) | EN: Travel speed between probe points (mm/s) | PT: Velocidade de deslocamento entre pontos de medição (mm/s)
-# horizontal_move_z: 5                          # ES: Altura Z de seguridad al moverse entre puntos (mm) | EN: Safe Z height when moving between probe points (mm) | PT: Altura Z de segurança ao mover entre pontos (mm)
-# retries: 5                                    # ES: Número máximo de intentos hasta alcanzar tolerancia | EN: Maximum number of attempts to reach tolerance | PT: Número máximo de tentativas para atingir a tolerância
-# retry_tolerance: 0.0075                       # ES: Diferencia máxima aceptable entre motores Z (mm). Valores típicos: 0.005–0.02 | EN: Maximum acceptable difference between Z motors (mm). Typical values: 0.005–0.02 | PT: Diferença máxima aceitável entre motores Z (mm). Valores típicos: 0.005–0.02
+# speed: 50                                     # Travel speed between probe points (mm/s)
+# horizontal_move_z: 5                          # Safe Z height when moving between probe points (mm)
+# retries: 5                                    # Maximum number of attempts to reach tolerance
+# retry_tolerance: 0.0075                       # Maximum acceptable difference between Z motors (mm). Typical values: 0.005–0.02
 {%- endif %}
 
 {%- if user.kinematics == 'corexy' and user.z_motors | int >= 3 %}
 {%- set bx = user.x_size | int %}
 {%- set by = user.y_size | int %}
 
-# [quad_gantry_level]                           # --- opcional / optional / opcional ---
-# # ES: Nivelación del gantry para impresoras CoreXY con 4 motores Z independientes (ej: Voron).
-# #     Klipper ajusta los 4 motores en esquina para mantener el gantry perfectamente horizontal.
-# #     Descomenta esta sección y ejecuta QUAD_GANTRY_LEVEL desde la consola de Klipper.
-# # EN: Gantry leveling for CoreXY printers with 4 independent Z motors (e.g. Voron).
-# #     Klipper adjusts all 4 corner motors to keep the gantry perfectly level.
-# #     Uncomment this section and run QUAD_GANTRY_LEVEL from the Klipper console.
-# # PT: Nivelamento do gantry para impressoras CoreXY com 4 motores Z independentes (ex: Voron).
-# #     O Klipper ajusta os 4 motores de canto para manter o gantry perfeitamente nivelado.
-# #     Descomente esta seção e execute QUAD_GANTRY_LEVEL no console do Klipper.
-# #
-# # ES: gantry_corners son las esquinas físicas del gantry en coordenadas de boquilla.
-# #     Generalmente van más allá del área de impresión. Consulta los planos de tu impresora.
-# # EN: gantry_corners are the physical corners of the gantry in nozzle coordinates.
-# #     They usually extend beyond the print area. Consult your printer's design specs.
-# # PT: gantry_corners são os cantos físicos do gantry em coordenadas do bico.
-# #     Geralmente vão além da área de impressão. Consulte os planos da sua impressora.
-# gantry_corners:                               # ES: Esquinas físicas del gantry (coords boquilla, NO del probe) | EN: Physical gantry corners (nozzle coords, NOT probe) | PT: Cantos físicos do gantry (coords do bico, NÃO do probe)
-#   -60, -10                                   # ES: Esquina frontal izquierda | EN: Front-left corner | PT: Canto frontal esquerdo
-#   {{ bx + 60 }}, {{ by + 90 }}               # ES: Esquina trasera derecha | EN: Rear-right corner | PT: Canto traseiro direito
-# points:                                       # ES: Coordenadas de boquilla donde el probe mide. Calculadas por KACE a partir del área alcanzable. | EN: Nozzle coordinates where the probe measures. Calculated by KACE from the reachable area. | PT: Coordenadas do bico onde o probe mede. Calculadas pelo KACE a partir da área alcançável.
+# [quad_gantry_level]                           # --- optional ---
+# Gantry leveling for CoreXY printers with 4 independent Z motors (e.g. Voron).
+# Klipper adjusts all 4 corner motors to keep the gantry perfectly level.
+# Uncomment this section and run QUAD_GANTRY_LEVEL from the Klipper console.
+#
+# gantry_corners are the physical corners of the gantry in nozzle coordinates.
+# They usually extend beyond the print area. Consult your printer's design specs.
+# gantry_corners:                               # Physical gantry corners (nozzle coords, NOT probe)
+#   -60, -10                                   # Front-left corner
+#   {{ bx + 60 }}, {{ by + 90 }}               # Rear-right corner
+# points:                                       # Nozzle coordinates where the probe measures. Calculated by KACE from the reachable area.
 {%- for pt in user.leveling.quad_gantry_level_points %}
 #   {{ pt[0] | round(1) }}, {{ pt[1] | round(1) }}
 {%- endfor %}
-# speed: 50                                     # ES: Velocidad de desplazamiento entre puntos de medición (mm/s) | EN: Travel speed between probe points (mm/s) | PT: Velocidade de deslocamento entre pontos de medição (mm/s)
-# horizontal_move_z: 5                          # ES: Altura Z de seguridad al moverse entre puntos (mm) | EN: Safe Z height when moving between probe points (mm) | PT: Altura Z de segurança ao mover entre pontos (mm)
-# retries: 5                                    # ES: Número máximo de intentos hasta alcanzar tolerancia | EN: Maximum number of attempts to reach tolerance | PT: Número máximo de tentativas para atingir a tolerância
-# retry_tolerance: 0.0075                       # ES: Diferencia máxima aceptable entre esquinas del gantry (mm) | EN: Maximum acceptable difference between gantry corners (mm) | PT: Diferença máxima aceitável entre os cantos do gantry (mm)
-# max_adjust: 4                                 # ES: Límite de ajuste máximo por seguridad (mm). Detiene si se excede. | EN: Maximum safety adjustment limit (mm). Stops if exceeded. | PT: Limite máximo de ajuste por segurança (mm). Para se excedido.
+# speed: 50                                     # Travel speed between probe points (mm/s)
+# horizontal_move_z: 5                          # Safe Z height when moving between probe points (mm)
+# retries: 5                                    # Maximum number of attempts to reach tolerance
+# retry_tolerance: 0.0075                       # Maximum acceptable difference between gantry corners (mm)
+# max_adjust: 4                                 # Maximum safety adjustment limit (mm). Stops if exceeded.
 {%- endif %}
 
 # --------------------------------------------------

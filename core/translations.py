@@ -2312,6 +2312,130 @@ def translate_comment(comment, lang):
         "EXP2 header": {
             "Español": "conector EXP2",
             "Português": "conector EXP2"
+        },
+        "--- optional ---": {
+            "Español": "--- opcional ---",
+            "Português": "--- opcional ---"
+        },
+        "Automatic gantry leveling when 2 or more independent Z motors are present.": {
+            "Español": "Nivelación automática del gantry cuando hay 2 o más motores Z independientes.",
+            "Português": "Nivelamento automático do gantry quando há 2 ou mais motores Z independentes."
+        },
+        "Klipper adjusts each Z motor individually to tilt the gantry parallel to the bed.": {
+            "Español": "Klipper mueve cada motor Z por separado para inclinar el gantry hasta que quede paralelo a la cama.",
+            "Português": "O Klipper move cada motor Z separadamente para inclinar o gantry até ficar paralelo à cama."
+        },
+        "Uncomment this section and run Z_TILT_ADJUST from the Klipper console to use it.": {
+            "Español": "Descomenta esta sección y ejecuta Z_TILT_ADJUST desde la consola de Klipper para usarla.",
+            "Português": "Descomente esta seção e execute Z_TILT_ADJUST no console do Klipper para usá-la."
+        },
+        "IMPORTANT — z_positions are NOT nozzle travel coordinates.": {
+            "Español": "IMPORTANTE — z_positions NO son coordenadas de movimiento del nozzle.",
+            "Português": "IMPORTANTE — z_positions NÃO são coordenadas de movimento do bico."
+        },
+        "They are the physical XY location of each Z screw or Z motor on the printer frame.": {
+            "Español": "Son la ubicación física (XY) de cada tornillo Z o motor Z en el chasis de la impresora.",
+            "Português": "São a localização física (XY) de cada parafuso Z ou motor Z no chassi da impressora."
+        },
+        "Measure with a ruler where the screws are relative to the axis origin.": {
+            "Español": "Mide con una regla dónde están los tornillos en relación al origen del eje.",
+            "Português": "Meça com uma régua onde estão os parafusos em relação à origem do eixo."
+        },
+        "Values may fall outside the print area (negative numbers or > max position).": {
+            "Español": "Los valores pueden estar fuera del área de impresión (números negativos o > posición máxima).",
+            "Português": "Os valores podem estar fora da área de impressão (números negativos ou > posição máxima)."
+        },
+        "Physical XY position of each Z motor/screw on the frame": {
+            "Español": "Posición XY física de cada motor/tornillo Z en el frame",
+            "Português": "Posição XY física de cada motor/parafuso Z no frame"
+        },
+        "Left Z motor (adjust for your printer)": {
+            "Español": "Motor Z izquierdo (ajustar según tu impresora)",
+            "Português": "Motor Z esquerdo (ajuste conforme sua impressora)"
+        },
+        "Right Z motor (adjust for your printer)": {
+            "Español": "Motor Z derecho (ajustar según tu impresora)",
+            "Português": "Motor Z direito (ajuste conforme sua impressora)"
+        },
+        "Front-left Z motor": {
+            "Español": "Motor Z frontal izquierdo",
+            "Português": "Motor Z frontal esquerdo"
+        },
+        "Front-right Z motor": {
+            "Español": "Motor Z frontal derecho",
+            "Português": "Motor Z frontal direito"
+        },
+        "Rear center Z motor": {
+            "Español": "Motor Z trasero central",
+            "Português": "Motor Z traseiro central"
+        },
+        "Rear-right Z motor": {
+            "Español": "Motor Z trasero derecho",
+            "Português": "Motor Z traseiro direito"
+        },
+        "Rear-left Z motor": {
+            "Español": "Motor Z trasero izquierdo",
+            "Português": "Motor Z traseiro esquerdo"
+        },
+        "Nozzle coordinates where the probe measures. Calculated by KACE from the reachable area.": {
+            "Español": "Coordenadas de boquilla donde el probe mide. Calculadas por KACE a partir del área alcanzable.",
+            "Português": "Coordenadas do bico onde o probe mede. Calculadas pelo KACE a partir da área alcançável."
+        },
+        "Travel speed between probe points (mm/s)": {
+            "Español": "Velocidad de desplazamiento entre puntos de medición (mm/s)",
+            "Português": "Velocidade de deslocamento entre pontos de medição (mm/s)"
+        },
+        "Safe Z height when moving between probe points (mm)": {
+            "Español": "Altura Z de seguridad al moverse entre puntos (mm)",
+            "Português": "Altura Z de segurança ao mover entre puntos (mm)"
+        },
+        "Maximum number of attempts to reach tolerance": {
+            "Español": "Número máximo de intentos hasta alcanzar tolerancia",
+            "Português": "Número máximo de tentativas para atingir a tolerância"
+        },
+        "Maximum acceptable difference between Z motors (mm). Typical values: 0.005–0.02": {
+            "Español": "Diferencia máxima aceptable entre motores Z (mm). Valores típicos: 0.005–0.02",
+            "Português": "Diferença máxima aceitável entre motores Z (mm). Valores típicos: 0.005–0.02"
+        },
+        "Gantry leveling for CoreXY printers with 4 independent Z motors (e.g. Voron).": {
+            "Español": "Nivelación del gantry para impresoras CoreXY con 4 motores Z independientes (ej: Voron).",
+            "Português": "Nivelamento do gantry para impressoras CoreXY com 4 motores Z independentes (ex: Voron)."
+        },
+        "Klipper adjusts all 4 corner motors to keep the gantry perfectly level.": {
+            "Español": "Klipper adjusts all 4 corner motors to keep the gantry perfectly level.",
+            "Português": "O Klipper ajusta os 4 motores de canto para manter o gantry perfeitamente nivelado."
+        },
+        "Uncomment this section and run QUAD_GANTRY_LEVEL from the Klipper console.": {
+            "Español": "Descomenta esta sección y ejecuta QUAD_GANTRY_LEVEL desde la consola de Klipper.",
+            "Português": "Descomente esta seção e execute QUAD_GANTRY_LEVEL no console do Klipper."
+        },
+        "gantry_corners are the physical corners of the gantry in nozzle coordinates.": {
+            "Español": "gantry_corners son las esquinas físicas del gantry en coordenadas de boquilla.",
+            "Português": "gantry_corners são os cantos físicos do gantry em coordenadas do bico."
+        },
+        "They usually extend beyond the print area. Consult your printer's design specs.": {
+            "Español": "Generalmente van más allá del área de impresión. Consulta los planos de tu impresora.",
+            "Português": "Geralmente vão além da área de impressão. Consulte os planos da sua impressora."
+        },
+        "Physical gantry corners (nozzle coords, NOT probe)": {
+            "Español": "Esquinas físicas del gantry (coords boquilla, NO del probe)",
+            "Português": "Cantos físicos do gantry (coords do bico, NÃO do probe)"
+        },
+        "Front-left corner": {
+            "Español": "Esquina frontal izquierda",
+            "Português": "Canto frontal esquerdo"
+        },
+        "Rear-right corner": {
+            "Español": "Esquina trasera derecha",
+            "Português": "Canto traseiro direito"
+        },
+        "Maximum acceptable difference between gantry corners (mm)": {
+            "Español": "Diferencia máxima aceptable entre esquinas del gantry (mm)",
+            "Português": "Diferença máxima aceitável entre os cantos do gantry (mm)"
+        },
+        "Maximum safety adjustment limit (mm). Stops if exceeded.": {
+            "Español": "Límite de ajuste máximo por seguridad (mm). Detiene si se excede.",
+            "Português": "Limite máximo de ajuste por segurança (mm). Para se excedido."
         }
     }
 

@@ -83,7 +83,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     language = get_lang()
     for line in output.splitlines():
         # Check if line is a commented setting that contains an inline comment
-        is_commented_setting = line.lstrip().startswith('#') and line.count('#') > 1 and (':' in line or ('[' in line and ']' in line))
+        is_commented_setting = line.lstrip().startswith('#') and line.count('#') > 1
         if ('#' in line and not line.lstrip().startswith('#')) or is_commented_setting:
             if not is_commented_setting:
                 content, comment = line.split('#', 1)

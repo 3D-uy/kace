@@ -772,6 +772,30 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
         finally:
             set_lang(orig_lang)
 
+    def test_z_tilt_and_qgl_comment_translation(self):
+        from core.translations import set_lang, get_lang
+        orig_lang = get_lang()
+        parsed = _parsed(
+            stepper_z1={"step_pin": "PF1", "dir_pin": "PF2", "enable_pin": "!PF3"}
+        )
+        user = _user(z_motors="2")
+        try:
+            set_lang("Español")
+            output = _generate(parsed, user)
+            self.assertIn("# Nivelación automática del gantry cuando hay 2 o más motores Z independientes.", output)
+            self.assertIn("-30, 117", output)
+            self.assertIn("Motor Z izquierdo (ajustar según tu impresora)", output)
+            self.assertIn("Velocidad de desplazamiento entre puntos de medición (mm/s)", output)
+
+            set_lang("Português")
+            output = _generate(parsed, user)
+            self.assertIn("# Nivelamento automático do gantry quando há 2 ou mais motores Z independentes.", output)
+            self.assertIn("-30, 117", output)
+            self.assertIn("Motor Z esquerdo (ajuste conforme sua impressora)", output)
+            self.assertIn("Velocidade de deslocamento entre pontos de medição (mm/s)", output)
+        finally:
+            set_lang(orig_lang)
+
 
 @_skip_no_jinja2
 class TestGenerateConfigFanBranch(unittest.TestCase):
