@@ -10,21 +10,18 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [main] — 2026-06-12
+## [0.9.3] — 2026-06-24
+
+### Fixed
+- False-negative Mainsail/Fluidd detection when installed via nginx or run under
+  `sudo` — replaced the single `os.path.isdir(~/mainsail)` check with a full
+  `_detect_webui()` probe covering: default home path, `SUDO_USER` home (via
+  `pwd.getpwnam`), `/home/*` glob, nginx web roots (`/var/www/mainsail`, etc.),
+  and nginx config files (`/etc/nginx/sites-{enabled,available}/mainsail`).
 
 ### Added
-- Standardized Klipper pin validation (`core/validators.py`) using regex pattern `^[!^~]*[A-Za-z0-9_.]+$`.
-- Automated pre-commit hook to safeguard against hardcoded UI strings and local Windows paths (`scripts/pre-commit`).
-- Full unit tests for pin validation (`tests/unit/test_validators.py`), including explicit verification of prefix-only (`!^`, `~`), internal spaces (`PA 0`), and combined prefixes (`!^PA0`).
-- Moonraker plain HTTP API key transmission warning prompt requiring user confirmation (`core/deployer.py`).
-- API key propagation header (`X-Api-Key`) for all Moonraker REST request calls (`core/moonraker.py`).
-- Security/functional unit tests in `tests/unit/test_deployer.py` covering Moonraker HTTP warning triggers and parameter propagation.
-
-### Changed
-- Refactored eager-loading database databases to load lazily at runtime across `core/wizard.py`, `core/display_checker.py`, `firmware/derivation.py`, and `core/advanced_module_handler.py`.
-- Consolidated Z-motor configuration logic under `_step_z_socket_assignment` and removed duplicated code.
-- Cleaned up display warnings and interactive steps to utilize the central `t()` translation mechanism.
-- Upgraded GitHub Actions `actions/checkout@v5` and `docker/setup-buildx-action@v4` in `ci.yml` and configured runner to execute under Node.js 24 natively.
+- Six new unit tests in `tests/unit/test_dashboard.py` covering all
+  `_detect_webui()` detection paths.
 
 ---
 
@@ -104,8 +101,7 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ANSI colour-coded terminal UI with emoji icon menus
 - Validated against 192 official Klipper board configurations
 
-[Unreleased]: https://github.com/3D-uy/kace/compare/main...HEAD
-[main]: https://github.com/3D-uy/kace/compare/v0.9.1...main
-[0.9.1]: https://github.com/3D-uy/kace/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/3D-uy/kace/compare/v0.1.0...v0.9.0
+[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/3D-uy/kace/compare/v0.9.2...v0.9.3
+[0.9.2]: https://github.com/3D-uy/kace/compare/v0.1.0...v0.9.2
 [0.1.0]: https://github.com/3D-uy/kace/releases/tag/v0.1.0
