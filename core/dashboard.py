@@ -70,6 +70,61 @@ def _service_active(name: str) -> bool:
         return False
 
 
+def _detect_webui(name: str, default_path: str) -> bool:
+    """Probe for the existence of a web UI (Mainsail or Fluidd)."""
+    # 1. Check standard path (using current user's home or configured default)
+    if os.path.isdir(default_path):
+        return True
+
+    # 2. Check if run under sudo, check the SUDO_USER's home
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        try:
+            import pwd
+            sudo_home = pwd.getpwnam(sudo_user).pw_dir
+            if os.path.isdir(os.path.join(sudo_home, name)):
+                return True
+        except (ImportError, KeyError):
+            # Fallback if pwd or user lookup fails
+            sudo_home = os.path.expanduser(f"~{sudo_user}")
+            if os.path.isdir(os.path.join(sudo_home, name)):
+                return True
+            # Direct /home/user path check (e.g. Unix path on Windows/WSL testing)
+            if os.path.isdir(f"/home/{sudo_user}/{name}"):
+                return True
+
+    # 3. Check common paths across all /home users via glob
+    try:
+        import glob
+        matches = glob.glob(f"/home/*/{name}")
+        for match in matches:
+            if os.path.isdir(match):
+                return True
+    except Exception:
+        pass
+
+    # 4. Check typical web/nginx paths
+    common_system_paths = [
+        f"/usr/share/nginx/html/{name}",
+        f"/var/www/{name}",
+        f"/var/www/html/{name}",
+    ]
+    for p in common_system_paths:
+        if os.path.isdir(p):
+            return True
+
+    # 5. Check Nginx configuration files
+    nginx_configs = [
+        f"/etc/nginx/sites-enabled/{name}",
+        f"/etc/nginx/sites-available/{name}",
+    ]
+    for cfg in nginx_configs:
+        if os.path.isfile(cfg):
+            return True
+
+    return False
+
+
 def detect_system_state() -> dict:
     """Probe the local system for Klipper ecosystem components.
 
@@ -78,8 +133,8 @@ def detect_system_state() -> dict:
     """
     klipper   = os.path.isdir(_PATH_KLIPPER)   or _service_active("klipper")
     moonraker = os.path.isdir(_PATH_MOONRAKER)  or _service_active("moonraker")
-    mainsail  = os.path.isdir(_PATH_MAINSAIL)
-    fluidd    = os.path.isdir(_PATH_FLUIDD)
+    mainsail  = _detect_webui("mainsail", _PATH_MAINSAIL)
+    fluidd    = _detect_webui("fluidd", _PATH_FLUIDD)
     crowsnest = os.path.isdir(_PATH_CROWSNEST)  or _service_active("crowsnest")
     has_cfg   = os.path.isfile(_PATH_PRINTER_CFG)
 

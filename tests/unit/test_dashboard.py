@@ -11,7 +11,7 @@ class TestDashboard(unittest.TestCase):
     def test_detect_system_state(self, mock_isfile, mock_isdir, mock_service_active, mock_mcu):
         """Verify detect_system_state correctly probes files and services."""
         mock_isdir.side_effect = lambda p: True if "klipper" in p or "moonraker" in p else False
-        mock_isfile.return_value = True
+        mock_isfile.side_effect = lambda p: True if "printer.cfg" in p else False
         mock_service_active.return_value = False
         mock_mcu.return_value = {"derived_mcu": "stm32f103", "mcu_path": "/dev/serial/by-id/mock"}
 
@@ -21,6 +21,50 @@ class TestDashboard(unittest.TestCase):
         self.assertFalse(state["mainsail"])
         self.assertTrue(state["printer_cfg"])
         self.assertEqual(state["mcu"], "stm32f103")
+
+    @patch("os.path.isdir")
+    @patch("os.path.isfile")
+    @patch("os.environ.get")
+    @patch("glob.glob")
+    def test_detect_webui_various_conditions(self, mock_glob, mock_env_get, mock_isfile, mock_isdir):
+        """Test _detect_webui with different paths, sudo users, and nginx configs."""
+        from core.dashboard import _detect_webui
+
+        # Test case 1: Default path exists
+        mock_isdir.side_effect = lambda p: p == "/mock/mainsail"
+        mock_isfile.return_value = False
+        mock_env_get.return_value = None
+        mock_glob.return_value = []
+        self.assertTrue(_detect_webui("mainsail", "/mock/mainsail"))
+
+        # Test case 2: Sudo user home path exists
+        mock_isdir.side_effect = lambda p: p == "/home/pi/mainsail"
+        mock_env_get.side_effect = lambda key, default=None: "pi" if key == "SUDO_USER" else default
+        # Since pwd might not exist on all target systems (like Windows where tests run),
+        # we test the fallback branch as well.
+        self.assertTrue(_detect_webui("mainsail", "/mock/not-exist"))
+
+        # Test case 3: Glob home match
+        mock_isdir.side_effect = lambda p: p == "/home/biqu/mainsail"
+        mock_env_get.side_effect = lambda key, default=None: None
+        mock_glob.return_value = ["/home/biqu/mainsail"]
+        self.assertTrue(_detect_webui("mainsail", "/mock/not-exist"))
+
+        # Test case 4: Typical nginx system path
+        mock_isdir.side_effect = lambda p: p == "/var/www/mainsail"
+        mock_glob.return_value = []
+        self.assertTrue(_detect_webui("mainsail", "/mock/not-exist"))
+
+        # Test case 5: Nginx config file exists
+        mock_isdir.side_effect = None
+        mock_isdir.return_value = False
+        mock_isfile.side_effect = lambda p: p == "/etc/nginx/sites-enabled/mainsail"
+        self.assertTrue(_detect_webui("mainsail", "/mock/not-exist"))
+
+        # Test case 6: None exists
+        mock_isfile.side_effect = None
+        mock_isfile.return_value = False
+        self.assertFalse(_detect_webui("mainsail", "/mock/not-exist"))
 
     def test_get_suggestions_all_missing(self):
         """Verify suggestions when klipper, moonraker, and config are missing."""
