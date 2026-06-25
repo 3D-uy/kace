@@ -26,6 +26,7 @@ class TestDeployer(unittest.TestCase):
             patch('core.moonraker.download_printer_cfg', return_value=(False, b"")),
             patch('core.moonraker.check_klipper_ready', return_value=(False, "unreachable")),
             patch('core.moonraker.verify_remote_file_exists', return_value=False),
+            patch('time.sleep'),
         ]
         for p in self.patches:
             p.start()
@@ -361,6 +362,7 @@ class TestDeployMoonrakerWorkflow(unittest.TestCase):
             patch('core.moonraker.download_printer_cfg', return_value=(False, b"")),
             patch('core.moonraker.check_klipper_ready', return_value=(False, "unreachable")),
             patch('core.moonraker.verify_remote_file_exists', return_value=False),
+            patch('time.sleep'),
         ]
         for p in self.patches:
             p.start()

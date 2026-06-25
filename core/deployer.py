@@ -5,6 +5,20 @@ import shutil
 import subprocess
 import sys
 
+
+def _sleep_with_progress(seconds):
+    """Sleep for the specified duration while printing a visual progress indicator."""
+    import time
+    sys.stdout.write("Waiting for Klipper to initialize: ")
+    sys.stdout.flush()
+    for _ in range(seconds):
+        time.sleep(1)
+        sys.stdout.write(".")
+        sys.stdout.flush()
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
 # paramiko is an optional dependency — only needed for SSH deployment.
 # It is imported lazily here so users who never use SSH deploy do not
 # pay the install cost. On first SSH use, KACE will install it
@@ -217,9 +231,15 @@ def deploy_config(user_data):
         import time
         verified = False
         err_msg = ""
-        
-        for attempt in range(10):
-            time.sleep(1)
+
+        # Give Klipper time to restart before polling.
+        _sleep_with_progress(10)
+
+        # 20 attempts × 3s = up to 60s total.
+        max_attempts = 20
+        poll_interval = 3
+
+        for attempt in range(max_attempts):
             if mr_ok:
                 ready_ok, ready_msg = check_klipper_ready(host, port)
                 files_exist = verify_remote_file_exists(host, port, "printer.cfg")
@@ -230,6 +250,7 @@ def deploy_config(user_data):
                     break
                 else:
                     err_msg = ready_msg if not ready_ok else "Uploaded config files missing on server"
+                    time.sleep(poll_interval)
             else:
                 # Fallback to systemd checks over SSH — use sudo -n to avoid password hangs
                 _, stdout_active, _ = ssh.exec_command(
@@ -254,6 +275,7 @@ def deploy_config(user_data):
                     err_msg = f"Klipper status is '{active_status}'"
                     if not files_exist:
                         err_msg += " (uploaded files missing on remote)"
+                    time.sleep(poll_interval)
 
         if verified:
             print("\033[92m[OK] Post-deployment verification successful! Klipper is running.\033[0m")
@@ -767,19 +789,30 @@ def deploy_moonraker(user_data):
             import time
             verified = False
             klipper_err = ""
-            
-            for attempt in range(10):
-                time.sleep(1)
+
+            # A full service restart takes 15-30s for Klipper+Moonraker to come
+            # back up. A firmware-only restart is faster (~5s). Give an initial
+            # grace period before polling so we don't burn retries on guaranteed
+            # 404s while the service is still spinning up.
+            initial_wait = 10 if restart_choice == "service" else 3
+            _sleep_with_progress(initial_wait)
+
+            # 20 attempts × 3s = up to 60s total — enough for slow Pi hardware.
+            max_attempts = 20
+            poll_interval = 3
+
+            for attempt in range(max_attempts):
                 ready_ok, ready_msg = check_klipper_ready(host, port, api_key=api_key)
                 files_exist = verify_remote_file_exists(host, port, "printer.cfg", api_key=api_key)
                 if macros_uploaded:
                     files_exist = files_exist and verify_remote_file_exists(host, port, "macros.cfg", api_key=api_key)
-                    
+
                 if ready_ok and files_exist:
                     verified = True
                     break
                 else:
                     klipper_err = ready_msg if not ready_ok else "Uploaded config files missing on server"
+                    time.sleep(poll_interval)
 
             if verified:
                 print("\033[92m[OK] Post-deployment verification successful! Klipper is Ready.\033[0m")

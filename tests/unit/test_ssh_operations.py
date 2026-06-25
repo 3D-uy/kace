@@ -62,18 +62,21 @@ _check_moonraker_patcher = patch('core.moonraker.check_moonraker', return_value=
 _verify_remote_file_exists_patcher = patch('core.moonraker.verify_remote_file_exists', return_value=False)
 _download_printer_cfg_patcher = patch('core.moonraker.download_printer_cfg', return_value=(False, b""))
 _check_klipper_ready_patcher = patch('core.moonraker.check_klipper_ready', return_value=(False, "unreachable"))
+_sleep_patcher = patch('time.sleep')
 
 def setUpModule():
     _check_moonraker_patcher.start()
     _verify_remote_file_exists_patcher.start()
     _download_printer_cfg_patcher.start()
     _check_klipper_ready_patcher.start()
+    _sleep_patcher.start()
 
 def tearDownModule():
     _check_moonraker_patcher.stop()
     _verify_remote_file_exists_patcher.stop()
     _download_printer_cfg_patcher.stop()
     _check_klipper_ready_patcher.stop()
+    _sleep_patcher.stop()
 
 
 # ── Shared test helpers ───────────────────────────────────────────────────────
