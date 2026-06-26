@@ -133,10 +133,10 @@ max_temp: 130                                   # Maximum safe temperature
 # --------------------------------------------------
 # [board_pins]
 # aliases:
-#     # EXP1 header
+#                                               # EXP1 header
 #     EXP1_1=TODO, EXP1_3=TODO, EXP1_5=TODO, EXP1_7=TODO, EXP1_9=<GND>,
 #     EXP1_2=TODO, EXP1_4=TODO, EXP1_6=TODO, EXP1_8=TODO, EXP1_10=<5V>,
-#     # EXP2 header
+#                                               # EXP2 header
 #     EXP2_1=TODO, EXP2_3=TODO, EXP2_5=TODO, EXP2_7=TODO, EXP2_9=<GND>,
 #     EXP2_2=TODO, EXP2_4=TODO, EXP2_6=TODO, EXP2_8=TODO, EXP2_10=<5V>
 
