@@ -225,6 +225,49 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             raise WizardExit()
 
         if prop == "save":
+            # Sanitize axis limits before saving to ensure position_min <= position_endstop <= position_max
+            adjusted_msg = []
+            for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
+                try:
+                    endstop = float(staged_user_data.get(f"{axis}_position_endstop", 0.0))
+                except (ValueError, TypeError):
+                    endstop = 0.0
+
+                try:
+                    p_min = float(staged_user_data.get(f"{axis}_position_min", 0.0))
+                except (ValueError, TypeError):
+                    p_min = 0.0
+
+                try:
+                    p_max = float(staged_user_data.get(f"{axis}_position_max", staged_user_data.get(size_key, 235.0)))
+                except (ValueError, TypeError):
+                    p_max = 235.0
+
+                if p_min > endstop:
+                    if axis == "z":
+                        p_min = min(endstop - 1.0, -2.0)
+                    else:
+                        p_min = endstop
+                    staged_user_data[f"{axis}_position_min"] = f"{p_min:g}"
+                    staged_defaults[f"{axis}_position_min"] = f"{p_min:g}"
+                    staged_parsed.setdefault(f"stepper_{axis}", {})["position_min"] = f"{p_min:g}"
+                    adjusted_msg.append(f"{axis.upper()} position_min adjusted to {p_min:g} to accommodate endstop {endstop:g}")
+
+                if p_max < endstop:
+                    p_max = endstop
+                    staged_user_data[f"{axis}_position_max"] = f"{p_max:g}"
+                    staged_defaults[f"{axis}_position_max"] = f"{p_max:g}"
+                    staged_parsed.setdefault(f"stepper_{axis}", {})["position_max"] = f"{p_max:g}"
+                    adjusted_msg.append(f"{axis.upper()} position_max adjusted to {p_max:g} to accommodate endstop {endstop:g}")
+
+            if adjusted_msg and os.environ.get("KACE_TESTING") != "1" and os.environ.get("KACE_QUIET") != "1":
+                print("\n\033[93m[!] Automatically adjusted limits to ensure physical consistency:\033[0m")
+                for msg in adjusted_msg:
+                    print(f"    - {msg}")
+                # Give the user a moment to see the message
+                import time
+                time.sleep(2.5)
+
             defaults.clear()
             defaults.update(staged_defaults)
             parsed.clear()

@@ -828,5 +828,36 @@ class TestGenerateConfigFanBranch(unittest.TestCase):
         self.assertNotIn("pin: PA8", output)
 
 
+@_skip_no_jinja2
+class TestGenerateConfigAxisSanitization(unittest.TestCase):
+    def test_z_axis_min_adjustment(self):
+        # When z_position_endstop is negative and z_position_min is default (0),
+        # position_min should be adjusted to -2.0 to ensure Klipper startup success.
+        parsed = _parsed()
+        user = _user(z_position_endstop="-0.5", z_position_min="0")
+        output = _generate(parsed, user)
+        self.assertIn("position_endstop: -0.5", output)
+        self.assertIn("position_min: -2", output)
+
+    def test_z_axis_max_adjustment(self):
+        # When z_position_endstop is greater than z_position_max,
+        # position_max should be adjusted to equal z_position_endstop.
+        parsed = _parsed()
+        user = _user(z_position_endstop="300", z_position_max="250")
+        output = _generate(parsed, user)
+        self.assertIn("position_endstop: 300", output)
+        self.assertIn("position_max: 300", output)
+
+    def test_other_axis_min_adjustment(self):
+        # When x_position_endstop is positive but x_position_min is larger than endstop,
+        # position_min should be adjusted to match the endstop.
+        # Since X endstop in wizard defaults to 0, let's set endstop to 0 and min to 10.
+        parsed = _parsed()
+        user = _user(x_position_endstop="0", x_position_min="10")
+        output = _generate(parsed, user)
+        self.assertIn("position_endstop: 0", output)
+        self.assertIn("position_min: 0", output)
+
+
 if __name__ == "__main__":
     unittest.main()

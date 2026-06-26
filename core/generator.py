@@ -26,16 +26,43 @@ def has_todo_pins(parsed_data: dict) -> list:
                     todos.append((section, key))
     return todos
 
-
 def generate_config(parsed_data, user_data, output_path=None, include_macros=False):
-
     """Generate printer.cfg from parsed config and user data using Jinja2."""
-    # Build and serialize the motion space model
-    from core.motion_model import PrinterMotionSpace
-    space = PrinterMotionSpace(user_data)
-    
     # Avoid in-place mutation of user_data by using a localized context dict
     user_ctx = dict(user_data)
+
+    # Enforce position_min <= position_endstop <= position_max for each axis to prevent Klipper startup errors
+    for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
+        try:
+            endstop = float(user_ctx.get(f"{axis}_position_endstop", 0.0))
+        except (ValueError, TypeError):
+            endstop = 0.0
+
+        try:
+            p_min = float(user_ctx.get(f"{axis}_position_min", 0.0))
+        except (ValueError, TypeError):
+            p_min = 0.0
+
+        try:
+            p_max = float(user_ctx.get(f"{axis}_position_max", user_ctx.get(size_key, 235.0)))
+        except (ValueError, TypeError):
+            p_max = 235.0
+
+        if p_min > endstop:
+            if axis == "z":
+                # For Z-axis, give a standard safety buffer below the endstop (default -2.0 or endstop - 1.0)
+                p_min = min(endstop - 1.0, -2.0)
+            else:
+                p_min = endstop
+            user_ctx[f"{axis}_position_min"] = f"{p_min:g}"
+
+        if p_max < endstop:
+            p_max = endstop
+            user_ctx[f"{axis}_position_max"] = f"{p_max:g}"
+
+    # Build and serialize the motion space model using the sanitized user_ctx
+    from core.motion_model import PrinterMotionSpace
+    space = PrinterMotionSpace(user_ctx)
     user_ctx["motion_space"] = space.to_dict()
 
     # Auto-generate bed_mesh config

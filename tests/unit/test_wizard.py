@@ -132,6 +132,50 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(user_data["y_size"], "320")
         self.assertEqual(defaults["y_size"], "320")
 
+    @patch("questionary.select")
+    def test_interactive_profile_review_save_auto_adjusts_inconsistent_limits(self, mock_select):
+        """Verify that when saving, inconsistent axis limits (min > endstop, max < endstop) are auto-adjusted."""
+        from core.wizard import interactive_profile_review
+        
+        defaults = {
+            "x_position_min": "0", "x_position_max": "235", "x_position_endstop": "0",
+            "y_position_min": "0", "y_position_max": "235", "y_position_endstop": "0",
+            "z_position_min": "0", "z_position_max": "250", "z_position_endstop": "0",
+            "x_size": "235", "y_size": "235", "z_size": "250"
+        }
+        parsed = {}
+        # Inconsistent inputs:
+        # X: min (10) > endstop (0) -> should adjust min to 0
+        # Y: max (100) < endstop (120) -> should adjust max to 120
+        # Z: min (0) > endstop (-0.5) -> should adjust Z min to min(-0.5-1.0, -2.0) = -2.0
+        user_data = {
+            "x_position_min": "10", "x_position_max": "235", "x_position_endstop": "0",
+            "y_position_min": "0", "y_position_max": "100", "y_position_endstop": "120",
+            "z_position_min": "0", "z_position_max": "250", "z_position_endstop": "-0.5",
+            "x_size": "235", "y_size": "100", "z_size": "250"
+        }
+        
+        # Select edit -> save -> confirm
+        mock_select.return_value.ask.side_effect = ["edit", "save", "confirm"]
+        
+        result = interactive_profile_review(defaults, parsed, user_data)
+        
+        self.assertEqual(result, "confirm")
+        # X min should be adjusted to 0
+        self.assertEqual(user_data["x_position_min"], "0")
+        self.assertEqual(defaults["x_position_min"], "0")
+        self.assertEqual(parsed["stepper_x"]["position_min"], "0")
+        
+        # Y max should be adjusted to 120
+        self.assertEqual(user_data["y_position_max"], "120")
+        self.assertEqual(defaults["y_position_max"], "120")
+        self.assertEqual(parsed["stepper_y"]["position_max"], "120")
+        
+        # Z min should be adjusted to -2
+        self.assertEqual(user_data["z_position_min"], "-2")
+        self.assertEqual(defaults["z_position_min"], "-2")
+        self.assertEqual(parsed["stepper_z"]["position_min"], "-2")
+
 
 
 class TestWizardRunner(unittest.TestCase):
