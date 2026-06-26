@@ -1,3 +1,6 @@
+# tests/unit/test_macro_generator.py
+# Klipper source: https://www.klipper3d.org/Command_Templates.html
+#
 import os
 import tempfile
 import shutil

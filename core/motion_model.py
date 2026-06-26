@@ -1,4 +1,6 @@
 # core/motion_model.py
+# Klipper source: https://www.klipper3d.org/Config_Reference.html#stepper
+# Klipper source: https://www.klipper3d.org/Config_Reference.html#printer
 #
 # Printer Motion Space Model — KACE
 #

@@ -1,3 +1,7 @@
+# tests/unit/test_motion_model.py
+# Klipper source: https://www.klipper3d.org/Config_Reference.html#stepper
+# Klipper source: https://www.klipper3d.org/Config_Reference.html#printer
+#
 import unittest
 from core.motion_model import PrinterMotionSpace
 

@@ -1,3 +1,6 @@
+# core/macro_generator.py
+# Klipper source: https://www.klipper3d.org/Command_Templates.html
+#
 import os
 from core.translations import t
 

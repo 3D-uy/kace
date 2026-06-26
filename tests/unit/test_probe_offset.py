@@ -1,3 +1,6 @@
+# tests/unit/test_probe_offset.py
+# Klipper source: https://www.klipper3d.org/Probe_Calibrate.html
+#
 import unittest
 from core.probe_offset_visualizer import _offset_to_cell, _render_bed
 

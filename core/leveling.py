@@ -1,4 +1,6 @@
 # core/leveling.py
+# Klipper source: https://www.klipper3d.org/Config_Reference.html#z_tilt
+# Klipper source: https://www.klipper3d.org/Config_Reference.html#quad_gantry_level
 #
 # Leveling Foundation & Probing Geometry helpers — KACE
 #

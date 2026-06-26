@@ -1,4 +1,5 @@
 # core/bed_mesh.py
+# Klipper source: https://www.klipper3d.org/Bed_Mesh.html
 #
 # Bed Mesh Auto-Configuration Generator — KACE
 #

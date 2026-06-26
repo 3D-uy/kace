@@ -1,4 +1,5 @@
 # core/probe_offset_visualizer.py
+# Klipper source: https://www.klipper3d.org/Probe_Calibrate.html
 #
 # Probe Offset Visualizer — KACE
 #
