@@ -1,6 +1,6 @@
 import re
 import os
-import questionary
+from core.menu import simple_input, yes_no, numbered_select
 from core.style import custom_style
 from core.translations import t, get_lang
 from core.exceptions import WizardExit
@@ -18,12 +18,14 @@ def _get_parsed(user_data):
 
 
 def _step_probe(user_data):
-    ans = questionary.select(
+    choices = ["None", "BLTouch", "Inductive", "CR-Touch", _back_choice(), _quit_choice()]
+    default_probe = user_data["probe"]
+    default_idx = choices.index(default_probe) if default_probe in choices[:4] else 0
+    ans = numbered_select(
         t("wizard.select_probe"),
-        choices=["None", "BLTouch", "Inductive", "CR-Touch", _back_choice(), _quit_choice()],
-        default=user_data["probe"] if user_data["probe"] in ["None", "BLTouch", "Inductive", "CR-Touch"] else None,
-        style=custom_style
-    ).ask()
+        choices=choices,
+        default=default_idx
+    )
     if ans == _QUIT or ans is None:
         raise WizardExit()
     if ans == _BACK:
@@ -338,24 +340,22 @@ def _step_bltouch_pins(user_data):
     while idx < len(prompts):
         current_prompt = prompts[idx]
         if current_prompt == "sensor":
-            sp = questionary.text(
+            sp = simple_input(
                 t("wizard.bltouch_sensor_prompt") or "BLTouch sensor_pin (e.g. ^PB7 or ^PC5):",
                 default=user_data.get("bltouch_sensor_pin") or "",
-                validate=make_pin_validator_with_collision_check(user_data),
-                style=custom_style
-            ).ask()
+                validate=make_pin_validator_with_collision_check(user_data)
+            )
             if sp is None or sp.strip().lower() in ("<", "back", "volver"):
                 return _BACK
             user_data["bltouch_sensor_pin"] = sp.strip()
             idx += 1
             
         elif current_prompt == "control":
-            cp = questionary.text(
+            cp = simple_input(
                 t("wizard.bltouch_control_prompt") or "BLTouch control_pin (e.g. PB6 or PE5):",
                 default=user_data.get("bltouch_control_pin") or "",
-                validate=make_pin_validator_with_collision_check(user_data),
-                style=custom_style
-            ).ask()
+                validate=make_pin_validator_with_collision_check(user_data)
+            )
             if cp is None or cp.strip().lower() in ("<", "back", "volver"):
                 if idx > 0:
                     idx -= 1
@@ -389,18 +389,28 @@ def _step_therm(user_data, therm_key, select_msg, custom_msg):
         preset_choices.insert(0, user_data[therm_key])
     choices = preset_choices + [{"name": t("choice.other_manual"), "value": "__other__"}, _back_choice(), _quit_choice()]
 
-    ans = questionary.select(
+    # Find default index
+    default_val = user_data[therm_key]
+    default_idx = 0
+    for idx_c, choice in enumerate(choices):
+        if isinstance(choice, dict) and choice.get("value") == default_val:
+            default_idx = idx_c
+            break
+        elif choice == default_val:
+            default_idx = idx_c
+            break
+
+    ans = numbered_select(
         select_msg,
         choices=choices,
-        default=user_data[therm_key] if user_data[therm_key] in preset_choices else None,
-        style=custom_style
-    ).ask()
+        default=default_idx
+    )
     if ans == _QUIT or ans is None:
         raise WizardExit()
     if ans == _BACK:
         return _BACK
     if ans == "__other__":
-        manual_ans = questionary.text(custom_msg, style=custom_style).ask()
+        manual_ans = simple_input(custom_msg)
         if manual_ans is None:
             return "__retry__"
         user_data[therm_key] = manual_ans

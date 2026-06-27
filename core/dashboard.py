@@ -15,9 +15,6 @@ import os
 import subprocess
 import sys
 
-import questionary
-
-from core.style import custom_style
 from core.translations import t, set_lang, set_mode
 from core.banner import print_kace_banner
 
@@ -240,41 +237,39 @@ def _select_language() -> None:
     Called once after the status panel is rendered for the first time.
     This ensures all subsequent prompts (including the action menu) are
     displayed in the user's preferred language.
+
+    Uses simple numbered input instead of questionary to avoid cursor-
+    position issues in bridged PTY environments (e.g. xterm.js over SSH).
     """
-    LANGUAGES = ["English", "Español", "Português"]
+    LANGUAGES = {"1": "English", "2": "Español", "3": "Português"}
+    print("\n  Select language / Seleccione el idioma / Selecione o idioma:")
+    for num, name in LANGUAGES.items():
+        print(f"    {num}) {name}")
     try:
-        lang = questionary.select(
-            "Select language / Seleccione el idioma / Selecione o idioma:",
-            choices=LANGUAGES,
-            style=custom_style,
-        ).ask()
+        choice = input("  Select [1-3]: ").strip()
     except (KeyboardInterrupt, EOFError):
         sys.exit(0)
 
-    if lang is None:
-        sys.exit(0)
-
+    lang = LANGUAGES.get(choice, "English")
     set_lang(lang)
 
 
 def _select_mode() -> None:
-    """Show a mode picker (Beginner vs Advanced) and set the configuration mode."""
-    choices = [
-        {"name": t("wizard.mode.beginner"), "value": "Beginner"},
-        {"name": t("wizard.mode.advanced"), "value": "Advanced"},
-    ]
+    """Show a mode picker (Beginner vs Advanced) and set the configuration mode.
+
+    Uses simple numbered input instead of questionary to avoid cursor-
+    position issues in bridged PTY environments (e.g. xterm.js over SSH).
+    """
+    MODES = {"1": "Beginner", "2": "Advanced"}
+    print(f"\n  {t('wizard.select_mode')}")
+    print(f"    1) {t('wizard.mode.beginner')}")
+    print(f"    2) {t('wizard.mode.advanced')}")
     try:
-        mode = questionary.select(
-            t("wizard.select_mode"),
-            choices=choices,
-            style=custom_style,
-        ).ask()
+        choice = input("  Select [1-2]: ").strip()
     except (KeyboardInterrupt, EOFError):
         sys.exit(0)
 
-    if mode is None:
-        sys.exit(0)
-
+    mode = MODES.get(choice, "Beginner")
     set_mode(mode)
 
 
@@ -308,19 +303,16 @@ def run_dashboard(state: dict) -> str:
         _render_suggestions(suggestions)
         print("")
 
-        choices = [
-            {"name": t("dashboard.action_generate"),  "value": "generate"},
-            {"name": t("dashboard.action_quit"),      "value": "quit"},
-        ]
-
+        ACTIONS = {"1": "generate", "2": "quit"}
+        print(f"\n  {t('dashboard.action_prompt')}")
+        print(f"    1) {t('dashboard.action_generate')}")
+        print(f"    2) {t('dashboard.action_quit')}")
         try:
-            action = questionary.select(
-                t("dashboard.action_prompt"),
-                choices=choices,
-                style=custom_style,
-            ).ask()
+            action_choice = input("  Select [1-2]: ").strip()
         except (KeyboardInterrupt, EOFError):
             sys.exit(0)
+
+        action = ACTIONS.get(action_choice, "quit")
 
         if action is None or action == "quit":
             return "quit"

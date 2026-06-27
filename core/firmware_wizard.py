@@ -1,5 +1,5 @@
 import sys
-import questionary
+from core.menu import simple_input, yes_no, numbered_select, Choice
 from core.style import custom_style
 from core.translations import t
 from core.exceptions import DerivationAmbiguityError
@@ -16,7 +16,7 @@ def run_firmware_wizard(user_data: dict):
         return
 
     prompt_mcu = mcu if mcu else "manually selected board"
-    ans = questionary.confirm(t("kace.compile_prompt", mcu=prompt_mcu)).ask()
+    ans = yes_no(t("kace.compile_prompt", mcu=prompt_mcu))
     if not ans:
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
         return
@@ -33,13 +33,12 @@ def run_firmware_wizard(user_data: dict):
         except DerivationAmbiguityError as ambig:
             if ambig.param == "mcu_family":
                 choices = ambig.options + ["Enter manually"]
-                ans_family = questionary.select(
+                ans_family = numbered_select(
                     f"Select MCU architecture family for {current_mcu if current_mcu else 'Board'}:",
-                    choices=choices,
-                    style=custom_style
-                ).ask()
+                    choices=choices
+                )
                 if ans_family == "Enter manually" or ans_family is None:
-                    ans_family = questionary.text("Enter Klipper ARCH (e.g. stm32):", style=custom_style).ask()
+                    ans_family = simple_input("Enter Klipper ARCH (e.g. stm32)")
                 if not ans_family:
                     print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
                     sys.exit(0)
@@ -47,24 +46,22 @@ def run_firmware_wizard(user_data: dict):
             elif ambig.param == "bootloader_offset":
                 options = ambig.options
                 choices = list(options.keys()) + ["No bootloader (0x0)", "Enter manually"]
-                ans_boot = questionary.select(
+                ans_boot = numbered_select(
                     f"Select bootloader offset for {current_mcu.upper()}:",
-                    choices=choices,
-                    style=custom_style
-                ).ask()
+                    choices=choices
+                )
                 if ans_boot == "Enter manually":
-                    ans_boot = questionary.text("Enter HEX offset (e.g. 0x8000):", style=custom_style).ask()
+                    ans_boot = simple_input("Enter HEX offset (e.g. 0x8000)")
                 elif ans_boot == "No bootloader (0x0)" or ans_boot is None:
                     ans_boot = "0x0"
                 else:
                     ans_boot = options.get(ans_boot, "0x0")
                 resolved_flash = ans_boot
             elif ambig.param == "comm_interface":
-                ans_comm = questionary.select(
+                ans_comm = numbered_select(
                     f"Select the communication interface for {(current_mcu or 'Board').upper()}:",
-                    choices=ambig.options,
-                    style=custom_style
-                ).ask()
+                    choices=ambig.options
+                )
                 if not ans_comm:
                     print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
                     sys.exit(0)
@@ -130,7 +127,7 @@ def run_firmware_wizard(user_data: dict):
             choices.append(t("builder.edit_clock"))
         choices.append(t("builder.abort"))
 
-        ans_summary = questionary.select(t("builder.config_correct"), choices=choices, style=custom_style).ask()
+        ans_summary = numbered_select(t("builder.config_correct"), choices=choices)
 
         if ans_summary == t("builder.compile_now"):
             break
@@ -138,10 +135,10 @@ def run_firmware_wizard(user_data: dict):
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
         elif ans_summary == t("builder.edit_arch"):
-            new_arch = questionary.text(t("builder.enter_arch"), default=arch, style=custom_style).ask()
+            new_arch = simple_input(t("builder.enter_arch"), default=arch)
             if new_arch: config_dict["CONFIG_MCU"] = f'"{new_arch}"'
         elif ans_summary == t("builder.edit_proc"):
-            new_model = questionary.text(t("builder.enter_proc"), default=model, style=custom_style).ask()
+            new_model = simple_input(t("builder.enter_proc"), default=model)
             if new_model: current_mcu = new_model
         elif ans_summary == t("builder.edit_boot"):
             opts = [
@@ -149,21 +146,21 @@ def run_firmware_wizard(user_data: dict):
                 f"{t('builder.boot_28k')} (0x7000)", f"{t('builder.boot_32k')} (0x8000)", f"{t('builder.boot_64k')} (0x10000)",
                 f"{t('builder.boot_128k')} (0x20000)", t("builder.enter_manual")
             ]
-            f_ans = questionary.select(t("builder.select_boot"), choices=opts, style=custom_style).ask()
+            f_ans = numbered_select(t("builder.select_boot"), choices=opts)
             if f_ans == t("builder.enter_manual"):
-                f_ans = questionary.text(t("builder.enter_hex"), default=flash, style=custom_style).ask()
+                f_ans = simple_input(t("builder.enter_hex"), default=flash)
                 if f_ans: config_dict["CONFIG_FLASH_START"] = f_ans
             elif f_ans:
                 config_dict["CONFIG_FLASH_START"] = f_ans.split(" (")[1].replace(")", "")
         elif ans_summary == t("builder.edit_comm"):
-            c_ans = questionary.select(t("builder.select_interface"), choices=["USB", "UART", "CAN", "SPI"], style=custom_style).ask()
+            c_ans = numbered_select(t("builder.select_interface"), choices=["USB", "UART", "CAN", "SPI"])
             if c_ans:
                 config_dict["CONFIG_USB"]    = "y" if c_ans == "USB"  else "n"
                 config_dict["CONFIG_SERIAL"] = "y" if c_ans == "UART" else "n"
                 config_dict["CONFIG_CANBUS"] = "y" if c_ans == "CAN"  else "n"
                 config_dict["CONFIG_SPI"]    = "y" if c_ans == "SPI"  else "n"
         elif ans_summary == t("builder.edit_clock"):
-            clk = questionary.text(t("builder.enter_clock"), default=clock, style=custom_style).ask()
+            clk = simple_input(t("builder.enter_clock"), default=clock)
             if clk: config_dict["CONFIG_CLOCK_FREQ"] = clk
 
     # ── 3. Invoke Headless Compiler Orchestrator ──
@@ -201,11 +198,10 @@ def run_firmware_wizard(user_data: dict):
         if result.get('firmware') == 'klipper.elf.hex':
             deploy_options.insert(1, {"name": f"⚡  {t('kace.deploy_avrdude')}", "value": "avrdude"})
 
-        deploy_fw = questionary.select(
+        deploy_fw = numbered_select(
             f"\n{t('kace.deploy_firmware_prompt')}",
-            choices=deploy_options,
-            style=custom_style
-        ).ask()
+            choices=deploy_options
+        )
 
         if deploy_fw == "usb":
             deploy_usb(user_data, artifact_type="firmware")

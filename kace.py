@@ -27,47 +27,11 @@ if len(sys.argv) > 1:
         elif arg == "--real-build":
             os.environ["KACE_REAL_BUILD"] = "1"
 
-import questionary
+from core.menu import simple_input, yes_no, numbered_select, password_input
 from core.validators import questionary_pin_validator
 
 if os.environ.get("KACE_AUTO") == "1":
     print("\n\033[93m[AUTO MODE]\033[0m User interactions disabled. Using safe defaults for all prompts.", flush=True)
-    
-    class MockQuestionary:
-        def __init__(self, default_val):
-            self.default_val = default_val
-        def ask(self):
-            return self.default_val
-
-    def mock_select(msg, choices, default=None, **kwargs):
-        if not choices:
-            val = default
-        elif isinstance(choices[0], str):
-            val = choices[0]
-        elif isinstance(choices[0], dict):
-            val = choices[0].get('value')
-        else:
-            val = getattr(choices[0], 'value', None)
-        return MockQuestionary(default if default is not None else val)
-
-    def mock_autocomplete(msg, choices, **kwargs):
-        val = choices[0] if choices else None
-        return MockQuestionary(val)
-
-    def mock_text(msg, default="", **kwargs):
-        return MockQuestionary(default)
-        
-    def mock_confirm(msg, default=False, **kwargs):
-        return MockQuestionary(default) # Safe default: aborts builds/deployments
-
-    def mock_password(msg, **kwargs):
-        return MockQuestionary("")
-
-    questionary.select = mock_select
-    questionary.autocomplete = mock_autocomplete
-    questionary.text = mock_text
-    questionary.confirm = mock_confirm
-    questionary.password = mock_password
 
 from core.scraper import fetch_raw_config, parse_config
 from core.wizard import run_wizard, make_pin_validator_with_collision_check
@@ -160,21 +124,19 @@ def main():
             pin_validator = make_pin_validator_with_collision_check(user_data)
 
             if _missing_sensor:
-                _sp = questionary.text(
+                _sp = simple_input(
                     "BLTouch sensor_pin (e.g. ^PB7 or ^PC5):",
-                    validate=pin_validator,
-                    style=custom_style
-                ).ask()
+                    validate=pin_validator
+                )
                 if not _sp:
                     print(f"\n\033[91m[!] No sensor_pin provided — aborting.\033[0m")
                     sys.exit(1)
                 _blt["sensor_pin"] = _sp.strip()
             if _missing_control:
-                _cp = questionary.text(
+                _cp = simple_input(
                     "BLTouch control_pin (e.g. PB6 or PE5):",
-                    validate=pin_validator,
-                    style=custom_style
-                ).ask()
+                    validate=pin_validator
+                )
                 if not _cp:
                     print(f"\n\033[91m[!] No control_pin provided — aborting.\033[0m")
                     sys.exit(1)
@@ -257,14 +219,10 @@ def main():
             from core.firmware_wizard import run_firmware_wizard
             run_firmware_wizard(user_data)
 
-    generate_macros = questionary.confirm(
+    generate_macros = yes_no(
         f"\n{t('kace.generate_macros_prompt')}",
-        default=True,
-        style=custom_style
-    ).ask()
-    if generate_macros is None:
-        print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-        sys.exit(0)
+        default=True
+    )
     user_data["macros_generated"] = generate_macros
 
     # ==========================================
@@ -294,7 +252,7 @@ def main():
     # ==========================================
     # PHASE 4: CONFIGURATION DEPLOYMENT
     # ==========================================
-    deploy_cfg = questionary.select(
+    deploy_cfg = numbered_select(
         f"\n{t('kace.deploy_cfg_prompt')}",
         choices=[
             {"name": f"✅  {t('kace.deploy_none')}",       "value": "none"},
@@ -302,9 +260,8 @@ def main():
             {"name": f"💾  {t('kace.deploy_usb')}",         "value": "usb"},
             {"name": f"🔗  {t('kace.deploy_ssh')}",         "value": "ssh"},
             {"name": f"🌐  {t('kace.deploy_moonraker')}",   "value": "moonraker"},
-        ],
-        style=custom_style
-    ).ask()
+        ]
+    )
 
     if deploy_cfg is None:
         print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
@@ -315,20 +272,20 @@ def main():
     elif deploy_cfg == "local":
         deploy_local(user_data, artifact_type="config")
     elif deploy_cfg == "ssh":
-        host = questionary.text(t("kace.ssh_host_prompt"), style=custom_style).ask()
-        if host is None:
+        host = simple_input(t("kace.ssh_host_prompt"))
+        if host is None or not host:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
-        user = questionary.text(t("kace.ssh_user_prompt"), default="pi", style=custom_style).ask()
-        if user is None:
+        user = simple_input(t("kace.ssh_user_prompt"), default="pi")
+        if user is None or not user:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
-        password = questionary.password(t("kace.ssh_pass_prompt"), style=custom_style).ask()
+        password = password_input(t("kace.ssh_pass_prompt"))
         if password is None:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
-        dest_path = questionary.text(t("kace.ssh_dest_prompt"), default="~/printer_data/config/", style=custom_style).ask()
-        if dest_path is None:
+        dest_path = simple_input(t("kace.ssh_dest_prompt"), default="~/printer_data/config/")
+        if dest_path is None or not dest_path:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
 

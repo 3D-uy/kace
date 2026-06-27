@@ -48,12 +48,7 @@ from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-# Stub questionary so tests run on Windows host (it is Docker-only)
-if 'questionary' not in sys.modules:
-    try:
-        import questionary  # noqa: F401
-    except ImportError:
-        sys.modules['questionary'] = MagicMock()
+
 
 from core.deployer import _InteractiveHostKeyPolicy, deploy_config
 
@@ -147,7 +142,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_key   = self._make_key()
 
         with patch('core.deployer._require_paramiko', return_value=mock_p), \
-             patch('questionary.confirm', return_value=MagicMock(ask=lambda: False)), \
+             patch('builtins.input', return_value='n'), \
              patch('builtins.print'):
             with self.assertRaises(mock_p.SSHException):
                 policy.missing_host_key(MagicMock(), '192.168.1.10', mock_key)
@@ -159,7 +154,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_key   = self._make_key()
 
         with patch('core.deployer._require_paramiko', return_value=mock_p), \
-             patch('questionary.confirm', return_value=MagicMock(ask=lambda: False)), \
+             patch('builtins.input', return_value='n'), \
              patch('builtins.print'):
             with self.assertRaises(mock_p.SSHException) as ctx:
                 policy.missing_host_key(MagicMock(), '192.168.1.10', mock_key)
@@ -174,7 +169,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_key   = self._make_key()
 
         with patch('core.deployer._require_paramiko', return_value=mock_p), \
-             patch('questionary.confirm', return_value=MagicMock(ask=lambda: False)), \
+             patch('builtins.input', return_value='n'), \
              patch('builtins.print'):
             with self.assertRaises(mock_p.SSHException) as ctx:
                 policy.missing_host_key(MagicMock(), 'pi.local', mock_key)
@@ -190,7 +185,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_key   = self._make_key()
 
         with patch('core.deployer._require_paramiko', return_value=mock_p), \
-             patch('questionary.confirm', return_value=MagicMock(ask=lambda: False)), \
+             patch('builtins.input', return_value='n'), \
              patch('builtins.print'):
             try:
                 policy.missing_host_key(mock_client, '192.168.1.10', mock_key)
@@ -206,7 +201,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         policy   = _InteractiveHostKeyPolicy()
         mock_key = self._make_key()
 
-        with patch('questionary.confirm', return_value=MagicMock(ask=lambda: True)), \
+        with patch('builtins.input', return_value='y'), \
              patch('builtins.print'):
             try:
                 policy.missing_host_key(MagicMock(), '192.168.1.10', mock_key)
@@ -222,7 +217,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_client = MagicMock()
         mock_key    = self._make_key(algo='ssh-rsa')
 
-        with patch('questionary.confirm', return_value=MagicMock(ask=lambda: True)), \
+        with patch('builtins.input', return_value='y'), \
              patch('builtins.print'):
             policy.missing_host_key(mock_client, '192.168.1.10', mock_key)
 
@@ -239,7 +234,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_client = MagicMock()
         mock_key    = self._make_key()
 
-        with patch('questionary.confirm', return_value=MagicMock(ask=lambda: True)), \
+        with patch('builtins.input', return_value='y'), \
              patch('builtins.print'):
             policy.missing_host_key(mock_client, '192.168.1.10', mock_key)
 
@@ -261,7 +256,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_client.save_host_keys.side_effect = OSError('Permission denied')
         mock_key    = self._make_key()
 
-        with patch('questionary.confirm', return_value=MagicMock(ask=lambda: True)), \
+        with patch('builtins.input', return_value='y'), \
              patch('builtins.print'):
             try:
                 policy.missing_host_key(mock_client, '192.168.1.10', mock_key)
@@ -281,7 +276,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
         mock_client.save_host_keys.side_effect = RuntimeError('Unexpected')
         mock_key    = self._make_key()
 
-        with patch('questionary.confirm', return_value=MagicMock(ask=lambda: True)), \
+        with patch('builtins.input', return_value='y'), \
              patch('builtins.print'):
             try:
                 policy.missing_host_key(mock_client, '192.168.1.10', mock_key)
@@ -304,7 +299,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
 
         captured = []
         with patch('builtins.print', side_effect=lambda *a, **kw: captured.append(' '.join(map(str, a)))), \
-             patch('questionary.confirm', return_value=MagicMock(ask=lambda: True)):
+             patch('builtins.input', return_value='y'):
             policy.missing_host_key(MagicMock(), '192.168.1.10', mock_key)
 
         all_output = '\n'.join(captured)
@@ -320,7 +315,7 @@ class TestInteractiveHostKeyPolicy(unittest.TestCase):
 
         captured = []
         with patch('builtins.print', side_effect=lambda *a, **kw: captured.append(' '.join(map(str, a)))), \
-             patch('questionary.confirm', return_value=MagicMock(ask=lambda: True)):
+             patch('builtins.input', return_value='y'):
             policy.missing_host_key(MagicMock(), 'mypi', mock_key)
 
         all_output = '\n'.join(captured)

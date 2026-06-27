@@ -1,11 +1,9 @@
 import unittest
-import unittest.mock
 import glob
 import os
 import sys
 from unittest.mock import patch, MagicMock
 
-# Ensure we import after setting paths or just use standard python pathing
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from firmware.detector import discover_mcu_hardware
 
@@ -28,7 +26,7 @@ class TestDetector(unittest.TestCase):
         self.assertTrue(any("Connected MCU auto-detected" in msg for msg in printed))
 
     @patch('glob.glob')
-    @patch('questionary.select')
+    @patch('firmware.detector.numbered_select')
     def test_multiple_mcus_prompts_user(self, mock_q_select, mock_glob):
         """Verify that multiple MCUs prompt the user to choose, and manual choice is removed."""
         ports_list = [
@@ -37,9 +35,7 @@ class TestDetector(unittest.TestCase):
         ]
         mock_glob.side_effect = lambda pattern: ports_list if 'by-id' in pattern else []
         
-        mock_select_instance = MagicMock()
-        mock_select_instance.ask.return_value = '/dev/serial/by-id/usb-Klipper_rp2040_SKRPico-if00'
-        mock_q_select.return_value = mock_select_instance
+        mock_q_select.return_value = '/dev/serial/by-id/usb-Klipper_rp2040_SKRPico-if00'
         
         ctx = discover_mcu_hardware(interactive=True)
         
@@ -56,7 +52,7 @@ class TestDetector(unittest.TestCase):
         self.assertIn('/dev/serial/by-id/usb-Klipper_stm32f446xx_Octopus-if00', choices)
 
     @patch('glob.glob')
-    @patch('questionary.select')
+    @patch('firmware.detector.numbered_select')
     @patch('builtins.print')
     def test_no_mcus_shows_diagnostics_and_retries(self, mock_print, mock_q_select, mock_glob):
         """Verify that no MCUs found displays diagnostics and allows retrying to find one."""
@@ -72,9 +68,7 @@ class TestDetector(unittest.TestCase):
         
         mock_glob.side_effect = mock_glob_fn
         
-        mock_select_instance = MagicMock()
-        mock_select_instance.ask.return_value = 'retry'
-        mock_q_select.return_value = mock_select_instance
+        mock_q_select.return_value = 'retry'
         
         ctx = discover_mcu_hardware(interactive=True)
         

@@ -1,4 +1,4 @@
-import questionary
+from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
 from core.scraper import fetch_config_list, fetch_raw_config, parse_config, get_reusable_driver_sockets, detect_fan_pins, detect_driver_info
 from core.style import custom_style
 from core.translations import t
@@ -71,20 +71,19 @@ def _step_board(user_data, suggested_configs, board_configs):
     """
     choices = []
     if suggested_configs:
-        choices.append(questionary.Separator(f"── {t('wizard.select_board_suggested')} ──"))
+        choices.append(Separator(f"── {t('wizard.select_board_suggested')} ──"))
         choices.extend(suggested_configs)
-        choices.append(questionary.Separator("──────────────────────────────────────────────────"))
+        choices.append(Separator("──────────────────────────────────────────────────"))
     choices.extend([
         {"name": t("choice.search_manually"), "value": "__search__"},
         _back_choice(),
         _quit_choice(),
     ])
 
-    ans = questionary.select(
+    ans = numbered_select(
         t("wizard.select_board"),
-        choices=choices,
-        style=custom_style
-    ).ask()
+        choices=choices
+    )
 
     if ans == _QUIT or ans is None:
         raise WizardExit()
@@ -92,11 +91,10 @@ def _step_board(user_data, suggested_configs, board_configs):
         return _BACK
 
     if ans == "__search__":
-        ans = questionary.autocomplete(
+        ans = autocomplete_select(
             t("wizard.select_board_manual"),
-            choices=board_configs,
-            style=custom_style
-        ).ask()
+            choices=board_configs
+        )
         if ans is None:
             return "__retry__"
 
@@ -152,11 +150,10 @@ def _step_fan_assignment(user_data: dict) -> str:
         _quit_choice()
     ])
 
-    ans_part = questionary.select(
+    ans_part = numbered_select(
         t("wizard.part_cooling_prompt"),
-        choices=part_choices,
-        style=custom_style
-    ).ask()
+        choices=part_choices
+    )
 
     if ans_part is None:
         raise WizardExit()
@@ -165,11 +162,10 @@ def _step_fan_assignment(user_data: dict) -> str:
 
     final_part_pin = None
     if ans_part == "custom":
-        custom_pin = questionary.text(
+        custom_pin = simple_input(
             t("wizard.fan_enter_custom"),
-            validate=questionary_pin_validator,
-            style=custom_style
-        ).ask()
+            validate=questionary_pin_validator
+        )
         if custom_pin is None:
             raise WizardExit()
         if not custom_pin.strip():
@@ -200,11 +196,10 @@ def _step_fan_assignment(user_data: dict) -> str:
         _quit_choice()
     ])
 
-    ans_hotend = questionary.select(
+    ans_hotend = numbered_select(
         t("wizard.hotend_fan_prompt"),
-        choices=hotend_choices,
-        style=custom_style
-    ).ask()
+        choices=hotend_choices
+    )
 
     if ans_hotend is None:
         raise WizardExit()
@@ -213,11 +208,10 @@ def _step_fan_assignment(user_data: dict) -> str:
 
     final_hotend_pin = None
     if ans_hotend == "custom":
-        custom_pin = questionary.text(
+        custom_pin = simple_input(
             t("wizard.fan_enter_custom"),
-            validate=questionary_pin_validator,
-            style=custom_style
-        ).ask()
+            validate=questionary_pin_validator
+        )
         if custom_pin is None:
             raise WizardExit()
         if not custom_pin.strip():
@@ -233,12 +227,22 @@ def _step_fan_assignment(user_data: dict) -> str:
 
 
 def _step_z_motors(user_data):
-    ans = questionary.select(
+    choices = ["1", "2", "3", "4", _back_choice(), _quit_choice()]
+    default_val = user_data.get("z_motors") or "1"
+    default_idx = 0
+    for idx, choice in enumerate(choices):
+        if isinstance(choice, dict) and choice.get("value") == default_val:
+            default_idx = idx
+            break
+        elif choice == default_val:
+            default_idx = idx
+            break
+
+    ans = numbered_select(
         t("wizard.z_motors"),
-        choices=["1", "2", "3", "4", _back_choice(), _quit_choice()],
-        default=user_data.get("z_motors") or "1",
-        style=custom_style
-    ).ask()
+        choices=choices,
+        default=default_idx
+    )
     if ans == _QUIT or ans is None:
         raise WizardExit()
     if ans == _BACK:
@@ -292,11 +296,10 @@ def _step_z_socket_assignment(user_data):
         driver_choices.append({"name": t("choice.quit_setup"),   "value": "quit"})
 
         print(f"\n\033[96m{t('wizard.mapping_pins', motor=motor_name)}\033[0m")
-        selected_driver = questionary.select(
+        selected_driver = numbered_select(
             t("wizard.select_driver_z", motor=motor_name.upper()),
-            choices=driver_choices,
-            style=custom_style
-        ).ask()
+            choices=driver_choices
+        )
 
         if selected_driver == "quit" or selected_driver is None:
             raise WizardExit()
@@ -320,9 +323,9 @@ def _step_z_socket_assignment(user_data):
 
         if selected_driver == "custom":
             print(t("wizard.assign_custom_pins_header", motor=motor_name))
-            step_pin = questionary.text(t("wizard.custom_step_pin"), validate=questionary_pin_validator, style=custom_style).ask()
-            dir_pin  = questionary.text(t("wizard.custom_dir_pin"),  validate=questionary_pin_validator, style=custom_style).ask()
-            en_pin   = questionary.text(t("wizard.custom_en_pin"),   validate=questionary_pin_validator, style=custom_style).ask()
+            step_pin = simple_input(t("wizard.custom_step_pin"), validate=questionary_pin_validator)
+            dir_pin  = simple_input(t("wizard.custom_dir_pin"),  validate=questionary_pin_validator)
+            en_pin   = simple_input(t("wizard.custom_en_pin"),   validate=questionary_pin_validator)
             if not step_pin or not dir_pin or not en_pin:
                 print(f"\n\033[91m{t('kace.abort_valid_pins')}\033[0m")
                 raise WizardExit()
@@ -371,31 +374,29 @@ def _step_driver_type(user_data):
         elif is_integrated and choice == "None (Standard)":
             if is_beginner:
                 name = f"{choice}  (Not Recommended for integrated TMC)"
-        formatted_choices.append(questionary.Choice(title=name, value=value))
+        formatted_choices.append(Choice(title=name, value=value))
         
     back_ch = _back_choice()
     quit_ch = _quit_choice()
-    formatted_choices.append(questionary.Choice(title=back_ch["name"], value=back_ch["value"]))
-    formatted_choices.append(questionary.Choice(title=quit_ch["name"], value=quit_ch["value"]))
+    formatted_choices.append(Choice(title=back_ch["name"], value=back_ch["value"]))
+    formatted_choices.append(Choice(title=quit_ch["name"], value=quit_ch["value"]))
     
     default_choice = formatted_choices[preselected_index].value
     
-    ans = questionary.select(
+    ans = numbered_select(
         t("wizard.select_driver") or "Select Stepper Driver Type:",
         choices=formatted_choices,
-        default=default_choice,
-        style=custom_style
-    ).ask()
+        default=preselected_index
+    )
     
     if ans == _QUIT or ans is None: raise WizardExit()
     if ans == _BACK: return _BACK
     
     if not is_integrated and not is_socketed and ans == "None (Standard)":
-        confirm_standalone = questionary.confirm(
+        confirm_standalone = yes_no(
             t("wizard.confirm_standalone"),
-            default=False,
-            style=custom_style
-        ).ask()
+            default=False
+        )
         if not confirm_standalone:
             return "__retry__"
 
@@ -421,21 +422,20 @@ def _step_driver_mode(user_data):
             if is_beginner:
                 name = f"{mode}  ✓ Recommended (Detected from board profile)"
             preselected_mode_index = idx
-        formatted_modes.append(questionary.Choice(title=name, value=value))
+        formatted_modes.append(Choice(title=name, value=value))
         
     back_ch = _back_choice()
     quit_ch = _quit_choice()
-    formatted_modes.append(questionary.Choice(title=back_ch["name"], value=back_ch["value"]))
-    formatted_modes.append(questionary.Choice(title=quit_ch["name"], value=quit_ch["value"]))
+    formatted_modes.append(Choice(title=back_ch["name"], value=back_ch["value"]))
+    formatted_modes.append(Choice(title=quit_ch["name"], value=quit_ch["value"]))
     
     default_mode = formatted_modes[preselected_mode_index].value
     
-    ans = questionary.select(
+    ans = numbered_select(
         t("wizard.select_driver_mode", driver=user_data["driver_type"]) or f"Select communication mode for {user_data['driver_type']}:",
         choices=formatted_modes,
-        default=default_mode,
-        style=custom_style
-    ).ask()
+        default=preselected_mode_index
+    )
     
     if ans == _QUIT or ans is None: raise WizardExit()
     if ans == _BACK: return _BACK
@@ -479,11 +479,10 @@ def _apply_z_tmc_mappings(user_data: dict) -> None:
                 # Prompt for custom pin
                 pin_key = "uart_pin" if driver_mode == "UART" else "cs_pin"
                 if dest_tmc not in parsed_data or pin_key not in parsed_data[dest_tmc]:
-                    uart_pin = questionary.text(
+                    uart_pin = simple_input(
                         t("wizard.custom_uart_pin", mode=driver_mode.lower(), motor=motor_name),
-                        validate=questionary_pin_validator,
-                        style=custom_style
-                    ).ask()
+                        validate=questionary_pin_validator
+                    )
                     if not uart_pin:
                         print(f"\n\033[91m{t('kace.abort_no_uart', mode=driver_mode)}\033[0m")
                         raise WizardExit()

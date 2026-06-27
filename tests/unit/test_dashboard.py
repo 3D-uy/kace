@@ -86,12 +86,11 @@ class TestDashboard(unittest.TestCase):
     @patch("core.dashboard.print_kace_banner")
     @patch("core.dashboard._render_status_panel")
     @patch("core.dashboard._render_suggestions")
-    @patch("questionary.select")
-    def test_run_dashboard_flow(self, mock_select, mock_render_sugg, mock_render_status, mock_banner, mock_show_manage):
+    @patch("builtins.input")
+    def test_run_dashboard_flow(self, mock_input, mock_render_sugg, mock_render_status, mock_banner, mock_show_manage):
         """Verify run_dashboard navigation flows: select language and select generate."""
-        # 1st call selects language, 2nd selects mode, 3rd selects generate
-        mock_ask = MagicMock(side_effect=["English", "Beginner", "generate"])
-        mock_select.return_value.ask = mock_ask
+        # 1st input: "1" → English, 2nd: "1" → Beginner, 3rd: "1" → generate
+        mock_input.side_effect = ["1", "1", "1"]
 
         state = {
             "klipper": True,
@@ -107,7 +106,7 @@ class TestDashboard(unittest.TestCase):
         result = run_dashboard(state)
         self.assertEqual(result, "generate")
         self.assertEqual(mock_show_manage.call_count, 0)
-        self.assertEqual(mock_ask.call_count, 3)
+        self.assertEqual(mock_input.call_count, 3)
 
 if __name__ == "__main__":
     unittest.main()

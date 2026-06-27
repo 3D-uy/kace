@@ -1,4 +1,4 @@
-import questionary
+from core.menu import simple_input, yes_no, numbered_select
 from core.style import custom_style
 from core.translations import t
 from core.exceptions import WizardExit
@@ -27,11 +27,10 @@ def _step_display(user_data):
 
 
 def _step_web_ui(user_data):
-    ans = questionary.select(
+    ans = numbered_select(
         t("wizard.select_web_ui"),
-        choices=["Mainsail", "Fluidd", "None", _back_choice(), _quit_choice()],
-        style=custom_style
-    ).ask()
+        choices=["Mainsail", "Fluidd", "None", _back_choice(), _quit_choice()]
+    )
     if ans == _QUIT or ans is None:
         raise WizardExit()
     if ans == _BACK:

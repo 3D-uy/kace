@@ -1,5 +1,5 @@
 # core/display_warning.py
-import questionary
+from core.menu import simple_input, yes_no
 from core.style import custom_style
 from core.translations import t
 
@@ -115,19 +115,17 @@ def print_display_warning(findings: list) -> bool:
 
     if needs_confirm:
         if has_unsafe:
-            ans = questionary.text(
-                "Type \"I understand the risks\" to continue anyway, or press Enter to abort:",
-                style=custom_style
-            ).ask()
+            ans = simple_input(
+                "Type \"I understand the risks\" to continue anyway, or press Enter to abort:"
+            )
             if ans != "I understand the risks":
                 return False
         else:
-            ans = questionary.confirm(
+            ans = yes_no(
                 t("display.continue_prompt"),
-                default=True,
-                style=custom_style
-            ).ask()
-            if ans is None or not ans:
+                default=True
+            )
+            if not ans:
                 return False
         print("")
 

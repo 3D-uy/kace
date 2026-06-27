@@ -12,44 +12,28 @@ from unittest.mock import MagicMock, patch
 
 from core.exceptions import WizardExit, GenerationError
 
-# questionary is a Docker-only dependency. Tests that require wizard.py
-# (which imports questionary at module level) are skipped on the host.
-try:
-    import questionary  # noqa: F401
-    _QUESTIONARY_AVAILABLE = True
-except ImportError:
-    _QUESTIONARY_AVAILABLE = False
 
-_skip_no_questionary = unittest.skipUnless(
-    _QUESTIONARY_AVAILABLE,
-    "questionary not installed — wizard tests run in Docker only",
-)
-
-
-# ── BUG-006: WizardExit on questionary returning None ────────────────────────
+# ── BUG-006: WizardExit on input returning None / Quit ────────────────────────
 #
-# Bug: When the user presses Ctrl-C in questionary, .ask() returns None.
+# Bug: When the user presses Ctrl-C, input/select returns None or '__quit__'.
 # If the wizard loop does not handle None explicitly, it falls through to
-# an unguarded branch and loops infinitely (or crashes with a TypeError
-# when None is used as a string value).
+# an unguarded branch and loops infinitely.
 #
-# Fix: Every questionary.select / questionary.text prompt checks:
+# Fix: Every prompt checks:
 #   if ans == _QUIT or ans is None: raise WizardExit()
 #
 # This test guards two of the most common wizard entry-points.
 
-@_skip_no_questionary
 class TestBUG006WizardExitOnNone(unittest.TestCase):
-    """BUG-006: Ctrl-C (questionary returns None) must raise WizardExit, not loop."""
+    """BUG-006: Ctrl-C (input returns None/Quit) must raise WizardExit, not loop."""
 
-    @patch("questionary.select")
-    @patch("questionary.autocomplete")
+    @patch("builtins.input")
     @patch("core.wizard.discover_mcu")
     @patch("core.wizard.fetch_config_list")
     def test_none_from_kinematics_prompt_raises_wizard_exit(
-        self, mock_fetch, mock_mcu, mock_autocomplete, mock_select
+        self, mock_fetch, mock_mcu, mock_input
     ):
-        """If questionary returns None on the kinematics prompt, WizardExit must be raised."""
+        """If input returns Quit or None, WizardExit must be raised."""
         from core.wizard import run_wizard
 
         mock_mcu.return_value = {
@@ -59,15 +43,8 @@ class TestBUG006WizardExitOnNone(unittest.TestCase):
         }
         mock_fetch.return_value = ["generic-bigtreetech-skr-v1.4.cfg"]
 
-        # Board selection returns a valid board; kinematics returns None (Ctrl-C)
-        mock_autocomplete.return_value.ask.return_value = "generic-bigtreetech-skr-v1.4.cfg"
-
-        select_answers = iter([
-            None,   # first select prompt → kinematics → None = Ctrl-C
-        ])
-        mock_select.side_effect = lambda *a, **kw: MagicMock(
-            ask=MagicMock(return_value=next(select_answers, None))
-        )
+        # Return "__quit__" for the first board prompt
+        mock_input.return_value = "__quit__"
 
         user_data = {
             "printer_profile": "generic-bigtreetech-skr-v1.4.cfg",
@@ -87,12 +64,11 @@ class TestBUG006WizardExitOnNone(unittest.TestCase):
         with self.assertRaises(WizardExit):
             run_wizard(user_data)
 
-    @patch("questionary.select")
-    @patch("questionary.autocomplete")
+    @patch("builtins.input")
     @patch("core.wizard.discover_mcu")
     @patch("core.wizard.fetch_config_list")
     def test_quit_sentinel_raises_wizard_exit(
-        self, mock_fetch, mock_mcu, mock_autocomplete, mock_select
+        self, mock_fetch, mock_mcu, mock_input
     ):
         """Selecting '__quit__' (the Quit menu item) must raise WizardExit."""
         from core.wizard import run_wizard
@@ -103,8 +79,7 @@ class TestBUG006WizardExitOnNone(unittest.TestCase):
             "hint": "usb",
         }
         mock_fetch.return_value = ["generic-bigtreetech-skr-v1.4.cfg"]
-        mock_autocomplete.return_value.ask.return_value = "generic-bigtreetech-skr-v1.4.cfg"
-        mock_select.return_value.ask.return_value = "__quit__"
+        mock_input.return_value = "__quit__"
 
         user_data = {
             "printer_profile": "generic-bigtreetech-skr-v1.4.cfg",

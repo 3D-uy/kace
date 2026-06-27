@@ -1,7 +1,7 @@
 import glob
 import re
 import os
-import questionary
+from core.menu import simple_input, yes_no, numbered_select
 from core.style import custom_style
 
 def discover_mcu_hardware(interactive=True):
@@ -75,23 +75,21 @@ def discover_mcu_hardware(interactive=True):
             print("  \033[96m• Board Power\033[0m: Verify the board is powered on (check status LEDs or power supply switches).")
             print("  \033[96m• Permissions\033[0m: Verify that the current user has access to serial devices (e.g. member of 'dialout').\n")
             
-            ans = questionary.select(
+            ans = numbered_select(
                 "How would you like to proceed?",
                 choices=[
                     {"name": "🔄  Retry hardware discovery", "value": "retry"},
                     {"name": "⌨️   Skip / Enter serial path manually", "value": "manual"},
                     {"name": "❌  Quit", "value": "quit"}
-                ],
-                style=custom_style
-            ).ask()
+                ]
+            )
 
             if ans == "retry":
                 continue
             elif ans == "manual":
-                manual_path = questionary.text(
-                    "Enter serial path manually (e.g. /dev/ttyUSB0, COM3, or leave blank to skip MCU detection):",
-                    style=custom_style
-                ).ask()
+                manual_path = simple_input(
+                    "Enter serial path manually (e.g. /dev/ttyUSB0, COM3, or leave blank to skip MCU detection):"
+                )
                 if manual_path and manual_path.strip():
                     context["mcu_path"] = manual_path.strip()
                     context["hint"] = "manual"
@@ -106,9 +104,9 @@ def discover_mcu_hardware(interactive=True):
                 choice = ports[0]
                 print(f"\n\033[92m[✔ ] Connected MCU auto-detected:\033[0m \033[96m{choice}\033[0m\n")
             else:
-                choice = questionary.select(
-                    "Select connected MCU:", choices=ports, style=custom_style
-                ).ask()
+                choice = numbered_select(
+                    "Select connected MCU:", choices=ports
+                )
 
                 if choice is None:
                     print("\033[93mExiting KACE.\033[0m")

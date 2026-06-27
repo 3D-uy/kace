@@ -5,17 +5,16 @@ from core.exceptions import WizardExit
 
 class TestWizard(unittest.TestCase):
 
-    @patch("questionary.select")
+    @patch("builtins.input")
     @patch("core.wizard.discover_mcu")
     @patch("core.wizard.fetch_config_list")
-    def test_wizard_exit_on_quit(self, mock_fetch, mock_mcu, mock_select):
+    def test_wizard_exit_on_quit(self, mock_fetch, mock_mcu, mock_input):
         """Verify that choosing Quit raises WizardExit exception."""
         mock_mcu.return_value = {"mcu_path": "/dev/serial/by-id/mock", "derived_mcu": "stm32f103"}
         mock_fetch.return_value = ["printer-mock.cfg"]
         
-        # Mock questionary select to return __quit__
-        mock_ask = MagicMock(return_value="__quit__")
-        mock_select.return_value.ask = mock_ask
+        # Mock input to return __quit__
+        mock_input.return_value = "__quit__"
         
         user_data = {
             "printer_profile": "Custom / Scratch Build",
@@ -37,9 +36,8 @@ class TestWizard(unittest.TestCase):
         with self.assertRaises(WizardExit):
             run_wizard(user_data)
 
-    @patch("questionary.select")
-    @patch("questionary.text")
-    def test_interactive_profile_review_edit_kinematics(self, mock_text, mock_select):
+    @patch("builtins.input")
+    def test_interactive_profile_review_edit_kinematics(self, mock_input):
         """Verify interactive_profile_review can edit kinematics and updates correctly."""
         from core.wizard import interactive_profile_review
         
@@ -47,12 +45,8 @@ class TestWizard(unittest.TestCase):
         parsed = {"printer": {"kinematics": "cartesian"}}
         user_data = {"kinematics": "cartesian"}
         
-        # 1st select: choose 'edit'
-        # 2nd select: choose 'kinematics'
-        # 3rd select: choose 'corexy'
-        # 4th select: choose 'save'
-        # 5th select: choose 'confirm'
-        mock_select.return_value.ask.side_effect = ["edit", "kinematics", "corexy", "save", "confirm"]
+        # Mock input prompts: edit -> kinematics -> corexy -> save -> confirm
+        mock_input.side_effect = ["edit", "kinematics", "corexy", "save", "confirm"]
         
         result = interactive_profile_review(defaults, parsed, user_data)
         
@@ -61,9 +55,8 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(defaults["kinematics"], "corexy")
         self.assertEqual(parsed["printer"]["kinematics"], "corexy")
 
-    @patch("questionary.select")
-    @patch("questionary.text")
-    def test_interactive_profile_review_edit_volume(self, mock_text, mock_select):
+    @patch("builtins.input")
+    def test_interactive_profile_review_edit_volume(self, mock_input):
         """Verify interactive_profile_review can edit build volume and validates inputs."""
         from core.wizard import interactive_profile_review
         
@@ -71,11 +64,8 @@ class TestWizard(unittest.TestCase):
         parsed = {}
         user_data = {"x_size": "235", "y_size": "235", "z_size": "250"}
         
-        # Select edit -> volume -> save -> confirm
-        mock_select.return_value.ask.side_effect = ["edit", "volume", "save", "confirm"]
-        
-        # Enter valid dimensions: 300, 300, 350
-        mock_text.return_value.ask.side_effect = ["300", "300", "350"]
+        # Mock inputs: edit -> volume -> 300 -> 300 -> 350 -> save -> confirm
+        mock_input.side_effect = ["edit", "volume", "300", "300", "350", "save", "confirm"]
         
         result = interactive_profile_review(defaults, parsed, user_data)
         
@@ -87,9 +77,8 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(parsed["stepper_y"]["position_max"], "300")
         self.assertEqual(parsed["stepper_z"]["position_max"], "350")
 
-    @patch("questionary.select")
-    @patch("questionary.text")
-    def test_interactive_profile_review_edit_individual_limits(self, mock_text, mock_select):
+    @patch("builtins.input")
+    def test_interactive_profile_review_edit_individual_limits(self, mock_input):
         """Verify interactive_profile_review can edit individual limits and handles sync correctly."""
         from core.wizard import interactive_profile_review
         
@@ -105,17 +94,12 @@ class TestWizard(unittest.TestCase):
             "x_size": "235", "y_size": "235"
         }
         
-        # We will do two separate edits inside the loop:
-        # First iteration: choose 'edit' -> 'x_position_min' -> type '-10' -> loop back
-        # Second iteration: choose 'y_position_max' -> type '320' -> loop back
-        # Third iteration: choose 'save' -> 'confirm'
-        mock_select.return_value.ask.side_effect = [
-            "edit", "x_position_min",
-            "y_position_max",
+        # Mock inputs: edit -> x_position_min -> -10 -> y_position_max -> 320 -> save -> confirm
+        mock_input.side_effect = [
+            "edit", "x_position_min", "-10",
+            "y_position_max", "320",
             "save", "confirm"
         ]
-        
-        mock_text.return_value.ask.side_effect = ["-10", "320"]
         
         result = interactive_profile_review(defaults, parsed, user_data)
         
@@ -132,8 +116,8 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(user_data["y_size"], "320")
         self.assertEqual(defaults["y_size"], "320")
 
-    @patch("questionary.select")
-    def test_interactive_profile_review_save_auto_adjusts_inconsistent_limits(self, mock_select):
+    @patch("builtins.input")
+    def test_interactive_profile_review_save_auto_adjusts_inconsistent_limits(self, mock_input):
         """Verify that when saving, inconsistent axis limits (min > endstop, max < endstop) are auto-adjusted."""
         from core.wizard import interactive_profile_review
         
@@ -156,7 +140,7 @@ class TestWizard(unittest.TestCase):
         }
         
         # Select edit -> save -> confirm
-        mock_select.return_value.ask.side_effect = ["edit", "save", "confirm"]
+        mock_input.side_effect = ["edit", "save", "confirm"]
         
         result = interactive_profile_review(defaults, parsed, user_data)
         
@@ -381,14 +365,14 @@ class TestWizardRunner(unittest.TestCase):
 
 class TestZSocketAssignment(unittest.TestCase):
 
-    @patch("questionary.select")
+    @patch("builtins.input")
     @patch("core.wizard.fetch_raw_config")
-    def test_z_socket_assignment_and_tmc_post_processing(self, mock_fetch, mock_select):
+    def test_z_socket_assignment_and_tmc_post_processing(self, mock_fetch, mock_input):
         from core.wizard import _step_z_socket_assignment, _apply_z_tmc_mappings
         mock_fetch.return_value = "[extruder1]\nstep_pin: PE1\ndir_pin: PE2\nenable_pin: PE3\n[tmc2209 extruder1]\nuart_pin: PD12\n"
         
         # User selects E1 (extruder1) for stepper_z1
-        mock_select.return_value.ask.return_value = "extruder1"
+        mock_input.return_value = "extruder1"
         
         board_parsed = {
             "extruder1": {
@@ -492,8 +476,8 @@ class TestWizardFanAssignment(unittest.TestCase):
         # Raw config with fan -> True
         self.assertTrue(_has_fan_options({"board_raw_config": "[fan]\npin: PA8"}))
 
-    @patch("questionary.select")
-    def test_step_fan_assignment_default_and_none(self, mock_select):
+    @patch("builtins.input")
+    def test_step_fan_assignment_default_and_none(self, mock_input):
         from core.wizard import _step_fan_assignment
         
         # Board with only default [fan]
@@ -501,16 +485,15 @@ class TestWizardFanAssignment(unittest.TestCase):
         user_data = {"board_raw_config": raw_cfg}
         
         # Select "default" for part cooling, and "none" for hotend
-        mock_select.return_value.ask.side_effect = ["default", "none"]
+        mock_input.side_effect = ["default", "none"]
         
         res = _step_fan_assignment(user_data)
         self.assertEqual(res, "success")
         self.assertEqual(user_data["fan_part_cooling_pin"], "default")
         self.assertEqual(user_data["fan_hotend_pin"], "none")
 
-    @patch("questionary.text")
-    @patch("questionary.select")
-    def test_step_fan_assignment_custom(self, mock_select, mock_text):
+    @patch("builtins.input")
+    def test_step_fan_assignment_custom(self, mock_input):
         from core.wizard import _step_fan_assignment
         
         # Board with fan and heater fan
@@ -518,8 +501,7 @@ class TestWizardFanAssignment(unittest.TestCase):
         user_data = {"board_raw_config": raw_cfg}
         
         # Select "custom" for part cooling, then enter "PB6". Then select "PE5" for hotend.
-        mock_select.return_value.ask.side_effect = ["custom", "PE5"]
-        mock_text.return_value.ask.side_effect = ["PB6"]
+        mock_input.side_effect = ["custom", "PB6", "PE5"]
         
         res = _step_fan_assignment(user_data)
         self.assertEqual(res, "success")
@@ -681,8 +663,8 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
             mock_parsed.return_value = {"bltouch": {"sensor_pin": "^TODO", "control_pin": "TODO"}}
             self.assertTrue(_needs_bltouch_pins(user_data))
 
-    @patch("questionary.select")
-    def test_probe_transitions(self, mock_select):
+    @patch("builtins.input")
+    def test_probe_transitions(self, mock_input):
         from core.wizard import run_wizard, WizardRunner
         
         captured_config = {}
@@ -717,12 +699,12 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         with patch("core.wizard._needs_bltouch_pins", return_value=False):
             self.assertEqual(probe_next("BLTouch", {}), "probe_offsets")
 
-    @patch("questionary.text")
-    def test_step_bltouch_pins_prompt_success(self, mock_text):
+    @patch("builtins.input")
+    def test_step_bltouch_pins_prompt_success(self, mock_input):
         from core.wizard import _step_bltouch_pins
         
         # Mocking prompt for sensor and control pin
-        mock_text.return_value.ask.side_effect = ["^PB7", "PB6"]
+        mock_input.side_effect = ["^PB7", "PB6"]
         
         user_data = {"board": "generic-melzi.cfg"}
         with patch("core.wizard.get_current_board_parsed", return_value={}):
@@ -732,12 +714,12 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         self.assertEqual(user_data["bltouch_sensor_pin"], "^PB7")
         self.assertEqual(user_data["bltouch_control_pin"], "PB6")
 
-    @patch("questionary.text")
-    def test_step_bltouch_pins_prompt_back(self, mock_text):
+    @patch("builtins.input")
+    def test_step_bltouch_pins_prompt_back(self, mock_input):
         from core.wizard import _step_bltouch_pins, _BACK
         
-        # User presses Esc on first prompt -> returns None
-        mock_text.return_value.ask.return_value = None
+        # User navigates back
+        mock_input.return_value = "<"
         
         user_data = {"board": "generic-melzi.cfg"}
         with patch("core.wizard.get_current_board_parsed", return_value={}):
@@ -748,12 +730,12 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
 
 class TestAxisLimitsWizard(unittest.TestCase):
 
-    @patch("questionary.text")
-    def test_step_x_limits_success(self, mock_text):
+    @patch("builtins.input")
+    def test_step_x_limits_success(self, mock_input):
         from core.wizard import _step_x_limits
         
         # min, max, endstop
-        mock_text.return_value.ask.side_effect = ["-5.5", "240.2", "0"]
+        mock_input.side_effect = ["-5.5", "240.2", "0"]
         user_data = {}
         
         res = _step_x_limits(user_data)
@@ -763,12 +745,12 @@ class TestAxisLimitsWizard(unittest.TestCase):
         self.assertEqual(user_data["x_size"], "240.2")
         self.assertEqual(user_data["x_position_endstop"], "0")
 
-    @patch("questionary.text")
-    def test_step_y_limits_back_navigation(self, mock_text):
+    @patch("builtins.input")
+    def test_step_y_limits_back_navigation(self, mock_input):
         from core.wizard import _step_y_limits, _BACK
         
         # User enters min, then at max types '<' to go back, enters min again, enters max, enters endstop
-        mock_text.return_value.ask.side_effect = ["-10", "<", "-5", "250", "0"]
+        mock_input.side_effect = ["-10", "<", "-5", "250", "0"]
         user_data = {}
         
         res = _step_y_limits(user_data)
@@ -777,12 +759,12 @@ class TestAxisLimitsWizard(unittest.TestCase):
         self.assertEqual(user_data["y_position_max"], "250")
         self.assertEqual(user_data["y_position_endstop"], "0")
 
-    @patch("questionary.text")
-    def test_step_z_limits_back_out(self, mock_text):
+    @patch("builtins.input")
+    def test_step_z_limits_back_out(self, mock_input):
         from core.wizard import _step_z_limits, _BACK
         
         # User enters '<' at the very first prompt to back out to previous step
-        mock_text.return_value.ask.return_value = "<"
+        mock_input.return_value = "<"
         user_data = {}
         
         res = _step_z_limits(user_data)

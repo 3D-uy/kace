@@ -1,7 +1,6 @@
 import copy
 import os
-import questionary
-from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
 from core.scraper import fetch_raw_config, parse_config, extract_profile_defaults
 from core.style import custom_style
 from core.translations import t, get_lang
@@ -110,15 +109,14 @@ def _step_profile_review_inner(defaults: dict, parsed: dict, user_data: dict) ->
     while True:
         print_detected_profile_summary(defaults, parsed, user_data)
 
-        action = questionary.select(
+        action = numbered_select(
             t("wizard.profile_review_prompt"),
             choices=[
                 {"name": t("choice.continue"),      "value": "confirm"},
                 {"name": t("choice.edit_profile"),  "value": "edit"},
-                {"name": t("choice.arrow_back"),    "value": "back"},
-            ],
-            style=custom_style
-        ).ask()
+                {"name": f"🔙  {t('choice.arrow_back') if t('choice.arrow_back') else 'Back'}",    "value": "back"},
+            ]
+        )
 
         if action is None:
             raise WizardExit()
@@ -190,36 +188,35 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
         print(f"  {SEP}")
 
         def _ansi_choice(text):
-            return to_formatted_text(ANSI(text))
+            return text
 
         choices = [
-            questionary.Choice(title=_ansi_choice(_row(1,  "Kinematics",         kin,                             "profile.comment_kinematics")), value="kinematics"),
-            questionary.Choice(title=_ansi_choice(_row(2,  "Build Volume",        f"{x_sz} x {y_sz} x {z_sz} mm", "profile.comment_build_volume")), value="volume"),
-            questionary.Separator("  " + "─" * 62),
-            questionary.Choice(title=_ansi_choice(_row(3,  "X position_min",      x_min, "profile.comment_position_min_x")), value="x_position_min"),
-            questionary.Choice(title=_ansi_choice(_row(4,  "X position_max",      x_max, "profile.comment_position_max_x")), value="x_position_max"),
-            questionary.Choice(title=_ansi_choice(_row(5,  "X position_endstop",  x_end, "profile.comment_position_endstop_x")), value="x_position_endstop"),
-            questionary.Separator("  " + "─" * 62),
-            questionary.Choice(title=_ansi_choice(_row(6,  "Y position_min",      y_min, "profile.comment_position_min_y")), value="y_position_min"),
-            questionary.Choice(title=_ansi_choice(_row(7,  "Y position_max",      y_max, "profile.comment_position_max_y")), value="y_position_max"),
-            questionary.Choice(title=_ansi_choice(_row(8,  "Y position_endstop",  y_end, "profile.comment_position_endstop_y")), value="y_position_endstop"),
-            questionary.Separator("  " + "─" * 62),
-            questionary.Choice(title=_ansi_choice(_row(9,  "Z position_min",      z_min, "profile.comment_position_min_z")), value="z_position_min"),
-            questionary.Choice(title=_ansi_choice(_row(10, "Z position_max",      z_max, "profile.comment_position_max_z")), value="z_position_max"),
-            questionary.Choice(title=_ansi_choice(_row(11, "Z position_endstop",  z_end, "profile.comment_position_endstop_z")), value="z_position_endstop"),
-            questionary.Separator("  " + "─" * 62),
-            questionary.Choice(title=_ansi_choice(_row(12, "Hotend Thermistor",   ht,    "profile.comment_hotend_therm")), value="hotend_thermistor"),
-            questionary.Choice(title=_ansi_choice(_row(13, "Bed Thermistor",      bt,    "profile.comment_bed_therm")), value="bed_thermistor"),
-            questionary.Separator("  " + "─" * 62),
-            questionary.Choice(title=_ansi_choice(f"  {B}{t('choice.save_continue')}{R}"), value="save"),
-            questionary.Choice(title=_ansi_choice(f"  {B}{t('choice.back_discard')}{R}"), value="back")
+            Choice(title=_ansi_choice(_row(1,  "Kinematics",         kin,                             "profile.comment_kinematics")), value="kinematics"),
+            Choice(title=_ansi_choice(_row(2,  "Build Volume",        f"{x_sz} x {y_sz} x {z_sz} mm", "profile.comment_build_volume")), value="volume"),
+            Separator("  " + "─" * 62),
+            Choice(title=_ansi_choice(_row(3,  "X position_min",      x_min, "profile.comment_position_min_x")), value="x_position_min"),
+            Choice(title=_ansi_choice(_row(4,  "X position_max",      x_max, "profile.comment_position_max_x")), value="x_position_max"),
+            Choice(title=_ansi_choice(_row(5,  "X position_endstop",  x_end, "profile.comment_position_endstop_x")), value="x_position_endstop"),
+            Separator("  " + "─" * 62),
+            Choice(title=_ansi_choice(_row(6,  "Y position_min",      y_min, "profile.comment_position_min_y")), value="y_position_min"),
+            Choice(title=_ansi_choice(_row(7,  "Y position_max",      y_max, "profile.comment_position_max_y")), value="y_position_max"),
+            Choice(title=_ansi_choice(_row(8,  "Y position_endstop",  y_end, "profile.comment_position_endstop_y")), value="y_position_endstop"),
+            Separator("  " + "─" * 62),
+            Choice(title=_ansi_choice(_row(9,  "Z position_min",      z_min, "profile.comment_position_min_z")), value="z_position_min"),
+            Choice(title=_ansi_choice(_row(10, "Z position_max",      z_max, "profile.comment_position_max_z")), value="z_position_max"),
+            Choice(title=_ansi_choice(_row(11, "Z position_endstop",  z_end, "profile.comment_position_endstop_z")), value="z_position_endstop"),
+            Separator("  " + "─" * 62),
+            Choice(title=_ansi_choice(_row(12, "Hotend Thermistor",   ht,    "profile.comment_hotend_therm")), value="hotend_thermistor"),
+            Choice(title=_ansi_choice(_row(13, "Bed Thermistor",      bt,    "profile.comment_bed_therm")), value="bed_thermistor"),
+            Separator("  " + "─" * 62),
+            Choice(title=_ansi_choice(f"  {B}{t('choice.save_continue')}{R}"), value="save"),
+            Choice(title=_ansi_choice(f"  {B}{t('choice.back_discard')}{R}"), value="back")
         ]
 
-        prop = questionary.select(
+        prop = numbered_select(
             t("wizard.profile_editor_prompt"),
-            choices=choices,
-            style=custom_style
-        ).ask()
+            choices=choices
+        )
 
         if prop is None:
             raise WizardExit()
@@ -280,23 +277,22 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             return "back"
 
         if prop == "kinematics":
-            new_kin = questionary.select(
+            new_kin = numbered_select(
                 "Select Kinematics:",
                 choices=["cartesian", "corexy", "delta"],
-                default=kin if kin in ["cartesian", "corexy", "delta"] else "cartesian",
-                style=custom_style
-            ).ask()
+                default=["cartesian", "corexy", "delta"].index(kin) if kin in ["cartesian", "corexy", "delta"] else 0
+            )
             if new_kin:
                 staged_user_data["kinematics"] = new_kin
                 staged_defaults["kinematics"] = new_kin
                 staged_parsed.setdefault('printer', {})['kinematics'] = new_kin
 
         elif prop == "volume":
-            new_x = questionary.text("Enter X build volume (mm):", default=str(x_sz), style=custom_style).ask()
+            new_x = simple_input("Enter X build volume (mm):", default=str(x_sz))
             if new_x is not None and validate_pos_float(new_x):
-                new_y = questionary.text("Enter Y build volume (mm):", default=str(y_sz), style=custom_style).ask()
+                new_y = simple_input("Enter Y build volume (mm):", default=str(y_sz))
                 if new_y is not None and validate_pos_float(new_y):
-                    new_z = questionary.text("Enter Z build volume (mm):", default=str(z_sz), style=custom_style).ask()
+                    new_z = simple_input("Enter Z build volume (mm):", default=str(z_sz))
                     if new_z is not None and validate_pos_float(new_z):
                         for key, val in [("x_size", new_x), ("y_size", new_y), ("z_size", new_z),
                                          ("x_position_max", new_x), ("y_position_max", new_y), ("z_position_max", new_z)]:
@@ -319,12 +315,11 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             }
             curr_val = val_map[prop]
             
-            new_val = questionary.text(
+            new_val = simple_input(
                 f"Enter {axis.upper()} {field} (mm):",
                 default=str(curr_val),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             
             if new_val is not None and new_val.strip().lower() not in ("<", "back", "volver", ""):
                 val_clean = new_val.strip()
@@ -341,14 +336,13 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
 
         elif prop == "hotend_thermistor":
             th_choices = list(THERMISTOR_PRESETS) + ["Other (Manual Entry)"]
-            new_th = questionary.select(
+            new_th = numbered_select(
                 "Select Hotend Thermistor:",
                 choices=th_choices,
-                default=ht if ht in THERMISTOR_PRESETS else None,
-                style=custom_style
-            ).ask()
+                default=th_choices.index(ht) if ht in THERMISTOR_PRESETS else 0
+            )
             if new_th == "Other (Manual Entry)":
-                new_th = questionary.text("Enter custom hotend thermistor name:", style=custom_style).ask()
+                new_th = simple_input("Enter custom hotend thermistor name:")
             if new_th:
                 staged_user_data["hotend_thermistor"] = new_th
                 staged_defaults["hotend_thermistor"] = new_th
@@ -356,14 +350,13 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
 
         elif prop == "bed_thermistor":
             bt_choices = list(THERMISTOR_PRESETS) + ["Other (Manual Entry)"]
-            new_tb = questionary.select(
+            new_tb = numbered_select(
                 "Select Bed Thermistor:",
                 choices=bt_choices,
-                default=bt if bt in THERMISTOR_PRESETS else None,
-                style=custom_style
-            ).ask()
+                default=bt_choices.index(bt) if bt in THERMISTOR_PRESETS else 0
+            )
             if new_tb == "Other (Manual Entry)":
-                new_tb = questionary.text("Enter custom bed thermistor name:", style=custom_style).ask()
+                new_tb = simple_input("Enter custom bed thermistor name:")
             if new_tb:
                 staged_user_data["bed_thermistor"] = new_tb
                 staged_defaults["bed_thermistor"] = new_tb
@@ -408,11 +401,10 @@ def _step_printer_profile(user_data, printer_configs):
         _quit_choice(),
     ]
 
-    ans = questionary.select(
+    ans = numbered_select(
         t("wizard.select_printer_model_menu"),
-        choices=choices,
-        style=custom_style
-    ).ask()
+        choices=choices
+    )
 
     if ans == _QUIT or ans is None:
         raise WizardExit()
@@ -427,11 +419,10 @@ def _step_printer_profile(user_data, printer_configs):
         return "Custom / Scratch Build"
 
     if ans == "search":
-        ans = questionary.autocomplete(
+        ans = autocomplete_select(
             t("wizard.select_printer_model"),
-            choices=printer_configs,
-            style=custom_style
-        ).ask()
+            choices=printer_configs
+        )
         if ans is None:
             return "__retry__"
 
@@ -439,11 +430,10 @@ def _step_printer_profile(user_data, printer_configs):
     raw = fetch_raw_config(ans)
     if not raw:
         print(f"\n\033[91m[!] Failed to load printer profile: '{ans}'\033[0m")
-        fallback = questionary.confirm(
+        fallback = yes_no(
             "Continue as Custom / Scratch Build?",
-            default=True,
-            style=custom_style
-        ).ask()
+            default=True
+        )
         if fallback:
             user_data["printer_profile"] = "Custom / Scratch Build"
             user_data["profile_loaded"]  = False
@@ -467,12 +457,14 @@ def _step_printer_profile(user_data, printer_configs):
 def _step_kinematics(user_data):
     if "kinematics" in user_data.get("_authoritative", set()):
         return user_data["kinematics"]
-    ans = questionary.select(
+    choices = ["cartesian", "corexy", "delta", _back_choice(), _quit_choice()]
+    default_kin = user_data.get("kinematics")
+    default_idx = choices.index(default_kin) if default_kin in choices[:3] else 0
+    ans = numbered_select(
         t("wizard.select_kinematics"),
-        choices=["cartesian", "corexy", "delta", _back_choice(), _quit_choice()],
-        default=user_data["kinematics"] if user_data["kinematics"] in ["cartesian", "corexy", "delta"] else None,
-        style=custom_style
-    ).ask()
+        choices=choices,
+        default=default_idx
+    )
     if ans == _QUIT or ans is None: raise WizardExit()
     if ans == _BACK: return _BACK
     user_data["kinematics"] = ans
@@ -482,12 +474,11 @@ def _step_kinematics(user_data):
 def _step_volume(user_data, size_key, max_key, msg_text):
     if size_key in user_data.get("_authoritative", set()):
         return user_data[size_key]
-    ans = questionary.text(
+    ans = simple_input(
         msg_text,
         default=str(user_data.get(size_key) or ""),
-        validate=questionary_pos_numeric_validator,
-        style=custom_style
-    ).ask()
+        validate=questionary_pos_numeric_validator
+    )
     if ans is None or ans.strip().lower() in ("<", "back", "volver"):
         return _BACK
     val_clean = ans.strip()
@@ -504,12 +495,11 @@ def _step_x_limits(user_data):
     while idx < len(prompts):
         curr = prompts[idx]
         if curr == "min":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.x_position_min") or "Enter X position_min (mm) [type '<' to go back]:",
                 default=str(user_data.get("x_position_min") if user_data.get("x_position_min") is not None else "0"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -517,12 +507,11 @@ def _step_x_limits(user_data):
             user_data["x_position_min"] = val.strip()
             idx += 1
         elif curr == "max":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.x_position_max") or "Enter X position_max (mm) [type '<' to go back]:",
                 default=str(user_data.get("x_position_max") or user_data.get("x_size") or "235"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -532,12 +521,11 @@ def _step_x_limits(user_data):
             user_data["x_size"] = val.strip()
             idx += 1
         elif curr == "endstop":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.x_position_endstop") or "Enter X position_endstop (mm) [type '<' to go back]:",
                 default=str(user_data.get("x_position_endstop") if user_data.get("x_position_endstop") is not None else "0"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -554,12 +542,11 @@ def _step_y_limits(user_data):
     while idx < len(prompts):
         curr = prompts[idx]
         if curr == "min":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.y_position_min") or "Enter Y position_min (mm) [type '<' to go back]:",
                 default=str(user_data.get("y_position_min") if user_data.get("y_position_min") is not None else "0"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -567,12 +554,11 @@ def _step_y_limits(user_data):
             user_data["y_position_min"] = val.strip()
             idx += 1
         elif curr == "max":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.y_position_max") or "Enter Y position_max (mm) [type '<' to go back]:",
                 default=str(user_data.get("y_position_max") or user_data.get("y_size") or "235"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -582,12 +568,11 @@ def _step_y_limits(user_data):
             user_data["y_size"] = val.strip()
             idx += 1
         elif curr == "endstop":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.y_position_endstop") or "Enter Y position_endstop (mm) [type '<' to go back]:",
                 default=str(user_data.get("y_position_endstop") if user_data.get("y_position_endstop") is not None else "0"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -604,12 +589,11 @@ def _step_z_limits(user_data):
     while idx < len(prompts):
         curr = prompts[idx]
         if curr == "min":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.z_position_min") or "Enter Z position_min (mm) [type '<' to go back]:",
                 default=str(user_data.get("z_position_min") if user_data.get("z_position_min") is not None else "0"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -617,12 +601,11 @@ def _step_z_limits(user_data):
             user_data["z_position_min"] = val.strip()
             idx += 1
         elif curr == "max":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.z_position_max") or "Enter Z position_max (mm) [type '<' to go back]:",
                 default=str(user_data.get("z_position_max") or user_data.get("z_size") or "250"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):
@@ -632,12 +615,11 @@ def _step_z_limits(user_data):
             user_data["z_size"] = val.strip()
             idx += 1
         elif curr == "endstop":
-            val = questionary.text(
+            val = simple_input(
                 t("wizard.z_position_endstop") or "Enter Z position_endstop (mm) [type '<' to go back]:",
                 default=str(user_data.get("z_position_endstop") if user_data.get("z_position_endstop") is not None else "0"),
-                validate=questionary_numeric_validator,
-                style=custom_style
-            ).ask()
+                validate=questionary_numeric_validator
+            )
             if val is None:
                 raise WizardExit()
             if val.strip().lower() in ("<", "back", "volver"):

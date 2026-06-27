@@ -25,8 +25,7 @@
 #     - reachable-area preview
 
 import sys
-import questionary
-from core.style import custom_style
+from core.menu import simple_input, numbered_select
 from core.translations import t
 
 # ── ANSI color constants (SSH/Pi-safe subset) ────────────────────────────────
@@ -325,12 +324,11 @@ def run_probe_offset_step(
         print()
 
         # ── X offset ─────────────────────────────────────────────────────────────
-        raw_x = questionary.text(
+        raw_x = simple_input(
             t("wizard.probe_x_offset") or "Probe X offset from nozzle (mm, e.g. -38 or 0):",
             default=f"{x_off:.1f}" if x_off != 0.0 else "0",
             validate=_validate_offset,
-            style=custom_style,
-        ).ask()
+        )
 
         if raw_x is None:
             # Ctrl+C or escape → signal back to caller
@@ -347,12 +345,11 @@ def run_probe_offset_step(
         _print_frame(x_off, y_off, bed_w, bed_h, probe_name, warn)
 
         # ── Y offset ─────────────────────────────────────────────────────────────
-        raw_y = questionary.text(
+        raw_y = simple_input(
             t("wizard.probe_y_offset") or "Probe Y offset from nozzle (mm, e.g. 0 or 25):",
             default=f"{y_off:.1f}" if y_off != 0.0 else "0",
             validate=_validate_offset,
-            style=custom_style,
-        ).ask()
+        )
 
         if raw_y is None:
             result["probe_y_offset"] = "__back__"
@@ -373,16 +370,15 @@ def run_probe_offset_step(
         choice_back = t("choice.back") or "Back"
         choice_quit = t("choice.quit") or "Quit"
 
-        ans = questionary.select(
+        ans = numbered_select(
             t("wizard.probe_confirm_offsets") or "Are these probe offsets correct?",
             choices=[
                 {"name": choice_yes, "value": "yes"},
                 {"name": choice_retry, "value": "retry"},
                 {"name": choice_back, "value": "back"},
                 {"name": choice_quit, "value": "quit"},
-            ],
-            style=custom_style,
-        ).ask()
+            ]
+        )
 
         if ans == "quit" or ans is None:
             sys.exit(0)

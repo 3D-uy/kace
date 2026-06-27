@@ -1,7 +1,7 @@
 import os
 import unittest
 from unittest.mock import patch, MagicMock
-import questionary
+from core.menu import Choice
 
 from core.translations import get_mode, set_mode, t
 from core.wizard.ui import _print_step_header
@@ -48,7 +48,7 @@ class TestWizardModes(unittest.TestCase):
             output = mock_stdout.getvalue()
             self.assertEqual(output, "")
 
-    @patch("questionary.select")
+    @patch("core.wizard.steps.hardware.numbered_select")
     @patch("core.wizard.steps.hardware.detect_driver_info")
     @patch("core.wizard.steps.hardware._get_parsed")
     def test_choice_recommendations_beginner(self, mock_get_parsed, mock_detect, mock_select):
@@ -61,21 +61,21 @@ class TestWizardModes(unittest.TestCase):
             "is_socketed": False,
             "driver_mode": "UART"
         }
-        mock_select.return_value.ask.return_value = "TMC2209"
+        mock_select.return_value = "TMC2209"
 
         user_data = {"board": "generic-skr.cfg"}
         _step_driver_type(user_data)
 
-        # Inspect choices passed to questionary.select
+        # Inspect choices passed to numbered_select
         args, kwargs = mock_select.call_args
-        choices = kwargs.get("choices", [])
-        titles = [c.title if hasattr(c, 'title') else c.get('name', '') for c in choices]
+        choices = args[1] if len(args) > 1 else kwargs.get("choices", [])
+        titles = [c.title if hasattr(c, 'title') else (c.get('name', '') if isinstance(c, dict) else str(c)) for c in choices]
 
         # Verify recommended suffixes exist
         self.assertTrue(any("✓ Recommended" in t for t in titles))
         self.assertTrue(any("Not Recommended" in t for t in titles))
 
-    @patch("questionary.select")
+    @patch("core.wizard.steps.hardware.numbered_select")
     @patch("core.wizard.steps.hardware.detect_driver_info")
     @patch("core.wizard.steps.hardware._get_parsed")
     def test_choice_recommendations_advanced(self, mock_get_parsed, mock_detect, mock_select):
@@ -88,27 +88,27 @@ class TestWizardModes(unittest.TestCase):
             "is_socketed": False,
             "driver_mode": "UART"
         }
-        mock_select.return_value.ask.return_value = "TMC2209"
+        mock_select.return_value = "TMC2209"
 
         user_data = {"board": "generic-skr.cfg"}
         _step_driver_type(user_data)
 
         args, kwargs = mock_select.call_args
-        choices = kwargs.get("choices", [])
-        titles = [c.title if hasattr(c, 'title') else c.get('name', '') for c in choices]
+        choices = args[1] if len(args) > 1 else kwargs.get("choices", [])
+        titles = [c.title if hasattr(c, 'title') else (c.get('name', '') if isinstance(c, dict) else str(c)) for c in choices]
 
         # Verify recommended suffixes do not exist
         for title in titles:
             self.assertNotIn("✓ Recommended", title)
             self.assertNotIn("Not Recommended", title)
 
-    @patch("questionary.select")
+    @patch("core.wizard.steps.hardware.numbered_select")
     @patch("core.wizard.steps.hardware.get_reusable_driver_sockets")
     def test_z_socket_recommendations_beginner(self, mock_get_sockets, mock_select):
         """Verify socket recommendation suffix in Beginner mode."""
         set_mode("Beginner")
         mock_get_sockets.return_value = [("extruder1", "E1")]
-        mock_select.return_value.ask.return_value = "extruder1"
+        mock_select.return_value = "extruder1"
 
         user_data = {
             "z_motors": "2",
@@ -119,18 +119,18 @@ class TestWizardModes(unittest.TestCase):
         _step_z_socket_assignment(user_data)
 
         args, kwargs = mock_select.call_args
-        choices = kwargs.get("choices", [])
+        choices = args[1] if len(args) > 1 else kwargs.get("choices", [])
         names = [c.get("name", "") if isinstance(c, dict) else str(c) for c in choices]
 
         self.assertTrue(any("✓ Recommended" in n for n in names))
 
-    @patch("questionary.select")
+    @patch("core.wizard.steps.hardware.numbered_select")
     @patch("core.wizard.steps.hardware.get_reusable_driver_sockets")
     def test_z_socket_recommendations_advanced(self, mock_get_sockets, mock_select):
         """Verify socket recommendation suffix is omitted in Advanced mode."""
         set_mode("Advanced")
         mock_get_sockets.return_value = [("extruder1", "E1")]
-        mock_select.return_value.ask.return_value = "extruder1"
+        mock_select.return_value = "extruder1"
 
         user_data = {
             "z_motors": "2",
@@ -141,7 +141,7 @@ class TestWizardModes(unittest.TestCase):
         _step_z_socket_assignment(user_data)
 
         args, kwargs = mock_select.call_args
-        choices = kwargs.get("choices", [])
+        choices = args[1] if len(args) > 1 else kwargs.get("choices", [])
         names = [c.get("name", "") if isinstance(c, dict) else str(c) for c in choices]
 
         for name in names:

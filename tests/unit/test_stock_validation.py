@@ -25,8 +25,7 @@ class TestStockValidation(unittest.TestCase):
     @patch('core.wizard.fetch_config_list', return_value=['generic-bigtreetech-skr-v1.4.cfg', 'generic-bigtreetech-skr-v1.3.cfg'])
     @patch('core.wizard.discover_mcu', return_value={'mcu_path': '', 'derived_mcu': 'lpc1769', 'hint': ''})
     @patch('core.wizard.get_lang', return_value='English')
-    @patch('core.wizard.questionary')
-    def test_exact_priority_suggestions_lpc1769(self, mock_questionary, mock_get_lang, mock_discover, mock_fetch):
+    def test_exact_priority_suggestions_lpc1769(self, mock_get_lang, mock_discover, mock_fetch):
         """Test that LPC1769 prioritizes exact SKR 1.4 mapping over LPC1768 fallbacks."""
         # We need to simulate the wizard up to board selection.
         # But run_wizard is a while loop. We can just test the inner logic.

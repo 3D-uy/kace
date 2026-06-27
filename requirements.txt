@@ -156,10 +156,7 @@ pyyaml==6.0.1 \
     --hash=sha256:fd1592b3fdf65fff2ad0004b5e363300ef59ced41c2e6b3a99d4089fa8c5435d \
     --hash=sha256:fd66fc5d0da6d9815ba2cebeb4205f95818ff4b79c3ebe268e75d961704af52f
     # via -r requirements.in
-questionary==2.0.1 \
-    --hash=sha256:8ab9a01d0b91b68444dff7f6652c1e754105533f083cbe27597c8110ecc230a2 \
-    --hash=sha256:bcce898bf3dbb446ff62830c86c5c6fb9a22a54146f0f5597d3da43b10d8fc8b
-    # via -r requirements.in
+
 wcwidth==0.8.1 \
     --hash=sha256:f453740b1e4a4f3291faa37944c555d71056c4da08d59809b307ef4feba695c8 \
     --hash=sha256:faf5b4a5366a72dc49cad48cdf21f52bdf63bdda995178e483ba247ff79089b9

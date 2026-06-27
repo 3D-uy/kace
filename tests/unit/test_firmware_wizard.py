@@ -12,7 +12,7 @@ from core.exceptions import DerivationAmbiguityError
 
 class TestFirmwareWizard(unittest.TestCase):
 
-    @patch('core.firmware_wizard.questionary.confirm')
+    @patch('core.firmware_wizard.yes_no')
     def test_skip_wizard_if_no_mcu(self, mock_confirm):
         """Verify the wizard skips if no MCU is designated and manual mode is off."""
         user_data = {"mcu_type": None, "mcu_hint": None}
@@ -27,10 +27,10 @@ class TestFirmwareWizard(unittest.TestCase):
         mock_confirm.assert_not_called()
         self.assertIn("Skipping firmware compilation", captured.getvalue())
 
-    @patch('core.firmware_wizard.questionary.confirm')
+    @patch('core.firmware_wizard.yes_no')
     def test_wizard_decline_compilation(self, mock_confirm):
         """Verify the wizard exits gracefully if compilation confirmation is declined."""
-        mock_confirm.return_value.ask.return_value = False
+        mock_confirm.return_value = False
         user_data = {"mcu_type": "stm32f103", "mcu_hint": "usb"}
         
         captured = io.StringIO()
@@ -42,13 +42,13 @@ class TestFirmwareWizard(unittest.TestCase):
 
         self.assertIn("Skipping firmware compilation", captured.getvalue())
 
-    @patch('core.firmware_wizard.questionary.confirm')
-    @patch('core.firmware_wizard.questionary.select')
-    @patch('core.firmware_wizard.questionary.text')
+    @patch('core.firmware_wizard.yes_no')
+    @patch('core.firmware_wizard.numbered_select')
+    @patch('core.firmware_wizard.simple_input')
     @patch('core.firmware_wizard.build_firmware_orchestrator')
     def test_mcu_family_ambiguity_handling(self, mock_build, mock_text, mock_select, mock_confirm):
         """Verify DerivationAmbiguityError on mcu_family prompts the user and continues."""
-        mock_confirm.return_value.ask.return_value = True
+        mock_confirm.return_value = True
         
         # Ambiguity error triggers: select arch -> select bootloader -> select interface -> select config summary choice -> loop exit on build_now
         # 1. First choice for select: "stm32" (to resolve MCU family ambiguity)
@@ -57,11 +57,11 @@ class TestFirmwareWizard(unittest.TestCase):
         # 4. Fourth choice for select: compile choice (builder.compile_now)
         # 5. Fifth choice for select: deploy method ("none")
         mock_select.side_effect = [
-            MagicMock(ask=lambda: "stm32"),
-            MagicMock(ask=lambda: "No bootloader (0x0)"),
-            MagicMock(ask=lambda: "USB"),
-            MagicMock(ask=lambda: "🚀  Compile Firmware Now"),
-            MagicMock(ask=lambda: "none")
+            "stm32",
+            "No bootloader (0x0)",
+            "USB",
+            "🚀  Compile Firmware Now",
+            "none"
         ]
         
         mock_build.return_value = {
@@ -86,20 +86,20 @@ class TestFirmwareWizard(unittest.TestCase):
         config_dict = mock_build.call_args[1]["config_dict"]
         self.assertEqual(config_dict.get("CONFIG_MCU"), '"stm32"')
 
-    @patch('core.firmware_wizard.questionary.confirm')
-    @patch('core.firmware_wizard.questionary.select')
+    @patch('core.firmware_wizard.yes_no')
+    @patch('core.firmware_wizard.numbered_select')
     @patch('core.firmware_wizard.build_firmware_orchestrator')
     def test_bootloader_offset_ambiguity_handling(self, mock_build, mock_select, mock_confirm):
         """Verify DerivationAmbiguityError on bootloader offset prompts the user and continues."""
-        mock_confirm.return_value.ask.return_value = True
+        mock_confirm.return_value = True
         
         # First select: "8KiB bootloader (0x2000)"
         # Second select: "Compile now"
         # Third select: deploy method "none"
         mock_select.side_effect = [
-            MagicMock(ask=lambda: "8KiB bootloader (0x2000)"),
-            MagicMock(ask=lambda: "🚀  Compile Firmware Now"),
-            MagicMock(ask=lambda: "none")
+            "8KiB bootloader (0x2000)",
+            "🚀  Compile Firmware Now",
+            "none"
         ]
         
         mock_build.return_value = {

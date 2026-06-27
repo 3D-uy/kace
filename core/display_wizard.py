@@ -24,7 +24,7 @@
 #   replicated for CAN devices, ADXL345, relay boards, etc.
 
 import sys
-import questionary
+from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator
 
 from core.style import custom_style
 from core.translations import t
@@ -204,29 +204,26 @@ def _confirm_risk(analysis: dict, display_key: str) -> bool:
         return True
 
     elif comp_class == "compatible_with_adapter":
-        ans = questionary.confirm(
+        ans = yes_no(
             t("wizard.display_confirm_experimental"),
             default=True,
-            style=custom_style,
-        ).ask()
+        )
         return bool(ans)
 
     elif comp_class == "experimental":
-        ans = questionary.confirm(
+        ans = yes_no(
             t("wizard.display_confirm_experimental"),
             default=False,
-            style=custom_style,
-        ).ask()
+        )
         return bool(ans)
 
     elif comp_class == "unsafe":
         # Hard gate: requires explicit typed acknowledgement
         print(f"\n  {_R}{_B}⛔ This display combination carries a HIGH RISK of permanent hardware damage.{_RS}")
         print(f"  {_R}KACE will generate a commented-out config with safety markers — NOT plug-and-play.{_RS}\n")
-        ans = questionary.text(
-            t("wizard.display_confirm_unsafe"),
-            style=custom_style,
-        ).ask()
+        ans = simple_input(
+            t("wizard.display_confirm_unsafe")
+        )
         return (ans or "").strip().lower() == "i accept the risk"
 
     return False
@@ -254,7 +251,7 @@ def _build_recommended_choices(
         # Separator (questionary separator using dynamic localized string)
         color, badge = _CLASS_BADGE[class_key]
         label = t(f"display.class_{class_key}")
-        choices.append(questionary.Separator(f"  {badge} {label}"))
+        choices.append(Separator(f"  {badge} {label}"))
 
         for section_key, entry, hw_info in entries:
             friendly = _friendly(section_key)
@@ -264,7 +261,7 @@ def _build_recommended_choices(
             })
 
     # Divider + advanced options
-    choices.append(questionary.Separator("──────────────────────────────────"))
+    choices.append(Separator("──────────────────────────────────"))
     choices.append({
         "name":  [
             ("", "  "),
@@ -307,11 +304,10 @@ def _run_manual_search(
     print(f"  {_Y}Selecting an unsafe display will not make it plug-and-play — KACE always{_RS}")
     print(f"  {_Y}generates safety comments and TODO markers for risky combinations.{_RS}\n")
 
-    raw = questionary.autocomplete(
+    raw = autocomplete_select(
         t("wizard.display_manual_prompt"),
         choices=autocomplete_choices,
-        style=custom_style,
-    ).ask()
+    )
 
     if raw is None:
         return None, None
@@ -412,11 +408,10 @@ def run_display_setup_step(
             {"name": t("choice.quit"), "value": _QUIT},
         ])
 
-        ans_a = questionary.select(
+        ans_a = numbered_select(
             t("wizard.display_use_prompt"),
             choices=category_choices,
-            style=custom_style,
-        ).ask()
+        )
 
         if ans_a is None or ans_a == _QUIT:
             raise WizardExit()
@@ -477,11 +472,10 @@ def run_display_setup_step(
                     filtered_recommended, board_filename, detected_mcu
                 )
 
-                ans_b = questionary.select(
+                ans_b = numbered_select(
                     t("wizard.display_category_prompt"),
                     choices=choices_b,
-                    style=custom_style,
-                ).ask()
+                )
 
                 if ans_b is None or ans_b == _QUIT:
                     raise WizardExit()

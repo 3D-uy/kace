@@ -80,8 +80,7 @@ class _InteractiveHostKeyPolicy:
     """
 
     def missing_host_key(self, client, hostname, key):
-        import questionary
-        from core.style import custom_style
+        from core.menu import yes_no
 
         algo = key.get_name()
         # Format fingerprint as colon-separated hex pairs (e.g. ab:cd:ef:...)
@@ -93,11 +92,10 @@ class _InteractiveHostKeyPolicy:
         print(f"    Fingerprint: {fingerprint}")
         print(f"\033[93m    Verify this fingerprint matches your Pi before continuing.\033[0m\n")
 
-        trust = questionary.confirm(
+        trust = yes_no(
             f"Trust and connect to {hostname}?",
             default=False,
-            style=custom_style,
-        ).ask()
+        )
 
         if not trust:
             # Raising SSHException aborts the connection cleanly
@@ -426,8 +424,7 @@ def deploy_config(user_data):
 def deploy_usb(user_data, artifact_type="all"):
     """Deploys the generated artifact(s) to a USB/SD card."""
     try:
-        import questionary
-        from core.style import custom_style
+        from core.menu import simple_input
         
         name_prompt = "Configuration (printer.cfg)" if artifact_type == "config" else \
                       "Firmware (klipper.bin/.uf2)" if artifact_type == "firmware" else "Configuration and Firmware"
@@ -436,10 +433,9 @@ def deploy_usb(user_data, artifact_type="all"):
         is_docker = os.path.exists('/.dockerenv') or os.environ.get('KACE_DOCKER') == '1'
         
         while True:
-            dest = questionary.text(
-                f"Enter USB/SD Card mount path for {name_prompt} (e.g. D:\\ or /media/usb):",
-                style=custom_style
-            ).ask()
+            dest = simple_input(
+                f"Enter USB/SD Card mount path for {name_prompt} (e.g. D:\\ or /media/usb)"
+            )
             
             if not dest:
                 return
@@ -499,8 +495,7 @@ def deploy_usb(user_data, artifact_type="all"):
 def deploy_local(user_data, artifact_type="all"):
     """Copies the requested artifact(s) to a local folder on the PC."""
     try:
-        import questionary
-        from core.style import custom_style
+        from core.menu import simple_input
         
         name_prompt = "Configuration (printer.cfg)" if artifact_type == "config" else \
                       "Firmware (klipper.bin/.uf2)" if artifact_type == "firmware" else "Configuration and Firmware"
@@ -509,10 +504,9 @@ def deploy_local(user_data, artifact_type="all"):
         is_docker = os.path.exists('/.dockerenv') or os.environ.get('KACE_DOCKER') == '1'
         
         while True:
-            dest = questionary.text(
-                f"Enter local destination folder path for {name_prompt} (e.g. C:\\3DPrinter or ~/Documents):",
-                style=custom_style
-            ).ask()
+            dest = simple_input(
+                f"Enter local destination folder path for {name_prompt} (e.g. C:\\3DPrinter or ~/Documents)"
+            )
             
             if not dest:
                 return
@@ -572,8 +566,7 @@ def deploy_local(user_data, artifact_type="all"):
 
 def deploy_avrdude(user_data, artifact_path, mcu_type):
     """Deploys firmware via USB using avrdude (for AVR MCUs)."""
-    import questionary
-    from core.style import custom_style
+    from core.menu import simple_input, yes_no
 
     if not shutil.which("avrdude"):
         print("\n\033[91mERROR:\033[0m 'avrdude' is not installed or not in PATH.")
@@ -589,11 +582,10 @@ def deploy_avrdude(user_data, artifact_path, mcu_type):
         default_port = "/dev/ttyUSB0"
 
     print("\n\033[96m>>> AVR Flashing via avrdude\033[0m")
-    port = questionary.text(
+    port = simple_input(
         "Enter the serial port for flashing:",
-        default=default_port,
-        style=custom_style
-    ).ask()
+        default=default_port
+    )
 
     if not port:
         print("\033[93mFlashing cancelled.\033[0m")
@@ -611,7 +603,7 @@ def deploy_avrdude(user_data, artifact_path, mcu_type):
     cmd_str = " ".join(cmd)
     print(f"\n\033[93mGenerated Command:\033[0m {cmd_str}")
     
-    confirm = questionary.confirm("Execute this command now?").ask()
+    confirm = yes_no("Execute this command now?")
     if confirm:
         print("\n\033[96m>>> Running avrdude...\033[0m")
         try:
@@ -633,8 +625,7 @@ def deploy_moonraker(user_data):
       4. Optionally trigger FIRMWARE_RESTART or service restart.
       5. On failure, offer to fall back to SSH deployment.
     """
-    import questionary
-    from core.style import custom_style
+    from core.menu import simple_input, yes_no, numbered_select, password_input
     from core.translations import t
     from core.moonraker import (
         DEFAULT_PORT,
@@ -648,40 +639,36 @@ def deploy_moonraker(user_data):
     )
 
     # ── Step 1: Gather connection details ─────────────────────────
-    host = questionary.text(
+    host = simple_input(
         t("moonraker.host_prompt"),
-        default=user_data.get("moonraker_host", ""),
-        style=custom_style,
-    ).ask()
+        default=user_data.get("moonraker_host", "")
+    )
 
     if not host:
         print("\033[93mMoonraker deployment cancelled.\033[0m")
         return
 
-    port_str = questionary.text(
+    port_str = simple_input(
         t("moonraker.port_prompt"),
-        default=str(user_data.get("moonraker_port", DEFAULT_PORT)),
-        style=custom_style,
-    ).ask()
+        default=str(user_data.get("moonraker_port", DEFAULT_PORT))
+    )
 
     try:
         port = int(port_str) if port_str else DEFAULT_PORT
     except ValueError:
         port = DEFAULT_PORT
 
-    api_key = questionary.text(
+    api_key = simple_input(
         t("moonraker.api_key_prompt"),
-        default="",
-        style=custom_style,
-    ).ask() or ""
+        default=""
+    ) or ""
 
     # Warn if using plain HTTP with an API key
     if api_key and host.strip().lower().startswith("http://"):
-        warning_ok = questionary.confirm(
+        warning_ok = yes_no(
             t("moonraker.http_warning"),
-            default=False,
-            style=custom_style,
-        ).ask()
+            default=False
+        )
         if warning_ok is None or not warning_ok:
             print(f"\n\033[91m[!] {t('moonraker.http_warning_cancelled')}\033[0m")
             return
@@ -697,16 +684,15 @@ def deploy_moonraker(user_data):
     if not ok:
         print(f"\033[91m[!] {t('moonraker.unreachable', host=host, port=port, error=info)}\033[0m")
         # Offer SSH fallback
-        fallback = questionary.confirm(
+        fallback = yes_no(
             t("moonraker.fallback_ssh"),
-            default=False,
-            style=custom_style,
-        ).ask()
+            default=False
+        )
         if fallback:
             user_data['host']      = host
-            ssh_user = questionary.text(t("kace.ssh_user_prompt"), default="pi", style=custom_style).ask()
-            ssh_pass = questionary.password(t("kace.ssh_pass_prompt"), style=custom_style).ask()
-            ssh_dest = questionary.text(t("kace.ssh_dest_prompt"), default="~/printer_data/config/", style=custom_style).ask()
+            ssh_user = simple_input(t("kace.ssh_user_prompt"), default="pi")
+            ssh_pass = password_input(t("kace.ssh_pass_prompt"))
+            ssh_dest = simple_input(t("kace.ssh_dest_prompt"), default="~/printer_data/config/")
             if user_data['host'] and ssh_user and ssh_dest:
                 user_data['user']      = ssh_user
                 user_data['dest_path'] = ssh_dest
@@ -757,15 +743,14 @@ def deploy_moonraker(user_data):
         print(f"\033[92m[OK] {t('moonraker.upload_ok')}\033[0m")
 
         # ── Step 5: Restart prompt ────────────────────────────────────
-        restart_choice = questionary.select(
+        restart_choice = numbered_select(
             t("moonraker.restart_prompt"),
             choices=[
                 {"name": t("moonraker.restart_firmware"), "value": "firmware"},
                 {"name": t("moonraker.restart_service"),  "value": "service"},
                 {"name": t("moonraker.restart_skip"),     "value": "skip"},
-            ],
-            style=custom_style,
-        ).ask()
+            ]
+        )
 
         if restart_choice is None:
             restart_choice = "skip"

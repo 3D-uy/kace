@@ -1,7 +1,6 @@
 import sys
 import os
 import copy
-import questionary
 from core.translations import t, get_lang
 from firmware.detector import discover_mcu_hardware
 

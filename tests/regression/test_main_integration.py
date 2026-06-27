@@ -188,17 +188,11 @@ _WIZARD_USER_DATA_NO_PARSED = {
 # ── Context manager helpers ───────────────────────────────────────────────────
 
 def _mock_questionary_for_main(macros_answer=True, deploy_answer="none"):
-    """Return a dict of patches to suppress Phase 3/4 questionary prompts
+    """Return a dict of patches to suppress Phase 3/4 prompts
     inside main() (macros confirm + deployment select)."""
-    confirm_mock = MagicMock()
-    confirm_mock.return_value.ask.return_value = macros_answer
-
-    select_mock = MagicMock()
-    select_mock.return_value.ask.return_value = deploy_answer
-
     return {
-        "kace.questionary.confirm": confirm_mock,
-        "kace.questionary.select":  select_mock,
+        "kace.yes_no": MagicMock(return_value=macros_answer),
+        "kace.numbered_select":  MagicMock(return_value=deploy_answer),
     }
 
 
@@ -235,7 +229,6 @@ class _HeadlessMixin:
 
 # ── Phase-transition & error-handling tests ────────────────────────────────────
 
-@_skip_no_questionary
 class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
     """
     Each test validates one distinct execution path through main().
@@ -313,8 +306,8 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         """If run_wizard already set board_parsed, fetch_raw_config must NOT
         be called — the cached parse is reused directly."""
         q_patches = _mock_questionary_for_main()
-        with patch('kace.questionary.confirm', q_patches['kace.questionary.confirm']), \
-             patch('kace.questionary.select',  q_patches['kace.questionary.select']):
+        with patch('kace.yes_no', q_patches['kace.yes_no']), \
+             patch('kace.numbered_select',  q_patches['kace.numbered_select']):
             import kace
             with self.assertRaises(SystemExit):
                 kace.main()
@@ -345,8 +338,8 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         q_patches = _mock_questionary_for_main()
         firmware_wizard_calls = []
 
-        with patch('kace.questionary.confirm', q_patches['kace.questionary.confirm']), \
-             patch('kace.questionary.select',  q_patches['kace.questionary.select']), \
+        with patch('kace.yes_no', q_patches['kace.yes_no']), \
+             patch('kace.numbered_select',  q_patches['kace.numbered_select']), \
              patch('core.firmware_wizard.run_firmware_wizard',
                    side_effect=lambda ud: firmware_wizard_calls.append(ud)):
             import kace
@@ -380,8 +373,8 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         )
 
         q_patches = _mock_questionary_for_main()
-        with patch('kace.questionary.confirm', q_patches['kace.questionary.confirm']), \
-             patch('kace.questionary.select',  q_patches['kace.questionary.select']), \
+        with patch('kace.yes_no', q_patches['kace.yes_no']), \
+             patch('kace.numbered_select',  q_patches['kace.numbered_select']), \
              patch('kace.generate_config', side_effect=gen_err):
             import kace
             with self.assertRaises(SystemExit) as ctx:
@@ -408,8 +401,8 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         """Choosing 'none' for deployment must complete the pipeline and
         exit with code 0."""
         q_patches = _mock_questionary_for_main(macros_answer=True, deploy_answer="none")
-        with patch('kace.questionary.confirm', q_patches['kace.questionary.confirm']), \
-             patch('kace.questionary.select',  q_patches['kace.questionary.select']):
+        with patch('kace.yes_no', q_patches['kace.yes_no']), \
+             patch('kace.numbered_select',  q_patches['kace.numbered_select']):
             import kace
             with self.assertRaises(SystemExit) as ctx:
                 kace.main()
@@ -419,7 +412,6 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
 
 # ── User-data propagation tests ───────────────────────────────────────────────
 
-@_skip_no_questionary
 class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
     """Verifies that data flows correctly between pipeline phases."""
 
@@ -444,8 +436,8 @@ class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
             return {"content": "[printer]\n"}
 
         q_patches = _mock_questionary_for_main()
-        with patch('kace.questionary.confirm', q_patches['kace.questionary.confirm']), \
-             patch('kace.questionary.select',  q_patches['kace.questionary.select']), \
+        with patch('kace.yes_no', q_patches['kace.yes_no']), \
+             patch('kace.numbered_select',  q_patches['kace.numbered_select']), \
              patch('kace.generate_config', side_effect=capture_generate):
             import kace
             with self.assertRaises(SystemExit):
@@ -475,8 +467,8 @@ class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
         """When the wizard does not pre-populate board_parsed, main() must call
         fetch_raw_config with the board name from user_data."""
         q_patches = _mock_questionary_for_main()
-        with patch('kace.questionary.confirm', q_patches['kace.questionary.confirm']), \
-             patch('kace.questionary.select',  q_patches['kace.questionary.select']), \
+        with patch('kace.yes_no', q_patches['kace.yes_no']), \
+             patch('kace.numbered_select',  q_patches['kace.numbered_select']), \
              patch('kace.generate_config', return_value={"content": "[printer]\n"}):
             import kace
             with self.assertRaises(SystemExit):
@@ -504,10 +496,8 @@ class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
             captured_kwargs.update(kwargs)
             return {"content": "[printer]\n"}
 
-        with patch('kace.questionary.confirm',
-                   return_value=MagicMock(ask=lambda: False)), \
-             patch('kace.questionary.select',
-                   return_value=MagicMock(ask=lambda: "none")), \
+        with patch('kace.yes_no', return_value=False), \
+             patch('kace.numbered_select', return_value='none'), \
              patch('kace.generate_config', side_effect=capture):
             import kace
             with self.assertRaises(SystemExit):
@@ -521,7 +511,6 @@ class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
 
 # ── Deployment path selection tests ──────────────────────────────────────────
 
-@_skip_no_questionary
 class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
     """Verifies the correct deployment function is called for each deploy choice."""
 
@@ -538,10 +527,8 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
              patch('kace.print_summary'), \
              patch('kace.time.sleep'), \
              patch('builtins.print'), \
-             patch('kace.questionary.confirm',
-                   return_value=MagicMock(ask=lambda: True)), \
-             patch('kace.questionary.select',
-                   return_value=MagicMock(ask=lambda: deploy_choice)), \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select', return_value=deploy_choice), \
              patch(deploy_fn_path, deploy_mock):
             import kace
             with self.assertRaises(SystemExit):
@@ -583,10 +570,8 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
              patch('kace.print_summary'), \
              patch('kace.time.sleep'), \
              patch('builtins.print'), \
-             patch('kace.questionary.confirm',
-                   return_value=MagicMock(ask=lambda: True)), \
-             patch('kace.questionary.select',
-                   return_value=MagicMock(ask=lambda: "none")), \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select', return_value='none'), \
              patch('kace.deploy_usb',       usb_mock), \
              patch('kace.deploy_local',     local_mock), \
              patch('kace.deploy_config',    ssh_mock), \
@@ -603,7 +588,6 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
 
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────
 
-@_skip_no_questionary
 @_skip_no_jinja2
 class TestMainCLIFullPipelineSmoke(_HeadlessMixin, unittest.TestCase):
     """Smoke test: runs the COMPLETE pipeline with real generate_config()
@@ -651,10 +635,8 @@ class TestMainCLIFullPipelineSmoke(_HeadlessMixin, unittest.TestCase):
                     return expanded.replace(home, tmpdir, 1)
                 return expanded
 
-            with patch('kace.questionary.confirm',
-                       return_value=MagicMock(ask=lambda: True)), \
-                 patch('kace.questionary.select',
-                       return_value=MagicMock(ask=lambda: 'none')), \
+            with patch('kace.yes_no', return_value=True), \
+                 patch('kace.numbered_select', return_value='none'), \
                  patch('core.generator.os.path.expanduser', side_effect=_redirect), \
                  patch('kace.os.path.expanduser', side_effect=_redirect):
                 with self.assertRaises(SystemExit) as ctx:

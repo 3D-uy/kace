@@ -104,8 +104,8 @@ class TestDisplayVoltageSafety(unittest.TestCase):
 
 class TestProbeOffsetVisualizerHardening(unittest.TestCase):
 
-    @patch("questionary.text")
-    @patch("questionary.select")
+    @patch("core.probe_offset_visualizer.simple_input")
+    @patch("core.probe_offset_visualizer.numbered_select")
     @patch("builtins.print")
     def test_run_probe_offset_step_retry_then_yes(self, mock_print, mock_select, mock_text):
         """Verify the probe offset setup loop handles retry and final acceptance."""
@@ -120,15 +120,15 @@ class TestProbeOffsetVisualizerHardening(unittest.TestCase):
         # Simulate user inputs:
         # First round: x_off = "-38.0", y_off = "10.0" -> confirm choice = "retry"
         # Second round: x_off = "-40.0", y_off = "5.0" -> confirm choice = "yes"
-        mock_text.return_value.ask.side_effect = ["-38.0", "10.0", "-40.0", "5.0"]
-        mock_select.return_value.ask.side_effect = ["retry", "yes"]
+        mock_text.side_effect = ["-38.0", "10.0", "-40.0", "5.0"]
+        mock_select.side_effect = ["retry", "yes"]
         
         res = run_probe_offset_step(user_data, "generic-creality-v4.2.2.cfg")
         
         self.assertEqual(res["probe_x_offset"], "-40.0")
         self.assertEqual(res["probe_y_offset"], "5.0")
 
-    @patch("questionary.text")
+    @patch("core.probe_offset_visualizer.simple_input")
     def test_run_probe_offset_step_cancel(self, mock_text):
         """Verify user cancellation (Ctrl+C/Escape returning None) returns __back__."""
         from core.probe_offset_visualizer import run_probe_offset_step
@@ -136,7 +136,7 @@ class TestProbeOffsetVisualizerHardening(unittest.TestCase):
         user_data = {"probe": "BLTouch", "x_size": "235", "y_size": "235"}
         
         # User cancels at X offset prompt
-        mock_text.return_value.ask.return_value = None
+        mock_text.return_value = None
         
         res = run_probe_offset_step(user_data, "generic-creality-v4.2.2.cfg")
         self.assertEqual(res["probe_x_offset"], "__back__")
@@ -187,7 +187,7 @@ class TestMCUDetectorFallbacks(unittest.TestCase):
 class TestDriverSelectionSafety(unittest.TestCase):
 
     @patch("core.wizard.steps.hardware._get_parsed")
-    @patch("questionary.select")
+    @patch("core.wizard.steps.hardware.numbered_select")
     def test_integrated_driver_warning_generation(self, mock_select, mock_get_parsed):
         """Verify integrated boards emit warning suffixes on non-matching stepper choices."""
         from core.wizard.steps.hardware import _step_driver_type
@@ -200,7 +200,7 @@ class TestDriverSelectionSafety(unittest.TestCase):
             "is_socketed": False,
             "driver_mode": "UART"
         }):
-            mock_select.return_value.ask.return_value = "TMC2209"
+            mock_select.return_value = "TMC2209"
             
             # Beginner mode to force recommendation formatting
             with patch("core.translations.get_mode", return_value="Beginner"):
@@ -219,15 +219,15 @@ class TestDriverSelectionSafety(unittest.TestCase):
 class TestBackupRollbackIntegration(unittest.TestCase):
 
     @patch("core.moonraker.check_moonraker")
-    @patch("questionary.confirm")
+    @patch("core.menu.yes_no")
     @patch("time.sleep")
-    @patch("questionary.text")
+    @patch("core.menu.simple_input")
     @patch("core.moonraker.verify_remote_file_exists")
     @patch("core.moonraker.download_printer_cfg")
     @patch("core.moonraker.upload_printer_cfg")
     @patch("core.moonraker.restart_firmware")
     @patch("core.moonraker.check_klipper_ready")
-    @patch("questionary.select")
+    @patch("core.menu.numbered_select")
     @patch("builtins.print")
     def test_deploy_moonraker_rollback_on_failed_verification(
         self, mock_print, mock_select, mock_ready, mock_restart, mock_upload, mock_download, mock_exists, mock_text, mock_sleep, mock_confirm, mock_check_mr
@@ -237,7 +237,7 @@ class TestBackupRollbackIntegration(unittest.TestCase):
         
         # 0. Mock Moonraker connection checks
         mock_check_mr.return_value = (True, "v1.0.0")
-        mock_confirm.return_value.ask.return_value = True
+        mock_confirm.return_value = True
         
         # 1. Remote file printer.cfg exists, download returns backup bytes
         mock_exists.side_effect = lambda h, p, f, **kw: True if f == "printer.cfg" else False
@@ -247,13 +247,13 @@ class TestBackupRollbackIntegration(unittest.TestCase):
         mock_upload.return_value = (True, "printer.cfg")
         
         # 3. Choose 'firmware' restart
-        mock_select.return_value.ask.return_value = "firmware"
+        mock_select.return_value = "firmware"
         mock_restart.return_value = (True, "Restarted")
         
         # 4. Klipper reports NOT ready during verification (returns config error)
         mock_ready.return_value = (False, "error: Heater heater_bed not matching pins")
         
-        mock_text.return_value.ask.side_effect = ["192.168.1.100", "7125", ""]
+        mock_text.side_effect = ["192.168.1.100", "7125", ""]
         
         deploy_moonraker({"moonraker_host": "192.168.1.100", "moonraker_port": 7125})
         
@@ -511,7 +511,7 @@ class TestBackupRollbackIntegration(unittest.TestCase):
 
     @patch("core.moonraker.check_moonraker")
     @patch("time.sleep")
-    @patch("questionary.text")
+    @patch("core.menu.simple_input")
     @patch("core.moonraker.verify_remote_file_exists")
     @patch("core.moonraker.download_printer_cfg")
     @patch("core.moonraker.upload_printer_cfg")
@@ -525,7 +525,7 @@ class TestBackupRollbackIntegration(unittest.TestCase):
         
         # Connection succeeds
         mock_check_mr.return_value = (True, "v1.0.0")
-        mock_text.return_value.ask.side_effect = ["192.168.1.100", "7125", ""]
+        mock_text.side_effect = ["192.168.1.100", "7125", ""]
         
         # Backup exists
         mock_exists.side_effect = lambda h, p, f, **kw: True if f == "printer.cfg" else False
