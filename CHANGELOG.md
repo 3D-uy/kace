@@ -10,6 +10,15 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.4] — 2026-06-28
+
+### Fixed
+- Fixed screen clearing mid-installation by removing redundant banner.py call.
+- Relocated the `[include macros.cfg]` line to reside inside the `# Includes` block instead of prepending it to the start of the file.
+- Skipped Z endstop checks and enforced negative `position_min` (`-2.0`) for Z virtual endstops (probes like BLTouch / CR-Touch) to avoid Klipper startup errors.
+
+---
+
 ## [0.9.3] — 2026-06-24
 
 ### Fixed
@@ -101,7 +110,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ANSI colour-coded terminal UI with emoji icon menus
 - Validated against 192 official Klipper board configurations
 
-[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/3D-uy/kace/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/3D-uy/kace/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/3D-uy/kace/compare/v0.1.0...v0.9.2
 [0.1.0]: https://github.com/3D-uy/kace/releases/tag/v0.1.0

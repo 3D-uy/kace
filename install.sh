@@ -22,12 +22,12 @@ E="\033[91m"   # Red (error)
 REPO_URL="https://github.com/3D-uy/kace.git"
 INSTALL_DIR="$HOME/kace"
 KACE_BIN="/usr/local/bin/kace"
-INSTALL_TAG="v0.9.3"
+INSTALL_TAG="v0.9.4"
 
 # ── Banner ───────────────────────────────────────────────────
 clear
 SUBTITLE="KACE Installer"
-VERSION="v0.9.3"
+VERSION="v0.9.4"
 
 # Cosmetic fallback banner for early install phase
 echo ""
