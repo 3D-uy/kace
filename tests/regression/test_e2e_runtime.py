@@ -31,56 +31,14 @@ class TestE2ERuntimeFlow(unittest.TestCase):
     @patch("urllib.request.urlopen")
     @patch("core.wizard.discover_mcu")
     @patch("core.wizard.fetch_config_list")
-    @patch("questionary.select")
-    @patch("questionary.text")
-    @patch("questionary.confirm")
-    @patch("questionary.autocomplete")
-    def test_complete_e2e_runtime_pipeline(self, mock_auto, mock_confirm, mock_text, mock_select, mock_fetch, mock_mcu, mock_urlopen):
+    def test_complete_e2e_runtime_pipeline(self, mock_fetch, mock_mcu, mock_urlopen):
         """Smoke test verifying the complete pipeline: parsed_data -> wizard -> motion_model -> bed_mesh -> generator -> deployer."""
         
         # 1. Setup Mock responses for MCU and board configuration
         mock_mcu.return_value = {"mcu_path": "/dev/serial/by-id/mock-usb", "derived_mcu": "stm32f103"}
         mock_fetch.return_value = ["generic-bigtreetech-skr-v1.4.cfg"]
 
-        # 2. Mock Wizard questions in order
-        # Step 0: autocomplete -> generic-bigtreetech-skr-v1.4.cfg
-        # Step 2: select kinematics -> cartesian
-        # Step 3, 4, 5: text volume -> 235, 235, 250
-        # Step 6: select probe -> BLTouch
-        # Step 8: select hotend_thermistor -> Generic 3950
-        # Step 9: select bed_thermistor -> Generic 3950
-        # Step 10: select driver -> TMC2209
-        # Step 11: select driver mode -> UART
-        # Step 12: select web UI -> Mainsail
-        # Step 13: select Z motors -> 2
-        
-        # We patch ask() to return sequential values depending on the type of prompt
-        mock_select_answers = ["cartesian", "Generic 3950", "Generic 3950", "TMC2209", "UART", "Mainsail", "2"]
-        mock_select_index = 0
-        def side_select(*args, **kwargs):
-            nonlocal mock_select_index
-            ans = mock_select_answers[mock_select_index]
-            mock_select_index += 1
-            m = MagicMock()
-            m.ask.return_value = ans
-            return m
-        mock_select.side_effect = side_select
-
-        mock_text_answers = ["235", "235", "250", "-38", "0", "0.580", "/dev/serial/by-id/mock-usb"]
-        mock_text_index = 0
-        def side_text(*args, **kwargs):
-            nonlocal mock_text_index
-            ans = mock_text_answers[mock_text_index]
-            mock_text_index += 1
-            m = MagicMock()
-            m.ask.return_value = ans
-            return m
-        mock_text.side_effect = side_text
-
-        mock_confirm.return_value.ask.return_value = True
-        mock_auto.return_value.ask.return_value = "generic-bigtreetech-skr-v1.4.cfg"
-
-        # 3. Run Wizard to generate user_data
+        # 2. Pre-populated user_data (wizard is not called in this test)
         user_data = {
             "printer_profile": "generic-bigtreetech-skr-v1.4.cfg",
             "board": "generic-bigtreetech-skr-v1.4.cfg",
@@ -203,7 +161,7 @@ class TestE2ERuntimeFlow(unittest.TestCase):
         mock_urlopen.return_value.__enter__.return_value.read.return_value = b'{"result": {"item": {"path": "printer.cfg"}}}'
         mock_urlopen.return_value.__enter__.return_value.status = 200
 
-        # Run Moonraker deployment simulation
+        # 8. Run Moonraker deployment simulation
         # Create a temp file representing the generated config
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -211,16 +169,14 @@ class TestE2ERuntimeFlow(unittest.TestCase):
             with open(cfg_file, "w") as f:
                 f.write(generated_cfg)
                 
-            # Mock deployment prompt select restart choice to 'skip'
-            mock_select.side_effect = None
-            mock_select.return_value.ask.return_value = "skip"
-            
-            # Mock text prompts for Moonraker host, port, and API key
-            mock_text.side_effect = None
-            mock_text.return_value.ask.side_effect = ["localhost", "7125", ""]
-            
-            # Monkeypatch the config filepath check in deployer
-            with patch("core.deployer.os.path.expanduser", return_value=cfg_file):
+            # Mock core.menu functions used by deploy_moonraker
+            # simple_input calls: host, port, api_key
+            # numbered_select call: restart choice
+            with patch("core.menu.simple_input", side_effect=["localhost", "7125", ""]) as mock_input, \
+                 patch("core.menu.numbered_select", return_value="skip") as mock_select, \
+                 patch("core.menu.yes_no", return_value=True) as mock_yesno, \
+                 patch("core.menu.password_input", return_value="") as mock_pass, \
+                 patch("core.deployer.os.path.expanduser", return_value=cfg_file):
                 deploy_moonraker(user_data)
 
 if __name__ == '__main__':

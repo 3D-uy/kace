@@ -90,6 +90,12 @@ def _check_questionary_mock(helper_name, prompt):
         mock_func = getattr(q, name, None)
         if mock_func is None or not isinstance(mock_func, (Mock, MagicMock)):
             continue
+        # Skip unconfigured MagicMock attributes (auto-created children of the
+        # questionary MagicMock() stub in CI).  Without this guard, accessing
+        # mock_func.return_value below mutates _mock_return_value from DEFAULT,
+        # causing later branches to return garbage MagicMock objects.
+        if mock_func.side_effect is None and mock_func._mock_return_value is DEFAULT:
+            continue
         try:
             # If side_effect is set, we must call mock_func() to get the item for this call
             if mock_func.side_effect is not None:
