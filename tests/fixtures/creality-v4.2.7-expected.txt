@@ -62,7 +62,7 @@ enable_pin: !PC3                                # Enable pin for the stepper dri
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 8                            # Distance in mm the axis travels per full rotation of the motor
 endstop_pin: probe:z_virtual_endstop            # Endstop pin. Add or remove "!" to invert logic
-position_min: 0                                 # Minimum valid Z position
+position_min: -2                                # Minimum valid Z position
 position_max: 250                               # Maximum valid Z position
 
 [extruder]

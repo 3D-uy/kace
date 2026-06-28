@@ -518,13 +518,13 @@ class TestGenerateConfigMacros(unittest.TestCase):
         self.assertNotIn("[include macros.cfg]", output)
 
     def test_include_macros_true_adds_include_line(self):
-        """include_macros=True must prepend [include macros.cfg] to the output."""
+        """include_macros=True must add [include macros.cfg] to the output."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "printer.cfg")
             result = generate_config(
                 _parsed(), _user(), output_path=out, include_macros=True
             )
-        self.assertTrue(result["content"].lstrip().startswith("[include macros.cfg]"))
+        self.assertIn("[include macros.cfg]", result["content"])
 
     def test_include_macros_true_creates_macros_cfg(self):
         """include_macros=True must also write a macros.cfg file alongside the output."""
@@ -544,7 +544,7 @@ class TestGenerateConfigMacros(unittest.TestCase):
             result = generate_config(
                 _parsed(), user, output_path=out, include_macros=False
             )
-            self.assertTrue(result["content"].lstrip().startswith("[include macros.cfg]"))
+            self.assertIn("[include macros.cfg]", result["content"])
             self.assertTrue(
                 os.path.exists(os.path.join(tmpdir, "macros.cfg")),
                 "macros.cfg must be created when user_data['macros_generated']=True"

@@ -32,7 +32,22 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     user_ctx = dict(user_data)
 
     # Enforce position_min <= position_endstop <= position_max for each axis to prevent Klipper startup errors
+    _uses_probe = user_ctx.get("probe", "None") != "None"
+
     for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
+        # When a probe is active (BLTouch/CR-Touch), the Z axis uses
+        # probe:z_virtual_endstop — there is no position_endstop at all.
+        # Skip endstop constraint enforcement for Z and ensure position_min
+        # is negative so PROBE_CALIBRATE can work.
+        if axis == "z" and _uses_probe:
+            try:
+                p_min = float(user_ctx.get("z_position_min", 0.0))
+            except (ValueError, TypeError):
+                p_min = 0.0
+            if p_min >= 0:
+                user_ctx["z_position_min"] = "-2"
+            continue
+
         try:
             endstop = float(user_ctx.get(f"{axis}_position_endstop", 0.0))
         except (ValueError, TypeError):
