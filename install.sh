@@ -87,10 +87,7 @@ if [ -f "$INSTALL_DIR/VERSION" ]; then
     VERSION="v$(cat "$INSTALL_DIR/VERSION" | tr -d '\r\n')"
 fi
 
-# Show the real decorative banner from the cloned repository
-if [ -f "$INSTALL_DIR/core/banner.py" ]; then
-    python3 "$INSTALL_DIR/core/banner.py" "$SUBTITLE" "$VERSION"
-fi
+
 
 # ── Step 3: Install Python dependencies ──────────────────────
 echo -e "${C}[3/5]${R} Installing Python packages..."
