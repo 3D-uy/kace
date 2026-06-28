@@ -10,7 +10,7 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [0.9.4] — 2026-06-28
+## [0.9.3.1] — 2026-06-28
 
 ### Fixed
 - Fixed screen clearing mid-installation by removing redundant banner.py call.
@@ -110,8 +110,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ANSI colour-coded terminal UI with emoji icon menus
 - Validated against 192 official Klipper board configurations
 
-[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.4...HEAD
-[0.9.4]: https://github.com/3D-uy/kace/compare/v0.9.3...v0.9.4
+[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.3.1...HEAD
+[0.9.3.1]: https://github.com/3D-uy/kace/compare/v0.9.3...v0.9.3.1
 [0.9.3]: https://github.com/3D-uy/kace/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/3D-uy/kace/compare/v0.1.0...v0.9.2
 [0.1.0]: https://github.com/3D-uy/kace/releases/tag/v0.1.0
