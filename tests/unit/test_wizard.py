@@ -546,6 +546,67 @@ class TestWizardProfileMerging(unittest.TestCase):
         self.assertEqual(board_parsed["stepper_x"]["dir_pin"], "!PC5")
         self.assertEqual(board_parsed["stepper_x"]["step_pin"], "PD7")
 
+    def test_run_wizard_does_not_merge_profile_pins_for_non_stock_board(self):
+        from core.wizard import run_wizard
+        mock_user_data = {
+            "board": "generic-bigtreetech-skr-v1.4.cfg",
+            "printer_profile": "printer-anet-a8-plus-2019.cfg",
+            "board_parsed": {
+                "stepper_x": {
+                    "step_pin": "P2.2",
+                    "dir_pin": "P2.6",
+                    "enable_pin": "!P2.1",
+                    "endstop_pin": "P1.29"
+                },
+                "heater_bed": {
+                    "heater_pin": "P2.5",
+                    "sensor_pin": "P0.25"
+                },
+                "board_pins": {
+                    "aliases": "EXP1_1=P1.30, EXP1_2=P0.28"
+                }
+            },
+            "_profile_parsed": {
+                "stepper_x": {
+                    "step_pin": "PD7",
+                    "dir_pin": "!PC5",
+                    "enable_pin": "!PD6",
+                    "endstop_pin": "^!PC2",
+                    "rotation_distance": "32",
+                    "position_max": "300"
+                },
+                "heater_bed": {
+                    "heater_pin": "PD4",
+                    "sensor_pin": "PA6",
+                    "sensor_type": "Generic 3950"
+                },
+                "board_pins": {
+                    "aliases": "EXP1_1=PA1, EXP1_2=PA2"
+                }
+            }
+        }
+        with patch("core.wizard.WizardRunner.run", return_value=mock_user_data), \
+             patch("core.wizard.discover_mcu", return_value={}), \
+             patch("core.wizard._apply_z_tmc_mappings"):
+            res = run_wizard()
+
+        board_parsed = res.get("board_parsed", {})
+        # Non-pin properties are merged
+        self.assertEqual(board_parsed["stepper_x"]["rotation_distance"], "32")
+        self.assertEqual(board_parsed["stepper_x"]["position_max"], "300")
+        self.assertEqual(board_parsed["heater_bed"]["sensor_type"], "Generic 3950")
+
+        # Pin properties are NOT merged/overwritten from profile
+        self.assertEqual(board_parsed["stepper_x"]["step_pin"], "P2.2")
+        self.assertEqual(board_parsed["stepper_x"]["dir_pin"], "P2.6")
+        self.assertEqual(board_parsed["stepper_x"]["enable_pin"], "!P2.1")
+        self.assertEqual(board_parsed["stepper_x"]["endstop_pin"], "P1.29")
+        self.assertEqual(board_parsed["heater_bed"]["heater_pin"], "P2.5")
+        self.assertEqual(board_parsed["heater_bed"]["sensor_pin"], "P0.25")
+        
+        # board_pins is NOT merged/overwritten from profile
+        self.assertEqual(board_parsed["board_pins"]["aliases"], "EXP1_1=P1.30, EXP1_2=P0.28")
+
 
 class TestWizardUIOrientation(unittest.TestCase):
     @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())

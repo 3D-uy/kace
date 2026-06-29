@@ -428,6 +428,12 @@ printer_profiles:
     expected_mcu:
       - stm32f4
   - search_terms:
+      - anet-a8-2019
+      - anet-a8plus
+      - anet-a8-plus
+    expected_mcu:
+      - atmega2560
+  - search_terms:
       - anet-a8
       - anet-a4
     expected_mcu:

@@ -87,6 +87,93 @@ def discover_mcu():
     return discover_mcu_hardware()
 
 
+def _check_is_non_stock(board_name: str, printer_profile: str, board_parsed: dict, profile_parsed: dict) -> bool:
+    """Determine if the selected board is a non-stock upgrade for the selected printer profile."""
+    if not board_name or not printer_profile or not profile_parsed or not board_parsed:
+        return False
+
+    # 1. Look up printer profile expected MCU database in data/boards.yaml
+    expected_mcus = []
+    try:
+        from core.loader import load_boards_yaml
+        db = load_boards_yaml()
+        printer_profiles_db = db.get('printer_profiles', [])
+        for entry in printer_profiles_db:
+            if any(term.lower() in printer_profile.lower() for term in entry.get("search_terms", [])):
+                expected_mcus = entry.get("expected_mcu", [])
+                break
+    except Exception:
+        pass
+
+    # 2. If expected stock MCUs are defined, retrieve selected board's MCU and compare
+    if expected_mcus:
+        board_mcu = ""
+        try:
+            for entry in db.get('boards', []):
+                mcu = entry.get('mcu', '')
+                search_terms = entry.get('search_terms', [])
+                if any(term.lower() in board_name.lower() for term in search_terms):
+                    board_mcu = mcu
+                    break
+        except Exception:
+            pass
+
+        if board_mcu:
+            norm_board = _normalize_mcu_family(board_mcu)
+            match_found = any(
+                norm_board == _normalize_mcu_family(exp)
+                or board_mcu.lower().startswith(exp.lower())
+                or exp.lower().startswith(board_mcu.lower())
+                for exp in expected_mcus
+            )
+            if not match_found:
+                return True
+            return False
+
+    # 3. Fallback: Heuristic style check based on pin formats
+    profile_pins = []
+    for section, sdata in profile_parsed.items():
+        if isinstance(sdata, dict):
+            for k, val in sdata.items():
+                if (k == 'pin' or k == 'pins' or k.endswith('_pin')) and isinstance(val, str):
+                    cleaned = val.strip().lstrip('!^~')
+                    if ':' in cleaned:
+                        cleaned = cleaned.split(':', 1)[1].strip().lstrip('!^~')
+                    if cleaned and not cleaned.upper().startswith("TODO"):
+                        profile_pins.append(cleaned)
+
+    board_pins = []
+    for section, sdata in board_parsed.items():
+        if isinstance(sdata, dict):
+            for k, val in sdata.items():
+                if (k == 'pin' or k == 'pins' or k.endswith('_pin')) and isinstance(val, str):
+                    cleaned = val.strip().lstrip('!^~')
+                    if ':' in cleaned:
+                        cleaned = cleaned.split(':', 1)[1].strip().lstrip('!^~')
+                    if cleaned and not cleaned.upper().startswith("TODO"):
+                        board_pins.append(cleaned)
+
+    def get_pin_style(pin: str) -> str:
+        pin_upper = pin.upper()
+        if '.' in pin_upper:
+            return 'LPC'
+        if pin_upper.startswith('GPIO'):
+            return 'RP2040'
+        import re
+        if re.match(r'^P[A-L]\d+', pin_upper):
+            return 'STM32_AVR'
+        return 'UNKNOWN'
+
+    profile_styles = {get_pin_style(p) for p in profile_pins} - {'UNKNOWN'}
+    board_styles = {get_pin_style(p) for p in board_pins} - {'UNKNOWN'}
+
+    if profile_styles and board_styles:
+        if not (profile_styles & board_styles):
+            return True
+
+    return False
+
+
 def run_wizard(user_data_arg=None):
     """Runs the interactive CLI wizard to gather user preferences.
 
@@ -308,10 +395,18 @@ def run_wizard(user_data_arg=None):
     profile_parsed = result_data.get("_profile_parsed")
     board_parsed = result_data.get("board_parsed")
     if profile_parsed and board_parsed is not None:
+        board_name = result_data.get("board", "")
+        printer_profile = result_data.get("printer_profile", "")
+        is_non_stock = _check_is_non_stock(board_name, printer_profile, board_parsed, profile_parsed)
+
         for section, section_data in profile_parsed.items():
+            if section == "board_pins" and is_non_stock:
+                continue
             if section not in board_parsed:
                 board_parsed[section] = {}
             for key, value in section_data.items():
+                if is_non_stock and (key == "pin" or key == "pins" or key.endswith("_pin")):
+                    continue
                 board_parsed[section][key] = value
 
     return result_data

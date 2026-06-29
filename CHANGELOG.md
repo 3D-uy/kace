@@ -10,6 +10,14 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.3.2] — 2026-06-29
+
+### Fixed
+- Fixed pin mapping bug when generating configuration files for printers with replaced (non-stock) board upgrades. Bypassed printer-profile pins and board_pins sections during merge if a non-stock board is active.
+- Added expected MCU stock mappings for Anet A8 Plus 2019 config model file names to boards.yaml.
+
+---
+
 ## [0.9.3.1] — 2026-06-28
 
 ### Fixed
@@ -110,7 +118,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ANSI colour-coded terminal UI with emoji icon menus
 - Validated against 192 official Klipper board configurations
 
-[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.3.1...HEAD
+[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.3.2...HEAD
+[0.9.3.2]: https://github.com/3D-uy/kace/compare/v0.9.3.1...v0.9.3.2
 [0.9.3.1]: https://github.com/3D-uy/kace/compare/v0.9.3...v0.9.3.1
 [0.9.3]: https://github.com/3D-uy/kace/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/3D-uy/kace/compare/v0.1.0...v0.9.2
