@@ -39,7 +39,9 @@ def _require_paramiko():
             current_dir = os.path.dirname(os.path.abspath(__file__))
             req_path = os.path.abspath(os.path.join(current_dir, "..", "requirements-ssh.txt"))
             pip_cmd = [sys.executable, "-m", "pip", "install", "-r", req_path, "--require-hashes"]
-            if platform.system() != "Windows":
+            # Only append --break-system-packages if running globally (outside a venv)
+            in_venv = sys.prefix != sys.base_prefix or hasattr(sys, 'real_prefix')
+            if platform.system() != "Windows" and not in_venv:
                 pip_cmd.append("--break-system-packages")
             subprocess.check_output(
                 pip_cmd,
