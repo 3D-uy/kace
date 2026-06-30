@@ -90,10 +90,12 @@ fi
 
 
 # ── Step 3: Install Python dependencies ──────────────────────
-echo -e "${C}[3/5]${R} Installing Python packages..."
+echo -e "${C}[3/5]${R} Installing Python packages in isolated venv..."
+python3 -m venv "$INSTALL_DIR/venv"
+"$INSTALL_DIR/venv/bin/pip" install --upgrade pip -q
 # Enforce hashes to protect against PyPI substitution attacks
-pip3 install -r "$INSTALL_DIR/requirements.txt" --require-hashes --break-system-packages -q
-echo -e "${G}  ✔ Python dependencies verified${R}"
+"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" --require-hashes -q
+echo -e "${G}  ✔ Python dependencies verified (isolated venv)${R}"
 
 # ── Step 4: Configure executable permissions ─────────────────
 echo -e "${C}[4/5]${R} Configuring permissions..."
@@ -103,14 +105,22 @@ echo -e "${G}  ✔ Permissions applied${R}"
 # ── Step 5: Create global symlink ────────────────────────────
 echo -e "${C}[5/5]${R} Finalizing installation..."
 if command -v sudo &>/dev/null; then
-    sudo ln -sf "$INSTALL_DIR/kace.py" "$KACE_BIN"
-    echo -e "${G}  ✔ Global command created: ${B}kace${R}${G} → ${KACE_BIN}${R}"
+    sudo tee "$KACE_BIN" > /dev/null <<EOF
+#!/usr/bin/env bash
+exec "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/kace.py" "\$@"
+EOF
+    sudo chmod +x "$KACE_BIN"
+    echo -e "${G}  ✔ Global wrapper command created: ${B}kace${R} → ${KACE_BIN}${R}"
 else
     # Fallback: add to user's PATH via ~/.local/bin
     FALLBACK_BIN="$HOME/.local/bin"
     mkdir -p "$FALLBACK_BIN"
-    ln -sf "$INSTALL_DIR/kace.py" "$FALLBACK_BIN/kace"
-    echo -e "${Y}  ⚠ sudo not available. Created fallback symlink at ${FALLBACK_BIN}/kace${R}"
+    tee "$FALLBACK_BIN/kace" > /dev/null <<EOF
+#!/usr/bin/env bash
+exec "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/kace.py" "\$@"
+EOF
+    chmod +x "$FALLBACK_BIN/kace"
+    echo -e "${Y}  ⚠ sudo not available. Created fallback wrapper at ${FALLBACK_BIN}/kace${R}"
     echo -e "${Y}  ⚠ Make sure ${FALLBACK_BIN} is in your PATH:${R}"
     echo -e "${Y}     export PATH=\"\$HOME/.local/bin:\$PATH\"${R}"
 fi
@@ -125,4 +135,4 @@ echo -e "  ${C}Launching KACE...${R}"
 sleep 1
 # Reconnect stdin to the terminal so interactive prompts (questionary) work
 exec < /dev/tty || true
-cd "$INSTALL_DIR" && python3 kace.py
+cd "$INSTALL_DIR" && ./venv/bin/python kace.py
