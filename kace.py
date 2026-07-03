@@ -276,7 +276,12 @@ def main():
         if host is None or not host:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
-        user = simple_input(t("kace.ssh_user_prompt"), default="pi")
+        # Default SSH user is overridable via KACE_SSH_USER (e.g. "kace" for
+        # KACE-installed Klipper). Falls back to the historical default "pi".
+        user = simple_input(
+            t("kace.ssh_user_prompt"),
+            default=os.environ.get("KACE_SSH_USER", "pi")
+        )
         if user is None or not user:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
