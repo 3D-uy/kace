@@ -51,9 +51,23 @@ else
 fi
 
 # ── Step 2: Clone or update KACE repository ──────────────────
-# Runtime files needed on the Pi — docs/assets are excluded from sparse clone
-# Root-level files (kace.py, requirements.txt, etc.) are included automatically
-_SPARSE_DIRS="core firmware data templates"
+# Only runtime files are checked out — docs, tests, docker, CI,
+# and non-essential root files (jobs.json, CHANGELOG, test_run.log…)
+# are excluded to minimize download size on the Pi.
+#
+# Cone mode (default) always pulls ALL root-level files.
+# Non-cone mode lets us whitelist exact paths.
+_SPARSE_PATTERNS="/kace.py
+/VERSION
+/requirements.txt
+/core/
+/firmware/
+/data/
+/templates/"
+
+# Non-runtime dirs/files that can be removed after a full clone fallback
+_CLEANUP_DIRS="docs tests docker .github scripts MagicMock"
+_CLEANUP_FILES="test_run.log jobs.json SWEEP_RESULTS.md REPOSITORY_MANIFEST.md CHANGELOG.md CODE_OF_CONDUCT.md SECURITY.md README.md requirements-ssh.txt .gitattributes"
 
 # Check if sparse checkout is supported (requires Git >= 2.25)
 _git_supports_sparse() {
@@ -74,11 +88,16 @@ else
     echo -e "  Cloning KACE (${INSTALL_TAG}) into ${Y}${INSTALL_DIR}${R}..."
     if _git_supports_sparse; then
         git clone --depth 1 --branch "$INSTALL_TAG" --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR" --quiet
-        git -C "$INSTALL_DIR" sparse-checkout set $_SPARSE_DIRS
-        echo -e "${G}  ✔ Repository cloned (optimized — tag ${INSTALL_TAG} — docs excluded)${R}"
+        # Non-cone mode: only the listed paths are checked out
+        git -C "$INSTALL_DIR" sparse-checkout init --no-cone
+        echo "$_SPARSE_PATTERNS" | git -C "$INSTALL_DIR" sparse-checkout set --no-cone --stdin
+        echo -e "${G}  ✔ Repository cloned (minimal — runtime files only)${R}"
     else
+        # Fallback: full clone, then delete non-runtime files
         git clone --depth 1 --branch "$INSTALL_TAG" "$REPO_URL" "$INSTALL_DIR" --quiet
-        echo -e "${G}  ✔ Repository cloned (tag ${INSTALL_TAG})${R}"
+        for d in $_CLEANUP_DIRS; do rm -rf "$INSTALL_DIR/$d" 2>/dev/null; done
+        for f in $_CLEANUP_FILES; do rm -f "$INSTALL_DIR/$f" 2>/dev/null; done
+        echo -e "${G}  ✔ Repository cloned (tag ${INSTALL_TAG} — non-runtime files removed)${R}"
     fi
 fi
 
