@@ -275,9 +275,10 @@ class TestBackupRollbackIntegration(unittest.TestCase):
     @patch("core.deployer.os.path.isfile", return_value=True)
     @patch("core.deployer.os.path.exists", return_value=False)
     @patch("core.moonraker.check_moonraker", return_value=(False, "unreachable"))
+    @patch("core.menu.numbered_select", return_value="service")
     @patch("builtins.print")
     def test_deploy_ssh_rollback_on_failed_verification(
-        self, mock_print, mock_check_mr, mock_exists, mock_isfile, mock_paramiko, mock_sleep
+        self, mock_print, mock_select, mock_check_mr, mock_exists, mock_isfile, mock_paramiko, mock_sleep
     ):
         """Verify SSH deployment triggers systemctl checks, journalctl logs, and restores backed-up files."""
         from core.deployer import deploy_config
@@ -415,9 +416,10 @@ class TestBackupRollbackIntegration(unittest.TestCase):
     @patch("core.deployer.os.path.isfile", return_value=True)
     @patch("core.deployer.os.path.exists", return_value=False)
     @patch("core.moonraker.check_moonraker", return_value=(False, "unreachable"))
+    @patch("core.menu.numbered_select", return_value="service")
     @patch("builtins.print")
     def test_sudo_non_interactive_fallback(
-        self, mock_print, mock_check_mr, mock_exists, mock_isfile, mock_paramiko, mock_sleep
+        self, mock_print, mock_select, mock_check_mr, mock_exists, mock_isfile, mock_paramiko, mock_sleep
     ):
         """Verify that SSH restart and validation calls use sudo -n with fallbacks."""
         from core.deployer import deploy_config

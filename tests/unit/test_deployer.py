@@ -160,8 +160,9 @@ class TestDeployer(unittest.TestCase):
     @patch('core.deployer._require_paramiko')
     @patch('core.deployer.os.path.isfile')
     @patch('core.deployer.os.path.exists')
+    @patch('core.menu.numbered_select', return_value='skip')
     @patch('builtins.print')
-    def test_deploy_config_sftp_success(self, mock_print, mock_exists, mock_isfile, mock_paramiko_func):
+    def test_deploy_config_sftp_success(self, mock_print, mock_select, mock_exists, mock_isfile, mock_paramiko_func):
         """Test successful config & macros SSH upload."""
         import os
         mock_isfile.return_value = True

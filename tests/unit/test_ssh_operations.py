@@ -58,6 +58,7 @@ _verify_remote_file_exists_patcher = patch('core.moonraker.verify_remote_file_ex
 _download_printer_cfg_patcher = patch('core.moonraker.download_printer_cfg', return_value=(False, b""))
 _check_klipper_ready_patcher = patch('core.moonraker.check_klipper_ready', return_value=(False, "unreachable"))
 _sleep_patcher = patch('time.sleep')
+_numbered_select_patcher = patch('core.menu.numbered_select', return_value='skip')
 
 def setUpModule():
     _check_moonraker_patcher.start()
@@ -65,6 +66,7 @@ def setUpModule():
     _download_printer_cfg_patcher.start()
     _check_klipper_ready_patcher.start()
     _sleep_patcher.start()
+    _numbered_select_patcher.start()
 
 def tearDownModule():
     _check_moonraker_patcher.stop()
@@ -72,6 +74,7 @@ def tearDownModule():
     _download_printer_cfg_patcher.stop()
     _check_klipper_ready_patcher.stop()
     _sleep_patcher.stop()
+    _numbered_select_patcher.stop()
 
 
 # ── Shared test helpers ───────────────────────────────────────────────────────
