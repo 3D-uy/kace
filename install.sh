@@ -60,6 +60,7 @@ fi
 _SPARSE_PATTERNS="/kace.py
 /VERSION
 /requirements.txt
+/requirements-ssh.txt
 /core/
 /firmware/
 /data/
@@ -67,7 +68,7 @@ _SPARSE_PATTERNS="/kace.py
 
 # Non-runtime dirs/files that can be removed after a full clone fallback
 _CLEANUP_DIRS="docs tests docker .github scripts MagicMock"
-_CLEANUP_FILES="test_run.log jobs.json SWEEP_RESULTS.md REPOSITORY_MANIFEST.md CHANGELOG.md CODE_OF_CONDUCT.md SECURITY.md README.md requirements-ssh.txt .gitattributes"
+_CLEANUP_FILES="test_run.log jobs.json SWEEP_RESULTS.md REPOSITORY_MANIFEST.md CHANGELOG.md CODE_OF_CONDUCT.md SECURITY.md README.md .gitattributes"
 
 # Check if sparse checkout is supported (requires Git >= 2.25)
 _git_supports_sparse() {
