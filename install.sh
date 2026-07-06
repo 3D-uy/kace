@@ -37,6 +37,19 @@ echo -e "  ${C}─────────────────────�
 echo ""
 
 # ── Step 1: System dependencies ──────────────────────────────
+# Fix local hostname resolution if missing (prevents "sudo: unable to resolve host" warnings)
+if command -v getent &>/dev/null && command -v hostname &>/dev/null; then
+    _HOSTNAME=$(hostname)
+    if [ -n "$_HOSTNAME" ] && ! getent hosts "$_HOSTNAME" &>/dev/null; then
+        echo -e "  ${Y}⚠ Local hostname '${_HOSTNAME}' is not resolvable.${R}"
+        echo -e "  Attempting to add '${_HOSTNAME}' to /etc/hosts to prevent sudo warnings..."
+        if command -v sudo &>/dev/null; then
+            echo "127.0.1.1 $_HOSTNAME" | sudo tee -a /etc/hosts >/dev/null
+            echo -e "  ${G}✔ Added ${_HOSTNAME} to /etc/hosts${R}"
+        fi
+    fi
+fi
+
 echo -e "${C}[1/5]${R} Checking system dependencies..."
 if command -v apt-get &>/dev/null; then
     sudo apt-get update -qq
