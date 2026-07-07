@@ -1,6 +1,6 @@
 # REPOSITORY MANIFEST — `3D-uy/kace`
 
-**Last updated:** 2026-06-14 · **Version:** main
+**Last updated:** 2026-07-07 · **Version:** main
 
 > This is a living document. Update the version number and `Last updated` date at the top on every release cycle.
 
@@ -42,6 +42,7 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 │   ├── dashboard.py            # System status dashboard — detects Klipper, Moonraker, Mainsail, etc.
 │   ├── display_checker.py      # Display hardware compatibility database and validation
 │   ├── validators.py           # Klipper pin string validation (regex-based)
+│   ├── pin_validator.py        # Pre-flight structural and pin namespace validation
 │   ├── advanced_module_handler.py  # Advanced Klipper module configuration (BLTouch, sensors)
 │   ├── banner.py               # ANSI decorative installer banner (called by install.sh post-clone)
 │   ├── bed_mesh.py             # Bed mesh configuration logic
@@ -112,7 +113,6 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 ├── README.md                   # Project landing page with badges, install commands, validation results
 ├── CHANGELOG.md                # Keep-a-Changelog format release notes
 ├── SWEEP_RESULTS.md            # Full per-config breakdown of the 192-board validation sweep
-├── KNOWN_FAILURES.md           # Documented pre-existing test failures: root cause, risk, fix path
 ├── SECURITY.md                 # Vulnerability reporting policy
 ├── CODE_OF_CONDUCT.md          # Contributor Covenant
 ├── LICENSE                     # GPL-3.0
@@ -168,7 +168,7 @@ Use this checklist before every `git tag` + push to `3D-uy/kace`:
 - [ ] **`requirements.txt` hashes are current** — regenerate via `pip-compile --generate-hashes requirements.in` if any dependency was updated
 - [ ] **`requirements-ssh.txt` hashes are current** — regenerate via `pip-compile --generate-hashes requirements-ssh.in` if any SSH dep was updated
 - [ ] **Sparse checkout dirs in `install.sh` match actual directory structure** — `_SPARSE_DIRS="core firmware data templates"` must list every directory required at runtime (check against the repo root)
-- [ ] **Full test suite passes** — `python3 tests/run_tests.py --verbose` → 0 failures, 0 errors. If any failures appear, cross-reference each failing test ID against `KNOWN_FAILURES.md` by name — count-matching is not sufficient.
+- [ ] **Full test suite passes** — `python3 tests/run_tests.py --verbose` → 0 failures, 0 errors.
 - [ ] **YAML integrity passes** — `python3 tests/run_tests.py --yaml-check` → no schema or precedence errors
 - [ ] **README install commands point to the main branch** — the installation commands must point to `raw.githubusercontent.com/3D-uy/KACE/main/install.sh`
 - [ ] **All three README language variants updated** — `README.md`, `docs/es/README.md`, `docs/pt/README.md` must be in sync on badge URLs and install commands
