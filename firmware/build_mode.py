@@ -62,27 +62,22 @@ def print_build_mode_banner() -> None:
     Print a one-line build-mode status banner at the start of every compile run.
     Shows clearly whether KACE is using the mock toolchain or the real one.
     """
+    if not is_mock_build():
+        return
+
     SEP = "─" * 52
-    if is_mock_build():
-        mode_label = f"{_Y}{_B}⚠  MOCK BUILD MODE{_R}"
-        note = f"{_Y}Firmware artifacts are placeholders — not flashable.{_R}"
-        hint = (
-            f"  {_C}To use the real toolchain:{_R}\n"
-            f"    KACE_REAL_BUILD=1 python3 kace.py\n"
-            f"    python3 kace.py --real-build"
-        )
-        print(f"\n  {SEP}")
-        print(f"  {mode_label}")
-        print(f"  {note}")
-        print(f"{hint}")
-        print(f"  {SEP}\n")
-    else:
-        mode_label = f"{_G}{_B}✓  REAL BUILD MODE{_R}"
-        note = f"{_G}Using system toolchain — firmware will be genuinely compiled.{_R}"
-        print(f"\n  {SEP}")
-        print(f"  {mode_label}")
-        print(f"  {note}")
-        print(f"  {SEP}\n")
+    mode_label = f"{_Y}{_B}⚠  MOCK BUILD MODE{_R}"
+    note = f"{_Y}Firmware artifacts are placeholders — not flashable.{_R}"
+    hint = (
+        f"  {_C}To use the real toolchain:{_R}\n"
+        f"    KACE_REAL_BUILD=1 python3 kace.py\n"
+        f"    python3 kace.py --real-build"
+    )
+    print(f"\n  {SEP}")
+    print(f"  {mode_label}")
+    print(f"  {note}")
+    print(f"{hint}")
+    print(f"  {SEP}\n")
 
 
 def print_mock_warning() -> None:

@@ -164,7 +164,7 @@ def run_firmware_wizard(user_data: dict):
             if clk: config_dict["CONFIG_CLOCK_FREQ"] = clk
 
     # ── 3. Invoke Headless Compiler Orchestrator ──
-    print(f"\n\033[91m[*]\033[0m {t('kace.compiling')}", flush=True)
+    print(f"\n\033[92m[*]\033[0m {t('kace.compiling')}", flush=True)
     result = build_firmware_orchestrator(
         mcu_path=user_data.get('mcu_path'),
         derived_mcu=current_mcu,
