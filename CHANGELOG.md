@@ -6,11 +6,12 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [0.9.3.3] — 2026-07-08
 
 ### Added
 - Pre-flight configuration validation (`core/pin_validator.py`) to prevent Klipper crash loops and OOM-induced network lockouts by rejecting malformed files (missing `[mcu]`, `serial`, `[printer]`, etc.) or cross-family pin namespaces before upload.
 - Environment variable `KACE_SSH_USER` support to override the default SSH user (e.g. for `kace` user instead of `pi`).
+- Added KACE CLI styling color escapes (cyan menu titles, orange suggested/default items, and orange select input prompts) in `core/menu.py`.
 
 ### Fixed
 - Switched `install.sh` to use an isolated Python virtual environment (`venv`) and wrapper commands to prevent system package collisions and potential network lockouts.
@@ -20,6 +21,10 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Preserved `requirements-ssh.txt` in sparse-checkout patterns to prevent missing dependency errors during automatic SSH package setup.
 - Automated local hostname resolution in `/etc/hosts` during installation to suppress generic `sudo` warnings.
 - Mocked interactive restart prompts in deployment tests to resolve CI timeouts.
+- Changed default SSH user references from `pi` to `kace` throughout UI prompts, translation files, and fallback default values.
+- Suppressed `REAL BUILD MODE` notification banner in mock-build compile sequences.
+- Changed `[*]` compile warning color indicator prefix from red to green to prevent false warning flags.
+- Suppressed Git detached HEAD warning advice blocks during tag checkouts in the installer.
 
 ---
 
@@ -131,7 +136,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ANSI colour-coded terminal UI with emoji icon menus
 - Validated against 192 official Klipper board configurations
 
-[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.3.2...HEAD
+[Unreleased]: https://github.com/3D-uy/kace/compare/v0.9.3.3...HEAD
+[0.9.3.3]: https://github.com/3D-uy/kace/compare/v0.9.3.2...v0.9.3.3
 [0.9.3.2]: https://github.com/3D-uy/kace/compare/v0.9.3.1...v0.9.3.2
 [0.9.3.1]: https://github.com/3D-uy/kace/compare/v0.9.3...v0.9.3.1
 [0.9.3]: https://github.com/3D-uy/kace/compare/v0.9.2...v0.9.3
