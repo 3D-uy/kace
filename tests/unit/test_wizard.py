@@ -797,13 +797,13 @@ class TestAxisLimitsWizard(unittest.TestCase):
         
         # min, max, endstop
         mock_input.side_effect = ["-5.5", "240.2", "0"]
-        user_data = {}
+        user_data = {"x_size": "235"}
         
         res = _step_x_limits(user_data)
         self.assertEqual(res, "done")
         self.assertEqual(user_data["x_position_min"], "-5.5")
         self.assertEqual(user_data["x_position_max"], "240.2")
-        self.assertEqual(user_data["x_size"], "240.2")
+        self.assertEqual(user_data["x_size"], "235")  # decoupled, remains unchanged!
         self.assertEqual(user_data["x_position_endstop"], "0")
 
     @patch("builtins.input")

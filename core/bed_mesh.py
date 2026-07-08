@@ -77,8 +77,10 @@ def generate_bed_mesh_config(motion_space: PrinterMotionSpace, user_data: dict, 
         else:
             return 7
 
-    probe_count_x = get_axis_probe_count(motion_space.x_size)
-    probe_count_y = get_axis_probe_count(motion_space.y_size)
+    x_bed_size = motion_space.printable_x_max - motion_space.printable_x_min
+    y_bed_size = motion_space.printable_y_max - motion_space.printable_y_min
+    probe_count_x = get_axis_probe_count(x_bed_size)
+    probe_count_y = get_axis_probe_count(y_bed_size)
 
     # Algorithm selection
     if probe_count_x >= 4 and probe_count_y >= 4:

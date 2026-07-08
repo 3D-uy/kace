@@ -75,6 +75,55 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
             p_max = endstop
             user_ctx[f"{axis}_position_max"] = f"{p_max:g}"
 
+    # ── ADR 001 Validation Layer ──────────────────────────────────────────────
+    try:
+        # Stepper positions
+        x_min_stepper = float(user_ctx.get("x_position_min", 0.0))
+        x_max_stepper = float(user_ctx.get("x_position_max", float(user_ctx.get("x_size", 235.0))))
+        y_min_stepper = float(user_ctx.get("y_position_min", 0.0))
+        y_max_stepper = float(user_ctx.get("y_position_max", float(user_ctx.get("y_size", 235.0))))
+        z_min_stepper = float(user_ctx.get("z_position_min", 0.0))
+        z_max_stepper = float(user_ctx.get("z_position_max", float(user_ctx.get("z_size", 250.0))))
+
+        # Printable limits (with robust derivation fallback)
+        printable_x_min = float(user_ctx.get("printable_x_min", x_min_stepper if x_min_stepper > 0.0 else 0.0))
+        printable_x_max = float(user_ctx.get("printable_x_max", float(user_ctx.get("x_size", 235.0))))
+        printable_y_min = float(user_ctx.get("printable_y_min", y_min_stepper if y_min_stepper > 0.0 else 0.0))
+        printable_y_max = float(user_ctx.get("printable_y_max", float(user_ctx.get("y_size", 235.0))))
+        printable_z_max = float(user_ctx.get("printable_z_max", float(user_ctx.get("z_size", 250.0))))
+    except (ValueError, TypeError) as e:
+        raise GenerationError(f"Invalid numeric value in geometry settings: {e}")
+
+    # Validate endstop bounds constraints (except Z when probe is active)
+    for axis, p_min, p_max in [("x", x_min_stepper, x_max_stepper), 
+                               ("y", y_min_stepper, y_max_stepper), 
+                               ("z", z_min_stepper, z_max_stepper)]:
+        if axis == "z" and _uses_probe:
+            continue
+        try:
+            endstop = float(user_ctx.get(f"{axis}_position_endstop", 0.0))
+            if not (p_min <= endstop <= p_max):
+                raise GenerationError(f"{axis.upper()} position_endstop ({endstop:g}) must be within mechanical limits [{p_min:g}, {p_max:g}].")
+        except (ValueError, TypeError):
+            pass
+
+    # Validate Printable Area fits within travel boundaries
+    if (printable_x_max - printable_x_min) > (x_max_stepper - x_min_stepper):
+        raise GenerationError(f"Printable area width ({printable_x_max - printable_x_min:g}mm) exceeds maximum X travel range ({x_max_stepper - x_min_stepper:g}mm).")
+    if (printable_y_max - printable_y_min) > (y_max_stepper - y_min_stepper):
+        raise GenerationError(f"Printable area depth ({printable_y_max - printable_y_min:g}mm) exceeds maximum Y travel range ({y_max_stepper - y_min_stepper:g}mm).")
+    if printable_z_max > (z_max_stepper - z_min_stepper):
+        raise GenerationError(f"Printable area height ({printable_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper - z_min_stepper:g}mm).")
+
+    # Validate Printable Area inclusion within travel limits
+    if printable_x_min < x_min_stepper or printable_x_max > x_max_stepper:
+        raise GenerationError(f"Printable X boundary [{printable_x_min:g}, {printable_x_max:g}] is outside physical X travel limits [{x_min_stepper:g}, {x_max_stepper:g}].")
+    if printable_y_min < y_min_stepper or printable_y_max > y_max_stepper:
+        raise GenerationError(f"Printable Y boundary [{printable_y_min:g}, {printable_y_max:g}] is outside physical Y travel limits [{y_min_stepper:g}, {y_max_stepper:g}].")
+
+    user_ctx["printable_center_x"] = f"{(printable_x_min + printable_x_max) / 2:g}"
+    user_ctx["printable_center_y"] = f"{(printable_y_min + printable_y_max) / 2:g}"
+
     # Build and serialize the motion space model using the sanitized user_ctx
     from core.motion_model import PrinterMotionSpace
     space = PrinterMotionSpace(user_ctx)

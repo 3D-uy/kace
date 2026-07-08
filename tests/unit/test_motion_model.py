@@ -118,5 +118,57 @@ class TestMotionModel(unittest.TestCase):
         self.assertIn("printable_bed_area", d)
         self.assertIn("nozzle_reachable_area", d)
 
+    def test_decoupled_printable_boundaries(self):
+        """Test motion model with decoupled machine geometry and printable bed boundaries."""
+        # 1. Custom explicit printable area
+        user_data = {
+            "x_size": "250",
+            "y_size": "250",
+            "z_size": "250",
+            "x_position_min": "-10",
+            "x_position_max": "260",
+            "printable_x_min": "10",
+            "printable_x_max": "240",
+            "printable_y_min": "15",
+            "printable_y_max": "245",
+            "printable_z_max": "230"
+        }
+        space = PrinterMotionSpace(user_data)
+        self.assertEqual(space.printable_x_min, 10.0)
+        self.assertEqual(space.printable_x_max, 240.0)
+        self.assertEqual(space.printable_y_min, 15.0)
+        self.assertEqual(space.printable_y_max, 245.0)
+        self.assertEqual(space.printable_z_max, 230.0)
+        
+        # Test printable area mapping
+        self.assertEqual(space.printable_bed_area()["x"], (10.0, 240.0))
+        self.assertEqual(space.printable_bed_area()["y"], (15.0, 245.0))
+
+        # 2. Positive position_min derivation fallback
+        user_data = {
+            "x_size": "235",
+            "y_size": "235",
+            "x_position_min": "15",
+            "y_position_min": "20",
+        }
+        space = PrinterMotionSpace(user_data)
+        self.assertEqual(space.printable_x_min, 15.0)  # derived from positive position_min
+        self.assertEqual(space.printable_y_min, 20.0)  # derived from positive position_min
+        self.assertEqual(space.printable_x_max, 235.0)
+        self.assertEqual(space.printable_y_max, 235.0)
+
+        # 3. Negative position_min derivation fallback
+        user_data = {
+            "x_size": "235",
+            "y_size": "235",
+            "x_position_min": "-15",
+            "y_position_min": "-20",
+        }
+        space = PrinterMotionSpace(user_data)
+        self.assertEqual(space.printable_x_min, 0.0)   # falls back to 0.0 since position_min <= 0
+        self.assertEqual(space.printable_y_min, 0.0)   # falls back to 0.0 since position_min <= 0
+        self.assertEqual(space.printable_x_max, 235.0)
+        self.assertEqual(space.printable_y_max, 235.0)
+
 if __name__ == '__main__':
     unittest.main()

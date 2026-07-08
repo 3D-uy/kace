@@ -180,7 +180,7 @@ y_offset: {{ user.probe_y_offset | default(0) }} # distance from nozzle to probe
 z_offset: 0 # nozzle to bed distance (mm) --- manual configuration --- (set using PROBE_CALIBRATE)
 
 [safe_z_home]
-home_xy_position: {{ user.x_size | int / 2 }}, {{ user.y_size | int / 2 }} # XY position to move to before homing Z
+home_xy_position: {{ user.printable_center_x | default(user.x_size | int / 2) }}, {{ user.printable_center_y | default(user.y_size | int / 2) }} # XY position to move to before homing Z
 speed: 50 # Speed at which the toolhead is moved to the safe Z home coordinate
 z_hop: 10 # Distance (in mm) to lift the Z axis prior to homing
 z_hop_speed: 5 # Speed (in mm/s) at which the Z axis is lifted prior to homing

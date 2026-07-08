@@ -22,7 +22,7 @@ E="\033[91m"   # Red (error)
 REPO_URL="https://github.com/3D-uy/kace.git"
 INSTALL_DIR="$HOME/kace"
 KACE_BIN="/usr/local/bin/kace"
-INSTALL_TAG="v0.9.3.3"
+INSTALL_TAG="main"
 
 # ── Banner ───────────────────────────────────────────────────
 clear
@@ -95,8 +95,8 @@ _git_supports_sparse() {
 echo -e "${C}[2/5]${R} Syncing KACE repository..."
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo -e "  Existing installation found — updating to ${INSTALL_TAG}..."
-    git -C "$INSTALL_DIR" fetch origin tag "$INSTALL_TAG" --depth=1
-    git -C "$INSTALL_DIR" -c advice.detachedHead=false checkout -f tags/"$INSTALL_TAG"
+    git -C "$INSTALL_DIR" fetch origin "$INSTALL_TAG" --depth=1
+    git -C "$INSTALL_DIR" -c advice.detachedHead=false checkout -f FETCH_HEAD
     echo -e "${G}  ✔ Repository updated to ${INSTALL_TAG}${R}"
 else
     echo -e "  Cloning KACE (${INSTALL_TAG}) into ${Y}${INSTALL_DIR}${R}..."

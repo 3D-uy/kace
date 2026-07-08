@@ -303,8 +303,13 @@ def run_probe_offset_step(
         return result
 
     try:
-        bed_w = float(user_data.get("x_size", 235))
-        bed_h = float(user_data.get("y_size", 235))
+        x_min = float(user_data.get("printable_x_min", 0.0))
+        x_max = float(user_data.get("printable_x_max", float(user_data.get("x_size", 235.0))))
+        bed_w = x_max - x_min
+        
+        y_min = float(user_data.get("printable_y_min", 0.0))
+        y_max = float(user_data.get("printable_y_max", float(user_data.get("y_size", 235.0))))
+        bed_h = y_max - y_min
     except (ValueError, TypeError):
         bed_w, bed_h = 235.0, 235.0
 

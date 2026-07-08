@@ -222,6 +222,48 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             raise WizardExit()
 
         if prop == "save":
+            # Run ADR 001 Validation Layer
+            try:
+                # Stepper limits
+                x_min_stepper = float(staged_user_data.get("x_position_min", 0.0))
+                x_max_stepper = float(staged_user_data.get("x_position_max", float(staged_user_data.get("x_size", 235.0))))
+                y_min_stepper = float(staged_user_data.get("y_position_min", 0.0))
+                y_max_stepper = float(staged_user_data.get("y_position_max", float(staged_user_data.get("y_size", 235.0))))
+                z_min_stepper = float(staged_user_data.get("z_position_min", 0.0))
+                z_max_stepper = float(staged_user_data.get("z_position_max", float(staged_user_data.get("z_size", 250.0))))
+
+                # Printable limits (with robust derivation fallback)
+                p_x_min = float(staged_user_data.get("printable_x_min", x_min_stepper if x_min_stepper > 0.0 else 0.0))
+                p_x_max = float(staged_user_data.get("printable_x_max", float(staged_user_data.get("x_size", 235.0))))
+                p_y_min = float(staged_user_data.get("printable_y_min", y_min_stepper if y_min_stepper > 0.0 else 0.0))
+                p_y_max = float(staged_user_data.get("printable_y_max", float(staged_user_data.get("y_size", 235.0))))
+                p_z_max = float(staged_user_data.get("printable_z_max", float(staged_user_data.get("z_size", 250.0))))
+            except (ValueError, TypeError) as e:
+                print(f"\n\033[91m[!] Validation Error: Invalid numeric value: {e}\033[0m")
+                import time
+                time.sleep(2.0)
+                continue
+
+            # Validate bed range
+            validation_error = None
+            if (p_x_max - p_x_min) > (x_max_stepper - x_min_stepper):
+                validation_error = f"Printable area width ({p_x_max - p_x_min:g}mm) exceeds maximum X travel range ({x_max_stepper - x_min_stepper:g}mm)."
+            elif (p_y_max - p_y_min) > (y_max_stepper - y_min_stepper):
+                validation_error = f"Printable area depth ({p_y_max - p_y_min:g}mm) exceeds maximum Y travel range ({y_max_stepper - y_min_stepper:g}mm)."
+            elif p_z_max > (z_max_stepper - z_min_stepper):
+                validation_error = f"Printable area height ({p_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper - z_min_stepper:g}mm)."
+            elif p_x_min < x_min_stepper or p_x_max > x_max_stepper:
+                validation_error = f"Printable X boundary [{p_x_min:g}, {p_x_max:g}] is outside physical X travel limits [{x_min_stepper:g}, {x_max_stepper:g}]."
+            elif p_y_min < y_min_stepper or p_y_max > y_max_stepper:
+                validation_error = f"Printable Y boundary [{p_y_min:g}, {p_y_max:g}] is outside physical Y travel limits [{y_min_stepper:g}, {y_max_stepper:g}]."
+
+            if validation_error:
+                print(f"\n\033[91m[!] Configuration Validation Failed:\033[0m")
+                print(f"    - {validation_error}")
+                import time
+                time.sleep(3.0)
+                continue
+
             # Sanitize axis limits before saving to ensure position_min <= position_endstop <= position_max
             adjusted_msg = []
             for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
@@ -294,13 +336,41 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 if new_y is not None and validate_pos_float(new_y):
                     new_z = simple_input("Enter Z build volume (mm):", default=str(z_sz))
                     if new_z is not None and validate_pos_float(new_z):
+                        # Update bed sizes (Printable Area logical bounds)
                         for key, val in [("x_size", new_x), ("y_size", new_y), ("z_size", new_z),
-                                         ("x_position_max", new_x), ("y_position_max", new_y), ("z_position_max", new_z)]:
+                                         ("printable_x_min", "0"), ("printable_x_max", new_x),
+                                         ("printable_y_min", "0"), ("printable_y_max", new_y),
+                                         ("printable_z_max", new_z)]:
                             staged_user_data[key] = val
                             staged_defaults[key] = val
-                        staged_parsed.setdefault('stepper_x', {})['position_max'] = new_x
-                        staged_parsed.setdefault('stepper_y', {})['position_max'] = new_y
-                        staged_parsed.setdefault('stepper_z', {})['position_max'] = new_z
+
+                        # Safe adjustment to avoid validation errors if mechanical limits are smaller
+                        try:
+                            curr_x_max = float(staged_user_data.get("x_position_max", x_max))
+                            if curr_x_max < float(new_x):
+                                staged_user_data["x_position_max"] = new_x
+                                staged_defaults["x_position_max"] = new_x
+                                staged_parsed.setdefault('stepper_x', {})['position_max'] = new_x
+                        except (ValueError, TypeError):
+                            pass
+
+                        try:
+                            curr_y_max = float(staged_user_data.get("y_position_max", y_max))
+                            if curr_y_max < float(new_y):
+                                staged_user_data["y_position_max"] = new_y
+                                staged_defaults["y_position_max"] = new_y
+                                staged_parsed.setdefault('stepper_y', {})['position_max'] = new_y
+                        except (ValueError, TypeError):
+                            pass
+
+                        try:
+                            curr_z_max = float(staged_user_data.get("z_position_max", z_max))
+                            if curr_z_max < float(new_z):
+                                staged_user_data["z_position_max"] = new_z
+                                staged_defaults["z_position_max"] = new_z
+                                staged_parsed.setdefault('stepper_z', {})['position_max'] = new_z
+                        except (ValueError, TypeError):
+                            pass
 
         elif prop in ("x_position_min", "x_position_max", "x_position_endstop",
                       "y_position_min", "y_position_max", "y_position_endstop",
@@ -486,6 +556,15 @@ def _step_volume(user_data, size_key, max_key, msg_text):
     user_data[size_key] = val_clean
     if user_data.get(max_key) == old_val or not user_data.get(max_key):
         user_data[max_key] = val_clean
+    
+    # Decouple Printable Area by storing printable_* limits
+    axis = size_key.split("_")[0]  # "x", "y", "z"
+    if axis in ("x", "y"):
+        user_data[f"printable_{axis}_min"] = "0"
+        user_data[f"printable_{axis}_max"] = val_clean
+    elif axis == "z":
+        user_data[f"printable_z_max"] = val_clean
+
     return val_clean
 
 
@@ -518,7 +597,6 @@ def _step_x_limits(user_data):
                 idx -= 1
                 continue
             user_data["x_position_max"] = val.strip()
-            user_data["x_size"] = val.strip()
             idx += 1
         elif curr == "endstop":
             val = simple_input(
@@ -565,7 +643,6 @@ def _step_y_limits(user_data):
                 idx -= 1
                 continue
             user_data["y_position_max"] = val.strip()
-            user_data["y_size"] = val.strip()
             idx += 1
         elif curr == "endstop":
             val = simple_input(
@@ -612,7 +689,6 @@ def _step_z_limits(user_data):
                 idx -= 1
                 continue
             user_data["z_position_max"] = val.strip()
-            user_data["z_size"] = val.strip()
             idx += 1
         elif curr == "endstop":
             val = simple_input(
