@@ -638,9 +638,9 @@ UI_STRINGS: dict = {
         "Português": "Digite o Host SSH (ex. 192.168.1.100):",
     },
     "kace.ssh_user_prompt": {
-        "English":   "Enter SSH User (e.g. pi or kace):",
-        "Español":   "Ingrese el Usuario SSH (ej. pi o kace):",
-        "Português": "Digite o Usuário SSH (ex. pi ou kace):",
+        "English":   "Enter SSH User (e.g. kace):",
+        "Español":   "Ingrese el Usuario SSH (ej. kace):",
+        "Português": "Digite o Usuário SSH (ex. kace):",
     },
     "kace.ssh_pass_prompt": {
         "English":   "Enter SSH Password:",

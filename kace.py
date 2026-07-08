@@ -280,7 +280,7 @@ def main():
         # KACE-installed Klipper). Falls back to the historical default "pi".
         user = simple_input(
             t("kace.ssh_user_prompt"),
-            default=os.environ.get("KACE_SSH_USER", "pi")
+            default=os.environ.get("KACE_SSH_USER", "kace")
         )
         if user is None or not user:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")

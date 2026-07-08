@@ -826,7 +826,7 @@ def deploy_moonraker(user_data):
             user_data['host']      = host
             ssh_user = simple_input(
                 t("kace.ssh_user_prompt"),
-                default=os.environ.get("KACE_SSH_USER", "pi")
+                default=os.environ.get("KACE_SSH_USER", "kace")
             )
             ssh_pass = password_input(t("kace.ssh_pass_prompt"))
             ssh_dest = simple_input(t("kace.ssh_dest_prompt"), default="~/printer_data/config/")
