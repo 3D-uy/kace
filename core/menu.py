@@ -161,7 +161,7 @@ def numbered_select(prompt, choices, default=0):
     if _is_auto():
         return selectable_choices[default][1]
         
-    print(f"\n  {prompt}")
+    print(f"\n  \033[96m{prompt}\033[0m")
     
     selectable_idx = 1
     selectable_map = {}
@@ -169,14 +169,17 @@ def numbered_select(prompt, choices, default=0):
     for is_selectable, item in display_lines:
         if is_selectable:
             label, value = item
-            print(f"    {selectable_idx}) {label}")
+            if (selectable_idx - 1) == default:
+                print(f"    \033[93m{selectable_idx}) {label}\033[0m")
+            else:
+                print(f"    {selectable_idx}) {label}")
             selectable_map[str(selectable_idx)] = value
             selectable_idx += 1
         else:
             print(f"    {item}")
             
     default_label, default_val = selectable_choices[default]
-    input_prompt = f"  Select [1-{len(selectable_choices)}] (default: {default_label}): "
+    input_prompt = f"  \033[93mSelect [1-{len(selectable_choices)}] (default: {default_label}):\033[0m "
     
     while True:
         try:
