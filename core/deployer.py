@@ -929,9 +929,9 @@ def deploy_moonraker(user_data):
             initial_wait = 10 if restart_choice == "service" else 3
             _sleep_with_progress(initial_wait)
 
-            # 20 attempts × 3s = up to 60s total — enough for slow Pi hardware.
+            # 20 attempts × 10s = up to 200s total — enough for slow Pi hardware.
             max_attempts = 20
-            poll_interval = 3
+            poll_interval = 10  # Allan
 
             for attempt in range(max_attempts):
                 ready_ok, ready_msg = check_klipper_ready(host, port, api_key=api_key)

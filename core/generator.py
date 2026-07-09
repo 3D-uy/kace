@@ -30,6 +30,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     """Generate printer.cfg from parsed config and user data using Jinja2."""
     # Avoid in-place mutation of user_data by using a localized context dict
     user_ctx = dict(user_data)
+    user_ctx["include_macros"] = include_macros
 
     # Enforce position_min <= position_endstop <= position_max for each axis to prevent Klipper startup errors
     _uses_probe = user_ctx.get("probe", "None") != "None"
@@ -353,28 +354,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         final_output += "\n\n# ==================================================\n# DISPLAY HARDWARE SECTIONS\n# ==================================================\n"
         final_output += "\n\n".join(display_blocks) + "\n"
 
-    if include_macros or user_data.get("macros_generated"):
-        # Insert [include macros.cfg] right after [include mainsail.cfg] or
-        # [include fluidd.cfg] so all includes stay grouped together.
-        lines = final_output.split("\n")
-        inserted = False
-        for i, line in enumerate(lines):
-            if line.strip() in ("[include mainsail.cfg]", "[include fluidd.cfg]"):
-                lines.insert(i + 1, "[include macros.cfg]")
-                inserted = True
-                break
-        if not inserted:
-            # Fallback: place after the header comment block
-            for i, line in enumerate(lines):
-                if line.strip().startswith("# -----") and i > 0:
-                    lines.insert(i, "[include macros.cfg]")
-                    lines.insert(i + 1, "")
-                    inserted = True
-                    break
-        if not inserted:
-            # Last resort: prepend
-            lines.insert(0, "[include macros.cfg]")
-        final_output = "\n".join(lines)
+
     # Validation: Do not proceed if generic TODO pins are left active, preventing Klipper startup errors
     active_todos = []
     current_section = "unknown"

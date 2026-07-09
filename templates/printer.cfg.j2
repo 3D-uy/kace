@@ -13,6 +13,9 @@
 {% elif user.web_interface == 'Fluidd' -%}
 [include fluidd.cfg]
 {%- endif %}
+{% if user.include_macros or user.macros_generated -%}
+[include macros.cfg]
+{%- endif %}
 
 # --------------------------------------------------
 # MCU
@@ -217,19 +220,20 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 # They are the physical XY location of each Z screw or Z motor on the printer frame.
 # Measure with a ruler where the screws are relative to the axis origin.
 # Values may fall outside the print area (negative numbers or > max position).
+
 # z_positions:                                  # Physical XY position of each Z motor/screw on the frame
 {%- if user.z_motors | int == 2 %}
 #   -30, {{ by // 2 }}                          # Left Z motor (adjust for your printer)
-#   {{ bx + 30 }}, {{ by // 2 }}               # Right Z motor (adjust for your printer)
+#   {{ bx + 30 }}, {{ by // 2 }}                # Right Z motor (adjust for your printer)
 {%- elif user.z_motors | int == 3 %}
 #   -30, 0                                      # Front-left Z motor
-#   {{ bx + 30 }}, 0                           # Front-right Z motor
-#   {{ bx // 2 }}, {{ by + 30 }}               # Rear center Z motor
+#   {{ bx + 30 }}, 0                            # Front-right Z motor
+#   {{ bx // 2 }}, {{ by + 30 }}                # Rear center Z motor
 {%- else %}
-#   -30, -30                                   # Front-left Z motor
-#   {{ bx + 30 }}, -30                         # Front-right Z motor
-#   {{ bx + 30 }}, {{ by + 30 }}               # Rear-right Z motor
-#   -30, {{ by + 30 }}                         # Rear-left Z motor
+#   -30, -30                                    # Front-left Z motor
+#   {{ bx + 30 }}, -30                          # Front-right Z motor
+#   {{ bx + 30 }}, {{ by + 30 }}                # Rear-right Z motor
+#   -30, {{ by + 30 }}                          # Rear-left Z motor
 {%- endif %}
 # points:                                       # Nozzle coordinates where the probe measures. Calculated by KACE from the reachable area.
 {%- for pt in user.leveling.z_tilt_points %}
@@ -252,6 +256,7 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 #
 # gantry_corners are the physical corners of the gantry in nozzle coordinates.
 # They usually extend beyond the print area. Consult your printer's design specs.
+
 # gantry_corners:                               # Physical gantry corners (nozzle coords, NOT probe)
 #   -60, -10                                   # Front-left corner
 #   {{ bx + 60 }}, {{ by + 90 }}               # Rear-right corner
