@@ -45,7 +45,7 @@ def get_mode() -> str:
 UI_STRINGS: dict = {
     # ── Wizard prompts ─────────────────────────────────────────
     "wizard.select_mode": {
-        "English":   "Select Configuration Mode / Seleccione el Modo de Configuración / Selecione o Modo de Configuração:",
+        "English":   "Select Configuration Mode:",
         "Español":   "Seleccione el Modo de Configuración:",
         "Português": "Selecione o Modo de Configuração:",
     },
