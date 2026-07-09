@@ -110,6 +110,11 @@ def _require_paramiko():
                 pip_cmd,
                 stderr=subprocess.STDOUT
             )
+            import importlib
+            importlib.invalidate_caches()
+            for k in list(sys.modules.keys()):
+                if k == 'paramiko' or k.startswith('paramiko.'):
+                    sys.modules.pop(k, None)
             import paramiko  # noqa: PLC0415
             print("\033[92m[OK] paramiko installed successfully.\033[0m\n")
             return paramiko
