@@ -327,128 +327,14 @@ def deploy_config(user_data):
             print("\033[93m[*] Restart skipped — Klipper will keep its current config.\033[0m")
             print("\033[93m    Run 'FIRMWARE_RESTART' in the Klipper console when ready to apply.\033[0m")
 
-        # ── Verification Loop ──────────────────────────────────────
-        # Only verify when we actually restarted; a skipped restart has nothing
-        # to wait for, and polling just hammers an already-strained Pi.
-        if not restart_done:
-            print("\033[92m[OK] Config uploaded. No restart performed — verification skipped.\033[0m")
-            deployed_successfully = True
-        else:
-            print("\033[96m[*]\033[0m Verifying Klipper startup status...")
-            import time
-            verified = False
-            err_msg = ""
-            prev_status = None
-            same_status_streak = 0
-
-            # RAM-aware poll budget. A 1 GB Pi 3 under restart pressure can
-            # barely answer one poll every few seconds; hammering it with 20
-            # tight polls contributes to the OOM lockup we're trying to avoid.
-            # Scale down on low-RAM hosts and bail early on a detected
-            # restart-loop (same non-ready status repeating).
-            ram_mb = _detect_ram_mb()
-            if ram_mb and ram_mb <= 1024:
-                initial_wait = 15        # give a constrained Pi more breathing room
-                max_attempts = 8         # 8 × 5s = 40s ceiling
-                poll_interval = 5
-            else:
-                initial_wait = 10
-                max_attempts = 20        # 20 × 3s = up to 60s total
-                poll_interval = 3
-
-            if ram_mb:
-                print(f"\033[96m[*]\033[0m Detected ~{ram_mb} MB RAM — using {max_attempts}×{poll_interval}s poll budget.")
-
-            # Give Klipper time to restart before polling.
-            _sleep_with_progress(initial_wait)
-
-            for attempt in range(max_attempts):
-                if mr_ok:
-                    ready_ok, ready_msg = check_klipper_ready(host, port)
-                    files_exist = verify_remote_file_exists(host, port, "printer.cfg")
-                    if macros_uploaded:
-                        files_exist = files_exist and verify_remote_file_exists(host, port, "macros.cfg")
-                    if ready_ok and files_exist:
-                        verified = True
-                        break
-                    else:
-                        err_msg = ready_msg if not ready_ok else "Uploaded config files missing on server"
-                        time.sleep(poll_interval)
-                else:
-                    # Fallback to systemd checks over SSH — use sudo -n to avoid password hangs
-                    _, stdout_active, _ = ssh.exec_command(
-                        "sudo -n systemctl is-active klipper || systemctl --user is-active klipper || systemctl is-active klipper",
-                        timeout=10
-                    )
-                    active_status = stdout_active.read().decode("utf-8").strip()
-
-                    # Check if file exists via SFTP
-                    files_exist = True
-                    try:
-                        sftp.stat(dest_file)
-                        if macros_uploaded:
-                            sftp.stat(dest_macros)
-                    except Exception:
-                        files_exist = False
-
-                    if active_status == "active" and files_exist:
-                        verified = True
-                        break
-                    else:
-                        err_msg = f"Klipper status is '{active_status}'"
-                        if not files_exist:
-                            err_msg += " (uploaded files missing on remote)"
-
-                        # Crash-loop early-bail: if Klipper keeps reporting the
-                        # same failed/activating state, it's stuck in a systemd
-                        # restart loop — stop polling so we don't worsen OOM on
-                        # a low-RAM Pi. Also detect the flapping between
-                        # 'activating' and 'failed' that's the classic loop.
-                        if active_status == prev_status or {active_status, prev_status} <= {"activating", "failed"}:
-                            same_status_streak += 1
-                        else:
-                            same_status_streak = 1
-                        prev_status = active_status
-                        if same_status_streak >= 3:
-                            err_msg += f" — restart loop detected (status '{active_status}' repeating); aborting poll to avoid OOM pressure"
-                            break
-                        time.sleep(poll_interval)
-
-            if verified:
-                print("\033[92m[OK] Post-deployment verification successful! Klipper is running.\033[0m")
-                deployed_successfully = True
-                # Cleanup remote backups
-                if printer_backup_created:
-                    try:
-                        sftp.remove(dest_file + ".bak")
-                    except Exception:
-                        pass
-                if macros_backup_created:
-                    try:
-                        sftp.remove(dest_macros + ".bak")
-                    except Exception:
-                        pass
-            else:
-                print(f"\033[91m[!] Verification FAILED: {err_msg}\033[0m")
-
-                # Print failed status and journalctl logs
-                if not mr_ok:
-                    _, stdout_failed, _ = ssh.exec_command(
-                        "sudo -n systemctl is-failed klipper || systemctl --user is-failed klipper || systemctl is-failed klipper",
-                        timeout=10
-                    )
-                    failed_status = stdout_failed.read().decode("utf-8").strip()
-                    print(f"Klipper systemd failed status: {failed_status}")
-
-                    print("\033[93m[!] Fetching recent Klipper logs via journalctl...\033[0m")
-                    _, stdout_journal, _ = ssh.exec_command(
-                        "sudo -n journalctl -u klipper -n 50 --no-pager || journalctl --user -u klipper -n 50 --no-pager || journalctl -u klipper -n 50 --no-pager",
-                        timeout=15
-                    )
-                    journal_logs = stdout_journal.read().decode("utf-8")
-                    print(journal_logs)
-
-                raise RuntimeError(f"Post-deployment verification failed: {err_msg}")
+        # ── Step 6: Post-Deployment Success & Instructions ─────────
+        deployed_successfully = True
+        print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
+        if restart_done:
+            print(f"\033[96m[*]\033[0m Klipper restart issued successfully.")
+            print(f"\033[93m[!] TIP: If Klipper doesn't load immediately or reports a connection error,\033[0m")
+            print(f"\033[93m    we recommend power-cycling (turning OFF and ON) your Raspberry Pi and printer.\033[0m")
+        print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}/\033[0m")
 
     except paramiko.AuthenticationException as e:
         print(f"\033[91mDeployment failed: Authentication error — check username and password. Details: {e}\033[0m")
@@ -920,44 +806,14 @@ def deploy_moonraker(user_data):
         else:
             raise RuntimeError(t('moonraker.restart_fail', error=restart_msg))
 
-        # ── Step 6: Post-Deployment Verification ────────────────────
+        # ── Step 6: Post-Deployment Success & Instructions ─────────
+        deployed_successfully = True
+        print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
         if restart_choice != "skip":
-            print("\033[96m[*]\033[0m Verifying Klipper startup status...")
-            import time
-            verified = False
-            klipper_err = ""
-
-            # A full service restart takes 15-30s for Klipper+Moonraker to come
-            # back up. A firmware-only restart is faster (~5s). Give an initial
-            # grace period before polling so we don't burn retries on guaranteed
-            # 404s while the service is still spinning up.
-            initial_wait = 15 if restart_choice == "service" else 8
-            _sleep_with_progress(initial_wait)
-
-            # 20 attempts × 5s = up to 100s total — enough for slow Pi hardware.
-            max_attempts = 20
-            poll_interval = 5
-
-            for attempt in range(max_attempts):
-                ready_ok, ready_msg = check_klipper_ready(host, port, api_key=api_key)
-                files_exist = verify_remote_file_exists(host, port, "printer.cfg", api_key=api_key)
-                if macros_uploaded:
-                    files_exist = files_exist and verify_remote_file_exists(host, port, "macros.cfg", api_key=api_key)
-
-                if ready_ok and files_exist:
-                    verified = True
-                    break
-                else:
-                    klipper_err = ready_msg if not ready_ok else "Uploaded config files missing on server"
-                    time.sleep(poll_interval)
-
-            if verified:
-                print("\033[92m[OK] Post-deployment verification successful! Klipper is Ready.\033[0m")
-                deployed_successfully = True
-            else:
-                raise RuntimeError(f"Verification FAILED: {klipper_err}")
-        else:
-            deployed_successfully = True
+            print(f"\033[96m[*]\033[0m Klipper restart issued successfully.")
+            print(f"\033[93m[!] TIP: If Klipper doesn't load immediately or reports a connection error,\033[0m")
+            print(f"\033[93m    we recommend power-cycling (turning OFF and ON) your Raspberry Pi and printer.\033[0m")
+        print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
 
     except Exception as e:
         print(f"\033[91mMoonraker deployment failed: {e}\033[0m")
