@@ -223,12 +223,12 @@ class TestRestartFirmware(unittest.TestCase):
 
     @patch("urllib.request.urlopen")
     def test_calls_firmware_restart_endpoint(self, mock_urlopen):
-        """restart_firmware must POST to /printer/firmware_restart."""
+        """restart_firmware must POST to /printer/restart."""
         mock_urlopen.return_value = _fake_response({"result": "ok"})
         restart_firmware("mypi", 7125)
         called_url = mock_urlopen.call_args[0][0]
         url_str = called_url.full_url if hasattr(called_url, "full_url") else str(called_url)
-        self.assertIn("/printer/firmware_restart", url_str)
+        self.assertIn("/printer/restart", url_str)
 
 
 # ── restart_klipper_service ───────────────────────────────────────

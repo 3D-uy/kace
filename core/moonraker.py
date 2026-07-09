@@ -165,20 +165,20 @@ def upload_printer_cfg(host: str, port: int, cfg_path: str, filename: str = None
 
 
 def restart_firmware(host: str, port: int = DEFAULT_PORT, api_key: str = None) -> tuple[bool, str]:
-    """Issue a FIRMWARE_RESTART via POST /printer/firmware_restart.
+    """Issue a RESTART via POST /printer/restart.
 
-    This reloads printer.cfg and restarts the Klipper firmware process.
-    Equivalent to typing FIRMWARE_RESTART in the Klipper console.
+    This reloads printer.cfg and restarts the Klipper host process.
+    Equivalent to typing RESTART in the Klipper console.
 
     Returns:
         (True, "OK") on success.
         (False, error_message) on failure.
     """
-    url = f"{_base_url(host, port)}/printer/firmware_restart"
+    url = f"{_base_url(host, port)}/printer/restart"
     ok, msg, _ = _post(url, data=b"{}", content_type="application/json", api_key=api_key)
     if not ok:
         return False, msg
-    return True, "FIRMWARE_RESTART issued"
+    return True, "RESTART issued"
 
 
 def restart_klipper_service(host: str, port: int = DEFAULT_PORT, api_key: str = None) -> tuple[bool, str]:

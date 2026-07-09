@@ -714,9 +714,9 @@ UI_STRINGS: dict = {
         "Português": "Reiniciar o Klipper para aplicar a nova configuração?",
     },
     "moonraker.restart_firmware": {
-        "English":   "FIRMWARE_RESTART (reload config, recommended)",
-        "Español":   "FIRMWARE_RESTART (recargar config, recomendado)",
-        "Português": "FIRMWARE_RESTART (recarregar config, recomendado)",
+        "English":   "RESTART (reload config, recommended)",
+        "Español":   "RESTART (recargar config, recomendado)",
+        "Português": "RESTART (recarregar config, recomendado)",
     },
     "moonraker.restart_service": {
         "English":   "SERVICE_RESTART (full Klipper service restart)",
