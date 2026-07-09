@@ -242,11 +242,11 @@ def _select_language() -> None:
     position issues in bridged PTY environments (e.g. xterm.js over SSH).
     """
     LANGUAGES = {"1": "English", "2": "Español", "3": "Português"}
-    print("\n  Select language / Seleccione el idioma / Selecione o idioma:")
+    print(f"\n  {_C}Select language / Seleccione el idioma / Selecione o idioma:{_R}")
     for num, name in LANGUAGES.items():
         print(f"    {num}) {name}")
     try:
-        choice = input("  Select [1-3]: ").strip()
+        choice = input(f"  {_Y}Select [1-3]:{_R} ").strip()
     except (KeyboardInterrupt, EOFError):
         sys.exit(0)
 
@@ -261,11 +261,11 @@ def _select_mode() -> None:
     position issues in bridged PTY environments (e.g. xterm.js over SSH).
     """
     MODES = {"1": "Beginner", "2": "Advanced"}
-    print(f"\n  {t('wizard.select_mode')}")
+    print(f"\n  {_C}{t('wizard.select_mode')}{_R}")
     print(f"    1) {t('wizard.mode.beginner')}")
     print(f"    2) {t('wizard.mode.advanced')}")
     try:
-        choice = input("  Select [1-2]: ").strip()
+        choice = input(f"  {_Y}Select [1-2]:{_R} ").strip()
     except (KeyboardInterrupt, EOFError):
         sys.exit(0)
 
@@ -304,11 +304,11 @@ def run_dashboard(state: dict) -> str:
         print("")
 
         ACTIONS = {"1": "generate", "2": "quit"}
-        print(f"\n  {t('dashboard.action_prompt')}")
+        print(f"\n  {_C}{t('dashboard.action_prompt')}{_R}")
         print(f"    1) {t('dashboard.action_generate')}")
         print(f"    2) {t('dashboard.action_quit')}")
         try:
-            action_choice = input("  Select [1-2]: ").strip()
+            action_choice = input(f"  {_Y}Select [1-2]:{_R} ").strip()
         except (KeyboardInterrupt, EOFError):
             sys.exit(0)
 
