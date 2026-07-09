@@ -654,14 +654,14 @@ UI_STRINGS: dict = {
     },
     # ── Moonraker deploy strings ────────────────────────────────
     "moonraker.host_prompt": {
-        "English":   "Enter Moonraker host (e.g. 192.168.1.100 or mainsailos.local):",
-        "Español":   "Ingrese el host de Moonraker (ej. 192.168.1.100 o mainsailos.local):",
-        "Português": "Digite o host do Moonraker (ex. 192.168.1.100 ou mainsailos.local):",
+        "English":   "Enter Moonraker host (e.g. 192.168.1.100):",
+        "Español":   "Ingrese el host de Moonraker (ej. 192.168.1.100):",
+        "Português": "Digite o host do Moonraker (ex. 192.168.1.100):",
     },
     "moonraker.port_prompt": {
-        "English":   "Enter Moonraker port (default: 7125):",
-        "Español":   "Ingrese el puerto de Moonraker (por defecto: 7125):",
-        "Português": "Digite a porta do Moonraker (padrão: 7125):",
+        "English":   "Enter Moonraker port",
+        "Español":   "Ingrese el puerto de Moonraker",
+        "Português": "Digite a porta do Moonraker",
     },
     "moonraker.api_key_prompt": {
         "English":   "Enter Moonraker API key (leave blank if not required):",

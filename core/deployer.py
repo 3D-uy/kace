@@ -931,12 +931,12 @@ def deploy_moonraker(user_data):
             # back up. A firmware-only restart is faster (~5s). Give an initial
             # grace period before polling so we don't burn retries on guaranteed
             # 404s while the service is still spinning up.
-            initial_wait = 10 if restart_choice == "service" else 3
+            initial_wait = 15 if restart_choice == "service" else 8
             _sleep_with_progress(initial_wait)
 
-            # 20 attempts × 10s = up to 200s total — enough for slow Pi hardware.
+            # 20 attempts × 5s = up to 100s total — enough for slow Pi hardware.
             max_attempts = 20
-            poll_interval = 10  # Allan
+            poll_interval = 5
 
             for attempt in range(max_attempts):
                 ready_ok, ready_msg = check_klipper_ready(host, port, api_key=api_key)

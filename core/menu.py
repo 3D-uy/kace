@@ -216,7 +216,7 @@ def simple_input(prompt, default=None, validate=None):
         return str(default).strip() if default is not None else ""
         
     prompt = prompt.rstrip(" :")
-    if default is not None:
+    if default is not None and str(default).strip() != "":
         full_prompt = f"  {prompt} (default: {default}): "
     else:
         full_prompt = f"  {prompt}: "
