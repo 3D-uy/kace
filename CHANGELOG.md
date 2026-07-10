@@ -6,6 +6,22 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.3.4] — Unreleased
+
+### Refactored
+- Decoupled testing-specific environment variable checks (`KACE_TESTING`, `KACE_REAL_BUILD`) from the production codebase (`core/` and `firmware/`).
+- Introduced generic dependency injection points (`make_command`, `env`, `concurrency`) in `build_firmware_orchestrator` to decouple build-tool resolution.
+- Extracted and encapsulated compiler LTO bypass wrapping logic into a dedicated testing fixture module under `tests/fixtures/`.
+- Reorganized the `docker/` folder structure, moving all CI-specific mocking files and scripts into `docker/ci/`.
+- Simplified test configurations by initializing global test-runner mocks and prepends inside test harness setups (`conftest.py` and `run_tests.py`).
+
+### Cleaned
+- Removed orphaned standalone validation/smoke scripts (`tests/smoke_advanced.py`, `tests/validate_advanced.py`, `tests/validate_display_hw.py`) since their functionality is fully covered by the integrated unit/regression test suite.
+- Updated `.gitignore` to explicitly ignore generated build files (`*.bin`, `*.uf2`, `*.elf.hex`), local `.config` files, and local KACE output files (`printer.cfg`, `macros.cfg`, `jobs.json`, `test_printer.cfg`).
+- Added missing `questionary` package declaration in `requirements.txt` with PyPI sha256 hashes.
+
+---
+
 ## [0.9.3.3] — 2026-07-08
 
 ### Added

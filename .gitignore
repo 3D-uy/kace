@@ -94,3 +94,13 @@ scratch/
 out/
 outp/
 *.log
+*.bin
+*.uf2
+*.elf.hex
+
+# Locally generated config files
+.config
+printer.cfg
+macros.cfg
+jobs.json
+test_printer.cfg
