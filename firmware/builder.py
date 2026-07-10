@@ -3,6 +3,7 @@ import time
 import shutil
 import tempfile
 import subprocess
+from typing import Optional
 from .derivation import derive_config
 from .firmware_generator import generate_firmware_config
 from .validator import validate_config
@@ -16,6 +17,18 @@ from core.translations import t
 from core.exceptions import DerivationAmbiguityError
 
 
+class BuildContext:
+    """Constrained execution options for the Klipper build process."""
+    def __init__(
+        self,
+        make_command: str = "make",
+        path_override: Optional[str] = None,
+        concurrency: Optional[int] = None,
+    ):
+        self.make_command = make_command
+        self.path_override = path_override
+        self.concurrency = concurrency
+
 
 def build_firmware_orchestrator(
     mcu_path=None,
@@ -24,9 +37,7 @@ def build_firmware_orchestrator(
     klipper_path="~/klipper",
     output_dir="~/kace",
     config_dict=None,
-    make_command="make",
-    env=None,
-    concurrency=None,
+    build_context: Optional[BuildContext] = None,
 ):
     """
     Orchestrates the firmware derivation, generation, validation, and build process.
@@ -57,20 +68,22 @@ def build_firmware_orchestrator(
     # Record the build start time
     build_start_time = time.time()
 
+    build_context = build_context or BuildContext()
+
     # ── Build-mode banner: shown once at the start of every compile run ──
-    print_build_mode_banner(make_command)
+    print_build_mode_banner(build_context.make_command)
 
     # 2. Generate minimal .config
     success, msg = generate_firmware_config(config_dict, klipper_path)
     if not success:
          return {"status": "error", "message": msg}
 
-    _make = make_command
+    _make = build_context.make_command
 
-    # Merge caller environment overrides with standard environment
+    # Merge execution path overrides safely
     sub_env = dict(os.environ)
-    if env:
-        sub_env.update(env)
+    if build_context.path_override:
+        sub_env["PATH"] = build_context.path_override + os.pathsep + sub_env.get("PATH", "")
 
     wrapper_dir_obj = None
 
@@ -101,9 +114,9 @@ def build_firmware_orchestrator(
         )
 
         build_cmd = [_make]
-        if concurrency is not None:
-            if concurrency > 1:
-                build_cmd.append(f"-j{concurrency}")
+        if build_context.concurrency is not None:
+            if build_context.concurrency > 1:
+                build_cmd.append(f"-j{build_context.concurrency}")
         else:
             try:
                 nproc = subprocess.check_output(["nproc"], env=sub_env).decode().strip()
@@ -198,7 +211,7 @@ def build_firmware_orchestrator(
                 raise compile_err
 
         # After compile: show mock warning if applicable
-        print_mock_warning(make_command)
+        print_mock_warning(build_context.make_command)
             
         # 6. Locate output artifact, verify its timestamp is fresh, and copy
         os.makedirs(output_dir, exist_ok=True)

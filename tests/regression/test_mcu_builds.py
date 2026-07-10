@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-from firmware.builder import build_firmware_orchestrator
+from firmware.builder import build_firmware_orchestrator, BuildContext
 from firmware.derivation import derive_config
 
 
@@ -40,50 +40,43 @@ class TestMCUBuilds(unittest.TestCase):
         # 1. Derive configuration
         config_dict = derive_config(mcu, hint=hint)
 
-        # 2. Activate real build mode via env var so the builder uses the
-        #    real system toolchain instead of the Docker mock make.
-        #    Using an env var is safer than the old shutil.move rename approach:
-        #    if the test crashes the container's /usr/local/bin/make is never lost.
-        prev = os.environ.get("KACE_REAL_BUILD")
-        os.environ["KACE_REAL_BUILD"] = "1"
-        try:
-            # 3. Call build_firmware_orchestrator
-            result = build_firmware_orchestrator(
-                mcu_path=f"/dev/serial/by-id/usb-Klipper_{mcu}_test-if00",
-                derived_mcu=mcu,
-                hint=hint,
-                klipper_path=self.klipper_path,
-                output_dir=self.output_dir.name,
-                config_dict=config_dict,
-            )
+        # 2. Configure build context to use the real system make
+        make_cmd = "make"
+        if os.path.exists("/usr/bin/make"):
+            make_cmd = "/usr/bin/make"
+        ctx = BuildContext(make_command=make_cmd)
+        
+        # 3. Call build_firmware_orchestrator
+        result = build_firmware_orchestrator(
+            mcu_path=f"/dev/serial/by-id/usb-Klipper_{mcu}_test-if00",
+            derived_mcu=mcu,
+            hint=hint,
+            klipper_path=self.klipper_path,
+            output_dir=self.output_dir.name,
+            config_dict=config_dict,
+            build_context=ctx,
+        )
 
-            # 4. Assert success and verify output artifact
-            self.assertEqual(
-                result.get("status"),
-                "success",
-                f"Build failed for {mcu}: {result.get('message')}",
-            )
-            self.assertEqual(result.get("firmware"), expected_filename)
+        # 4. Assert success and verify output artifact
+        self.assertEqual(
+            result.get("status"),
+            "success",
+            f"Build failed for {mcu}: {result.get('message')}",
+        )
+        self.assertEqual(result.get("firmware"), expected_filename)
 
-            dest_path = result.get("path")
-            self.assertIsNotNone(dest_path)
-            self.assertTrue(os.path.exists(dest_path))
+        dest_path = result.get("path")
+        self.assertIsNotNone(dest_path)
+        self.assertTrue(os.path.exists(dest_path))
 
-            # Real firmware must exceed the mock-detection threshold
-            from firmware.build_mode import FIRMWARE_MINIMUM_SIZE_BYTES
-            self.assertGreater(
-                os.path.getsize(dest_path),
-                FIRMWARE_MINIMUM_SIZE_BYTES,
-                f"Generated binary {expected_filename} for {mcu} is smaller than "
-                f"{FIRMWARE_MINIMUM_SIZE_BYTES} bytes — likely a mock artifact",
-            )
-
-        finally:
-            # Always restore the original env var state
-            if prev is None:
-                os.environ.pop("KACE_REAL_BUILD", None)
-            else:
-                os.environ["KACE_REAL_BUILD"] = prev
+        # Real firmware must exceed the mock-detection threshold
+        from firmware.build_mode import FIRMWARE_MINIMUM_SIZE_BYTES
+        self.assertGreater(
+            os.path.getsize(dest_path),
+            FIRMWARE_MINIMUM_SIZE_BYTES,
+            f"Generated binary {expected_filename} for {mcu} is smaller than "
+            f"{FIRMWARE_MINIMUM_SIZE_BYTES} bytes — likely a mock artifact",
+        )
 
     def test_lpc1769_build(self):
         """Verify LPC1769 builds successfully to klipper.bin."""

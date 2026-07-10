@@ -4,7 +4,7 @@ from core.style import custom_style
 from core.translations import t
 from core.exceptions import DerivationAmbiguityError
 from firmware.derivation import derive_config
-from firmware.builder import build_firmware_orchestrator
+from firmware.builder import build_firmware_orchestrator, BuildContext
 from core.deployer import deploy_usb, deploy_local, deploy_avrdude
 
 def run_firmware_wizard(user_data: dict):
@@ -171,7 +171,7 @@ def run_firmware_wizard(user_data: dict):
         hint=current_hint,
         output_dir="~/kace",
         config_dict=config_dict,
-        make_command=user_data.get('make_command', 'make')
+        build_context=BuildContext(make_command=user_data.get('make_command', 'make'))
     )
 
     if result.get("status") == "success":
