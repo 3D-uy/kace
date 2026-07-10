@@ -170,7 +170,8 @@ def run_firmware_wizard(user_data: dict):
         derived_mcu=current_mcu,
         hint=current_hint,
         output_dir="~/kace",
-        config_dict=config_dict
+        config_dict=config_dict,
+        make_command=user_data.get('make_command', 'make')
     )
 
     if result.get("status") == "success":

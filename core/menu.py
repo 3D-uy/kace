@@ -65,13 +65,19 @@ def parse_choices(choices):
             
     return display_lines, selectable_choices
 
+_MOCK_PROMPTS_ACTIVE = False
+
+def set_mock_prompts_active(active: bool) -> None:
+    """Enable or disable prompt mocking for testing environment."""
+    global _MOCK_PROMPTS_ACTIVE
+    _MOCK_PROMPTS_ACTIVE = active
+
 def _check_questionary_mock(helper_name, prompt):
     import sys
-    import os
     from unittest.mock import Mock, MagicMock, DEFAULT
     
     # Only run mock hook if testing environment is active
-    if os.environ.get("KACE_TESTING") != "1":
+    if not _MOCK_PROMPTS_ACTIVE:
         return DEFAULT
         
     q = sys.modules.get('questionary')

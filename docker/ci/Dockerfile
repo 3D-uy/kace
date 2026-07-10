@@ -24,15 +24,15 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir paramiko==3.4.0
 
 # Set up mock systemctl to intercept systemd service checks in KACE dashboard
-COPY docker/mock_systemctl /usr/local/bin/systemctl
+COPY docker/ci/mock_systemctl /usr/local/bin/systemctl
 RUN chmod +x /usr/local/bin/systemctl
 
 # Set up mock make to intercept Klipper firmware compilation
-COPY docker/mock_make /usr/local/bin/make
+COPY docker/ci/mock_make /usr/local/bin/make
 RUN chmod +x /usr/local/bin/make
 
 # Expose Moonraker API mock port
 EXPOSE 7125
 
 # Run the entrypoint script
-CMD ["/bin/bash", "/workspace/docker/entrypoint.sh"]
+CMD ["/bin/bash", "/workspace/docker/ci/entrypoint.sh"]

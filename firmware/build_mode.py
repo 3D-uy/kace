@@ -41,9 +41,9 @@ _RE = "\033[91m"   # red
 
 # ── Detection ─────────────────────────────────────────────────────────────────
 
-def is_mock_build() -> bool:
+def is_mock_build(make_command: str = "make") -> bool:
     """Return True when the mock make script is active."""
-    if os.environ.get("KACE_REAL_BUILD") == "1":
+    if make_command != "make":
         return False
 
     if os.path.exists(_MOCK_MAKE_PATH):
@@ -57,12 +57,12 @@ def is_mock_build() -> bool:
 
 # ── User-facing output ────────────────────────────────────────────────────────
 
-def print_build_mode_banner() -> None:
+def print_build_mode_banner(make_command: str = "make") -> None:
     """
     Print a one-line build-mode status banner at the start of every compile run.
     Shows clearly whether KACE is using the mock toolchain or the real one.
     """
-    if not is_mock_build():
+    if not is_mock_build(make_command):
         return
 
     SEP = "─" * 52
@@ -80,12 +80,12 @@ def print_build_mode_banner() -> None:
     print(f"  {SEP}\n")
 
 
-def print_mock_warning() -> None:
+def print_mock_warning(make_command: str = "make") -> None:
     """
     Print a prominent warning block after a mock build completes,
     reminding the user the output files cannot be flashed.
     """
-    if not is_mock_build():
+    if not is_mock_build(make_command):
         return
     print(
         f"\n  {_Y}{'═' * 52}{_R}\n"

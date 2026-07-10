@@ -29,6 +29,7 @@ class TestWizardModes(unittest.TestCase):
         self.assertEqual(get_mode(), "Advanced")
 
     @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
+    @patch("core.wizard.ui._SUPPRESS_HEADERS", False)
     def test_step_header_beginner_mode(self, mock_stdout):
         """Verify that step headers are printed in Beginner mode."""
         set_mode("Beginner")
@@ -40,6 +41,7 @@ class TestWizardModes(unittest.TestCase):
             self.assertIn("Phase", output)
 
     @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
+    @patch("core.wizard.ui._SUPPRESS_HEADERS", False)
     def test_step_header_advanced_mode(self, mock_stdout):
         """Verify that step headers are not printed in Advanced mode (early return)."""
         set_mode("Advanced")

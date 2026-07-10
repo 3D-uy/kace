@@ -24,8 +24,11 @@ if len(sys.argv) > 1:
     for i, arg in enumerate(sys.argv):
         if arg == "--auto":
             os.environ["KACE_AUTO"] = "1"
-        elif arg == "--real-build":
-            os.environ["KACE_REAL_BUILD"] = "1"
+# Resolve make command at the application boundary
+_make_command = "make"
+if os.environ.get("KACE_REAL_BUILD") == "1":
+    if os.path.exists("/usr/bin/make"):
+        _make_command = "/usr/bin/make"
 
 from core.menu import simple_input, yes_no, numbered_select, password_input
 from core.validators import questionary_pin_validator
@@ -64,7 +67,7 @@ def main():
             sys.exit(0)
     
     # Interactive Wizard & Phase 1 Execution Loop
-    user_data = None
+    user_data = {"make_command": _make_command}
     
     try:
         user_data = run_wizard(user_data)

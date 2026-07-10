@@ -26,7 +26,7 @@ def has_todo_pins(parsed_data: dict) -> list:
                     todos.append((section, key))
     return todos
 
-def generate_config(parsed_data, user_data, output_path=None, include_macros=False):
+def generate_config(parsed_data, user_data, output_path=None, include_macros=False, verbose=True):
     """Generate printer.cfg from parsed config and user data using Jinja2."""
     # Avoid in-place mutation of user_data by using a localized context dict
     user_ctx = dict(user_data)
@@ -367,7 +367,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
             active_todos.append((current_section, key))
 
     if active_todos:
-        if os.environ.get("KACE_TESTING") != "1":
+        if verbose:
             print("\n\033[91mCRITICAL ERROR: Configuration generated with unresolved 'TODO' values!\033[0m")
             print("\033[93mThis usually happens if your board does not map all required pins natively.\033[0m")
             for section, key in active_todos:

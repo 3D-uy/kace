@@ -17,7 +17,17 @@ from core.exceptions import DerivationAmbiguityError
 
 
 
-def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klipper_path="~/klipper", output_dir="~/kace", config_dict=None):
+def build_firmware_orchestrator(
+    mcu_path=None,
+    derived_mcu=None,
+    hint=None,
+    klipper_path="~/klipper",
+    output_dir="~/kace",
+    config_dict=None,
+    make_command="make",
+    env=None,
+    concurrency=None,
+):
     """
     Orchestrates the firmware derivation, generation, validation, and build process.
     Runs headlessly without questionary prompts.
@@ -48,83 +58,31 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
     build_start_time = time.time()
 
     # ── Build-mode banner: shown once at the start of every compile run ──
-    print_build_mode_banner()
+    print_build_mode_banner(make_command)
 
     # 2. Generate minimal .config
     success, msg = generate_firmware_config(config_dict, klipper_path)
     if not success:
          return {"status": "error", "message": msg}
 
-    # Resolve the correct make binary. On a real system (Pi) this resolves
-    # correctly via PATH. In Docker, the mock make at /usr/local/bin/make
-    # intercepts calls — which is the intended dev-mode behaviour.
-    _make = "make"
-    if os.environ.get("KACE_REAL_BUILD") == "1":
-        if os.path.exists("/usr/bin/make"):
-            _make = "/usr/bin/make"
+    _make = make_command
+
+    # Merge caller environment overrides with standard environment
+    sub_env = dict(os.environ)
+    if env:
+        sub_env.update(env)
 
     wrapper_dir_obj = None
-    old_path = os.environ.get("PATH", "")
 
     try:
-        if os.environ.get("KACE_TESTING") == "1":
-            # Set up LTO bypass compiler wrapper
-            try:
-                wrapper_dir_obj = tempfile.TemporaryDirectory(prefix="kace_cc_wrapper_")
-                w_dir = wrapper_dir_obj.name
-                
-                wrapper_code = (
-                    "#!/usr/bin/env python3\n"
-                    "import sys\n"
-                    "import os\n"
-                    "import subprocess\n"
-                    "\n"
-                    "def main():\n"
-                    "    cmd_name = os.path.basename(sys.argv[0])\n"
-                    "    wrapper_dir = os.path.dirname(os.path.abspath(sys.argv[0]))\n"
-                    "    real_compiler = None\n"
-                    "    paths = os.environ.get('PATH', '').split(os.pathsep)\n"
-                    "    for p in paths:\n"
-                    "        if not p:\n"
-                    "            continue\n"
-                    "        abs_p = os.path.abspath(p)\n"
-                    "        if abs_p == wrapper_dir:\n"
-                    "            continue\n"
-                    "        candidate = os.path.join(p, cmd_name)\n"
-                    "        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):\n"
-                    "            real_compiler = candidate\n"
-                    "            break\n"
-                    "    if not real_compiler:\n"
-                    "        sys.exit(f'Compiler wrapper error: Could not find real {cmd_name} in PATH')\n"
-                    "    args = sys.argv[1:]\n"
-                    "    filtered_args = []\n"
-                    "    for arg in args:\n"
-                    "        if arg.startswith('-flto') or arg == '-fwhole-program' or arg == '-fno-use-linker-plugin':\n"
-                    "            continue\n"
-                    "        filtered_args.append(arg)\n"
-                    "    res = subprocess.run([real_compiler] + filtered_args)\n"
-                    "    sys.exit(res.returncode)\n"
-                    "if __name__ == '__main__':\n"
-                    "    main()\n"
-                )
-                
-                for comp in ["arm-none-eabi-gcc", "avr-gcc"]:
-                    wrapper_path = os.path.join(w_dir, comp)
-                    with open(wrapper_path, "w", encoding="utf-8") as f:
-                        f.write(wrapper_code)
-                    os.chmod(wrapper_path, 0o755)
-                    
-                os.environ["PATH"] = w_dir + os.pathsep + old_path
-            except Exception as wrapper_err:
-                print(f"Warning: Failed to setup LTO compiler wrapper: {wrapper_err}")
-
         # 3. Resolve full configuration with olddefconfig
         subprocess.run(
             [_make, "olddefconfig"],
             cwd=klipper_path,
             check=True,
             capture_output=True,
-            text=True
+            text=True,
+            env=sub_env,
         )
         
         # 4. Post-olddefconfig Validation
@@ -138,13 +96,17 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
             cwd=klipper_path,
             check=True,
             capture_output=True,
-            text=True
+            text=True,
+            env=sub_env,
         )
 
         build_cmd = [_make]
-        if os.environ.get("KACE_TESTING") != "1":
+        if concurrency is not None:
+            if concurrency > 1:
+                build_cmd.append(f"-j{concurrency}")
+        else:
             try:
-                nproc = subprocess.check_output(["nproc"]).decode().strip()
+                nproc = subprocess.check_output(["nproc"], env=sub_env).decode().strip()
                 build_cmd.append(f"-j{nproc}")
             except Exception:
                 pass  # Fallback if nproc is not available
@@ -155,7 +117,8 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
                 cwd=klipper_path,
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
+                env=sub_env,
             )
         except subprocess.CalledProcessError as compile_err:
             stderr_out = compile_err.stderr or ""
@@ -209,7 +172,8 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
                             f.write(wrapper_code)
                         os.chmod(wrapper_path, 0o755)
                         
-                    os.environ["PATH"] = w_dir + os.pathsep + old_path
+                    # Inject wrapper directory to sub_env's PATH
+                    sub_env["PATH"] = w_dir + os.pathsep + sub_env.get("PATH", "")
                     
                     # Clean and compile again
                     subprocess.run(
@@ -217,14 +181,16 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
                         cwd=klipper_path,
                         check=True,
                         capture_output=True,
-                        text=True
+                        text=True,
+                        env=sub_env,
                     )
                     subprocess.run(
                         build_cmd,
                         cwd=klipper_path,
                         check=True,
                         capture_output=True,
-                        text=True
+                        text=True,
+                        env=sub_env,
                     )
                 except Exception as retry_err:
                     raise compile_err
@@ -232,7 +198,7 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
                 raise compile_err
 
         # After compile: show mock warning if applicable
-        print_mock_warning()
+        print_mock_warning(make_command)
             
         # 6. Locate output artifact, verify its timestamp is fresh, and copy
         os.makedirs(output_dir, exist_ok=True)
@@ -300,11 +266,6 @@ def build_firmware_orchestrator(mcu_path=None, derived_mcu=None, hint=None, klip
     except Exception as e:
          return {"status": "error", "message": t("builder.unexpected_error", error=str(e))}
     finally:
-        # Restore PATH
-        if old_path:
-            os.environ["PATH"] = old_path
-        else:
-            os.environ.pop("PATH", None)
         # Clean up temporary wrapper directory
         if wrapper_dir_obj:
             try:
