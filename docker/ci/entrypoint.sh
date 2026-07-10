@@ -205,7 +205,7 @@ setup_dual_mcu() {
 
 start_moonraker_mock() {
     cleanup_moonraker
-    python3 /workspace/docker/mock_moonraker.py > /tmp/mock_moonraker.log 2>&1 &
+    python3 /workspace/docker/ci/mock_moonraker.py > /tmp/mock_moonraker.log 2>&1 &
     sleep 0.5
     echo -e "${GREEN}[+] Started Mock Moonraker API daemon on port 7125.${NC}"
 }

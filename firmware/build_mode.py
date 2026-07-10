@@ -41,9 +41,9 @@ _RE = "\033[91m"   # red
 
 # ── Detection ─────────────────────────────────────────────────────────────────
 
-def is_mock_build() -> bool:
+def is_mock_build(make_command: str = "make") -> bool:
     """Return True when the mock make script is active."""
-    if os.environ.get("KACE_REAL_BUILD") == "1":
+    if make_command != "make":
         return False
 
     if os.path.exists(_MOCK_MAKE_PATH):
@@ -57,12 +57,23 @@ def is_mock_build() -> bool:
 
 # ── User-facing output ────────────────────────────────────────────────────────
 
-def print_build_mode_banner() -> None:
+def _safe_print(text: str) -> None:
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Fallback to pure ASCII for environments that don't support unicode
+        ascii_text = text.encode("ascii", errors="replace").decode("ascii")
+        # Map replaced ? characters back to nice clean dashes/equals
+        ascii_text = ascii_text.replace("?", "-")
+        print(ascii_text)
+
+
+def print_build_mode_banner(make_command: str = "make") -> None:
     """
     Print a one-line build-mode status banner at the start of every compile run.
     Shows clearly whether KACE is using the mock toolchain or the real one.
     """
-    if not is_mock_build():
+    if not is_mock_build(make_command):
         return
 
     SEP = "─" * 52
@@ -73,21 +84,21 @@ def print_build_mode_banner() -> None:
         f"    KACE_REAL_BUILD=1 python3 kace.py\n"
         f"    python3 kace.py --real-build"
     )
-    print(f"\n  {SEP}")
-    print(f"  {mode_label}")
-    print(f"  {note}")
-    print(f"{hint}")
-    print(f"  {SEP}\n")
+    _safe_print(f"\n  {SEP}")
+    _safe_print(f"  {mode_label}")
+    _safe_print(f"  {note}")
+    _safe_print(f"{hint}")
+    _safe_print(f"  {SEP}\n")
 
 
-def print_mock_warning() -> None:
+def print_mock_warning(make_command: str = "make") -> None:
     """
     Print a prominent warning block after a mock build completes,
     reminding the user the output files cannot be flashed.
     """
-    if not is_mock_build():
+    if not is_mock_build(make_command):
         return
-    print(
+    _safe_print(
         f"\n  {_Y}{'═' * 52}{_R}\n"
         f"  {_Y}{_B}  Development Mode Detected{_R}\n"
         f"  {_Y}  Using mock compiler.{_R}\n"
@@ -105,7 +116,7 @@ def print_size_warning(path: str, size_bytes: int) -> None:
     """
     size_str = _human_size(size_bytes)
     threshold_str = _human_size(FIRMWARE_MINIMUM_SIZE_BYTES)
-    print(
+    _safe_print(
         f"\n  {_Y}{'─' * 52}{_R}\n"
         f"  {_Y}{_B}  WARNING: Suspicious firmware size{_R}\n"
         f"  {_Y}  File   : {path}{_R}\n"

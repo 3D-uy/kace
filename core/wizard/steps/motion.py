@@ -11,6 +11,13 @@ from core.wizard.runner import _BACK, _QUIT
 from core.wizard.ui import _back_choice, _quit_choice
 
 _PRINTER_PROFILES_DB = None
+_INTERACTIVE_MODE = True
+
+def set_interactive_mode(interactive: bool) -> None:
+    """Configure whether interactive operations (like clear screen, sleep) are performed."""
+    global _INTERACTIVE_MODE
+    _INTERACTIVE_MODE = interactive
+
 
 def _load_printer_profiles() -> list:
     try:
@@ -168,7 +175,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
         return kin, x_sz, y_sz, z_sz, x_min, x_max, x_end, y_min, y_max, y_end, z_min, z_max, z_end, ht, bt
 
     while True:
-        if os.environ.get("KACE_TESTING") != "1" and os.environ.get("KACE_QUIET") != "1":
+        if _INTERACTIVE_MODE and os.environ.get("KACE_QUIET") != "1":
             os.system('clear' if os.name == 'posix' else 'cls')
 
         kin, x_sz, y_sz, z_sz, x_min, x_max, x_end, \
@@ -299,7 +306,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                     staged_parsed.setdefault(f"stepper_{axis}", {})["position_max"] = f"{p_max:g}"
                     adjusted_msg.append(f"{axis.upper()} position_max adjusted to {p_max:g} to accommodate endstop {endstop:g}")
 
-            if adjusted_msg and os.environ.get("KACE_TESTING") != "1" and os.environ.get("KACE_QUIET") != "1":
+            if adjusted_msg and _INTERACTIVE_MODE and os.environ.get("KACE_QUIET") != "1":
                 print("\n\033[93m[!] Automatically adjusted limits to ensure physical consistency:\033[0m")
                 for msg in adjusted_msg:
                     print(f"    - {msg}")

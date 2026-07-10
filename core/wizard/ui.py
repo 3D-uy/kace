@@ -58,11 +58,18 @@ def _get_active_phase_steps(phase: str, user_data: dict) -> list:
     return active
 
 
+_SUPPRESS_HEADERS = False
+
+def set_suppress_headers(suppress: bool) -> None:
+    """Toggle suppression of UI step headers (useful in test runner context)."""
+    global _SUPPRESS_HEADERS
+    _SUPPRESS_HEADERS = suppress
+
 def _print_step_header(step_id: str, user_data: dict) -> None:
     """Print a visually rich step header box in stdout if quiet/auto mode is not enabled."""
     if get_mode() == "Advanced":
         return
-    if os.environ.get("KACE_TESTING") == "1":
+    if _SUPPRESS_HEADERS:
         return
     if os.environ.get("KACE_AUTO") == "1":
         return
