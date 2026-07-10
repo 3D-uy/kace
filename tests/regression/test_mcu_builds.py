@@ -33,8 +33,12 @@ class TestMCUBuilds(unittest.TestCase):
         self.output_dir.cleanup()
 
     def _run_build_test(self, mcu, hint, expected_filename, compiler_binary):
-        # Check if compiler is available in the environment
-        if not shutil.which(compiler_binary) or not shutil.which("make"):
+        # Check if compiler is available in the environment, excluding the wrapper directory
+        from tests.fixtures.mocks import get_compiler_wrapper_path
+        wrapper_dir = get_compiler_wrapper_path()
+        clean_paths = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p and os.path.abspath(p) != os.path.abspath(wrapper_dir)]
+        real_compiler_path = shutil.which(compiler_binary, path=os.pathsep.join(clean_paths))
+        if not real_compiler_path or not shutil.which("make"):
             self.skipTest(f"Compiler {compiler_binary} or make not found")
 
         # 1. Derive configuration
