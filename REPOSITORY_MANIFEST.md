@@ -103,8 +103,7 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 │   └── pt/                     # Portuguese translations of all guides above
 │
 ├── docker/                     # Docker simulation testbed (dev-only, .gitignore'd compose files)
-│   ├── Dockerfile              # Multi-arch Linux image with cross-compilation toolchains
-│   └── entrypoint.sh           # Simulation scenario builder (mocks services, serial ports, hardware)
+│   └── ci/                     # CI-specific docker environment (Dockerfile, entrypoint.sh, and mocks)
 │
 ├── .github/
 │   └── workflows/
@@ -196,7 +195,7 @@ The following are **never shipped** in the public `3D-uy/kace` repository:
 | `__pycache__/` / `*.pyc` | Python bytecode | `.gitignore` |
 | `.env` / `venv/` / `*.egg-info/` | Local environment files | `.gitignore` |
 
-> **Note on `docker/`:** The `docker/` directory itself **is** committed (Dockerfile + entrypoint.sh are useful to contributors). Only the `docker-compose*.yml` files are excluded because they may contain local path mounts or environment secrets.
+> **Note on `docker/`:** The `docker/` directory itself **is** committed (Dockerfile + entrypoint.sh inside `docker/ci/` are useful to contributors). Only the `docker-compose*.yml` files are excluded because they may contain local path mounts or environment secrets.
 
 > **Note on `REPOSITORY_MANIFEST.md`:** This file **intentionally ships** to `3D-uy/kace`. It is a contributor-facing document that maps the repository structure and surfaces the release checklist. It is not listed in the exclusions table above.
 

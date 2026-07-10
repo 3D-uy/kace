@@ -152,7 +152,7 @@ jobs:
 
       - name: Build Docker validation image
         run: |
-          docker build -f docker/Dockerfile -t kace-dev .
+          docker build -f docker/ci/Dockerfile -t kace-dev .
 
       - name: Run MCU firmware build tests in Docker
         run: |
