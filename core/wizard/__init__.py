@@ -380,12 +380,10 @@ def run_wizard(user_data_arg=None):
         },
     }
 
-    if user_data_arg is None:
-        user_data  = dict(initial_defaults)
-        start_step = "board"
-    else:
-        user_data  = user_data_arg
-        start_step = "web_ui"
+    user_data = dict(initial_defaults)
+    if user_data_arg is not None:
+        user_data.update(user_data_arg)
+    start_step = user_data.pop("start_step", "board")
 
     runner = WizardRunner(steps_config, step_order, initial_data=user_data)
     result_data = runner.run(start_step)
