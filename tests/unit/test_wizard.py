@@ -109,12 +109,12 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(defaults["x_position_min"], "-10")
         self.assertEqual(parsed["stepper_x"]["position_min"], "-10")
         
-        # Check Y max edit and synchronization to y_size
+        # Check Y max edit and verify it is decoupled from y_size
         self.assertEqual(user_data["y_position_max"], "320")
         self.assertEqual(defaults["y_position_max"], "320")
         self.assertEqual(parsed["stepper_y"]["position_max"], "320")
-        self.assertEqual(user_data["y_size"], "320")
-        self.assertEqual(defaults["y_size"], "320")
+        self.assertEqual(user_data["y_size"], "235")
+        self.assertEqual(defaults["y_size"], "235")
 
     @patch("builtins.input")
     def test_interactive_profile_review_save_auto_adjusts_inconsistent_limits(self, mock_input):

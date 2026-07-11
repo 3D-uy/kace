@@ -185,7 +185,7 @@ def numbered_select(prompt, choices, default=0):
             print(f"    {item}")
             
     default_label, default_val = selectable_choices[default]
-    input_prompt = f"  \033[93mSelect [1-{len(selectable_choices)}] (default: {default_label}):\033[0m "
+    input_prompt = f"  \033[93mSelect [1-{len(selectable_choices)}]:\033[0m "
     
     while True:
         try:

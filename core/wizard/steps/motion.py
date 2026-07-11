@@ -83,9 +83,9 @@ def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict
                 print("")
 
     # ── Build Volume ──────────────────────────────────────────────────────────
-    x_size = parsed.get('stepper_x', {}).get('position_max') or defaults.get('x_size')
-    y_size = parsed.get('stepper_y', {}).get('position_max') or defaults.get('y_size')
-    z_size = parsed.get('stepper_z', {}).get('position_max') or defaults.get('z_size')
+    x_size = (user_data.get('x_size') if user_data else None) or defaults.get('x_size') or parsed.get('stepper_x', {}).get('position_max')
+    y_size = (user_data.get('y_size') if user_data else None) or defaults.get('y_size') or parsed.get('stepper_y', {}).get('position_max')
+    z_size = (user_data.get('z_size') if user_data else None) or defaults.get('z_size') or parsed.get('stepper_z', {}).get('position_max')
     if x_size and y_size and z_size:
         print("  \033[96mBuild Volume\033[0m")
         print("  \033[96m────────────\033[0m")
@@ -158,9 +158,9 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
 
     def _resolve(sd, sp):
         kin   = sp.get('printer', {}).get('kinematics') or sd.get('kinematics', 'cartesian')
-        x_sz  = sp.get('stepper_x', {}).get('position_max') or sd.get('x_size', '235')
-        y_sz  = sp.get('stepper_y', {}).get('position_max') or sd.get('y_size', '235')
-        z_sz  = sp.get('stepper_z', {}).get('position_max') or sd.get('z_size', '250')
+        x_sz  = sd.get('x_size') or sp.get('stepper_x', {}).get('position_max') or '235'
+        y_sz  = sd.get('y_size') or sp.get('stepper_y', {}).get('position_max') or '235'
+        z_sz  = sd.get('z_size') or sp.get('stepper_z', {}).get('position_max') or '250'
         x_min = sp.get('stepper_x', {}).get('position_min') or sd.get('x_position_min', '0')
         x_max = sp.get('stepper_x', {}).get('position_max') or sd.get('x_position_max', '235')
         x_end = sp.get('stepper_x', {}).get('position_endstop') or sd.get('x_position_endstop', '0')
@@ -187,9 +187,9 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
         R = "\033[0m"    # reset
         SEP = "─" * 62
 
-        def _row(idx, label, value, comment_key):
+        def _row(label, value, comment_key):
             comment = t(comment_key)
-            return f"  {B}{idx:>2}.{R}  {label:<22} {C}{value}{R}  {D}# {comment}{R}"
+            return f"{label:<22} {C}{value}{R}  {D}# {comment}{R}"
 
         print(f"\n  {B}{t('choice.edit_profile')}{R}")
         print(f"  {SEP}")
@@ -198,26 +198,26 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             return text
 
         choices = [
-            Choice(title=_ansi_choice(_row(1,  "Kinematics",         kin,                             "profile.comment_kinematics")), value="kinematics"),
-            Choice(title=_ansi_choice(_row(2,  "Build Volume",        f"{x_sz} x {y_sz} x {z_sz} mm", "profile.comment_build_volume")), value="volume"),
+            Choice(title=_ansi_choice(_row("Kinematics",         kin,                             "profile.comment_kinematics")), value="kinematics"),
+            Choice(title=_ansi_choice(_row("Build Volume",        f"{x_sz} x {y_sz} x {z_sz} mm", "profile.comment_build_volume")), value="volume"),
             Separator("  " + "─" * 62),
-            Choice(title=_ansi_choice(_row(3,  "X position_min",      x_min, "profile.comment_position_min_x")), value="x_position_min"),
-            Choice(title=_ansi_choice(_row(4,  "X position_max",      x_max, "profile.comment_position_max_x")), value="x_position_max"),
-            Choice(title=_ansi_choice(_row(5,  "X position_endstop",  x_end, "profile.comment_position_endstop_x")), value="x_position_endstop"),
+            Choice(title=_ansi_choice(_row("X position_min",      x_min, "profile.comment_position_min_x")), value="x_position_min"),
+            Choice(title=_ansi_choice(_row("X position_max",      x_max, "profile.comment_position_max_x")), value="x_position_max"),
+            Choice(title=_ansi_choice(_row("X position_endstop",  x_end, "profile.comment_position_endstop_x")), value="x_position_endstop"),
             Separator("  " + "─" * 62),
-            Choice(title=_ansi_choice(_row(6,  "Y position_min",      y_min, "profile.comment_position_min_y")), value="y_position_min"),
-            Choice(title=_ansi_choice(_row(7,  "Y position_max",      y_max, "profile.comment_position_max_y")), value="y_position_max"),
-            Choice(title=_ansi_choice(_row(8,  "Y position_endstop",  y_end, "profile.comment_position_endstop_y")), value="y_position_endstop"),
+            Choice(title=_ansi_choice(_row("Y position_min",      y_min, "profile.comment_position_min_y")), value="y_position_min"),
+            Choice(title=_ansi_choice(_row("Y position_max",      y_max, "profile.comment_position_max_y")), value="y_position_max"),
+            Choice(title=_ansi_choice(_row("Y position_endstop",  y_end, "profile.comment_position_endstop_y")), value="y_position_endstop"),
             Separator("  " + "─" * 62),
-            Choice(title=_ansi_choice(_row(9,  "Z position_min",      z_min, "profile.comment_position_min_z")), value="z_position_min"),
-            Choice(title=_ansi_choice(_row(10, "Z position_max",      z_max, "profile.comment_position_max_z")), value="z_position_max"),
-            Choice(title=_ansi_choice(_row(11, "Z position_endstop",  z_end, "profile.comment_position_endstop_z")), value="z_position_endstop"),
+            Choice(title=_ansi_choice(_row("Z position_min",      z_min, "profile.comment_position_min_z")), value="z_position_min"),
+            Choice(title=_ansi_choice(_row("Z position_max",      z_max, "profile.comment_position_max_z")), value="z_position_max"),
+            Choice(title=_ansi_choice(_row("Z position_endstop",  z_end, "profile.comment_position_endstop_z")), value="z_position_endstop"),
             Separator("  " + "─" * 62),
-            Choice(title=_ansi_choice(_row(12, "Hotend Thermistor",   ht,    "profile.comment_hotend_therm")), value="hotend_thermistor"),
-            Choice(title=_ansi_choice(_row(13, "Bed Thermistor",      bt,    "profile.comment_bed_therm")), value="bed_thermistor"),
+            Choice(title=_ansi_choice(_row("Hotend Thermistor",   ht,    "profile.comment_hotend_therm")), value="hotend_thermistor"),
+            Choice(title=_ansi_choice(_row("Bed Thermistor",      bt,    "profile.comment_bed_therm")), value="bed_thermistor"),
             Separator("  " + "─" * 62),
-            Choice(title=_ansi_choice(f"  {B}{t('choice.save_continue')}{R}"), value="save"),
-            Choice(title=_ansi_choice(f"  {B}{t('choice.back_discard')}{R}"), value="back")
+            Choice(title=_ansi_choice(f"{B}{t('choice.save_continue')}{R}"), value="save"),
+            Choice(title=_ansi_choice(f"{B}{t('choice.back_discard')}{R}"), value="back")
         ]
 
         prop = numbered_select(
@@ -406,10 +406,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 sx = staged_parsed.setdefault(f"stepper_{axis}", {})
                 sx[field] = val_clean
                 
-                if field == "position_max":
-                    size_key = f"{axis}_size"
-                    staged_user_data[size_key] = val_clean
-                    staged_defaults[size_key] = val_clean
+                pass
 
         elif prop == "hotend_thermistor":
             th_choices = list(THERMISTOR_PRESETS) + ["Other (Manual Entry)"]
