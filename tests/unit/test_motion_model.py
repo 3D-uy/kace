@@ -170,5 +170,20 @@ class TestMotionModel(unittest.TestCase):
         self.assertEqual(space.printable_x_max, 235.0)
         self.assertEqual(space.printable_y_max, 235.0)
 
+        # 4. Offset travel shift alignment (e.g. position_min = -5, position_max = 295, x_size = 300)
+        user_data = {
+            "x_size": "300",
+            "y_size": "300",
+            "x_position_min": "-5",
+            "x_position_max": "295",
+            "y_position_min": "-10",
+            "y_position_max": "290",
+        }
+        space = PrinterMotionSpace(user_data)
+        self.assertEqual(space.printable_x_min, -5.0)
+        self.assertEqual(space.printable_x_max, 295.0)
+        self.assertEqual(space.printable_y_min, -10.0)
+        self.assertEqual(space.printable_y_max, 290.0)
+
 if __name__ == '__main__':
     unittest.main()

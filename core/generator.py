@@ -86,12 +86,49 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         z_min_stepper = float(user_ctx.get("z_position_min", 0.0))
         z_max_stepper = float(user_ctx.get("z_position_max", float(user_ctx.get("z_size", 250.0))))
 
-        # Printable limits (with robust derivation fallback)
-        printable_x_min = float(user_ctx.get("printable_x_min", x_min_stepper if x_min_stepper > 0.0 else 0.0))
-        printable_x_max = float(user_ctx.get("printable_x_max", float(user_ctx.get("x_size", 235.0))))
-        printable_y_min = float(user_ctx.get("printable_y_min", y_min_stepper if y_min_stepper > 0.0 else 0.0))
-        printable_y_max = float(user_ctx.get("printable_y_max", float(user_ctx.get("y_size", 235.0))))
+        # Printable limits (with robust derivation fallback and shift alignment)
+        p_x_min_val = user_ctx.get("printable_x_min")
+        printable_x_min = float(p_x_min_val) if p_x_min_val is not None else (x_min_stepper if x_min_stepper > 0.0 else 0.0)
+        p_x_max_val = user_ctx.get("printable_x_max")
+        printable_x_max = float(p_x_max_val) if p_x_max_val is not None else float(user_ctx.get("x_size", 235.0))
+
+        # Shift printable X area within physical limits if possible, only if NOT explicitly set by user
+        if p_x_min_val is None and p_x_max_val is None:
+            if printable_x_max > x_max_stepper:
+                shift_x = printable_x_max - x_max_stepper
+                if printable_x_min - shift_x >= x_min_stepper:
+                    printable_x_min -= shift_x
+                    printable_x_max -= shift_x
+            elif printable_x_min < x_min_stepper:
+                shift_x = x_min_stepper - printable_x_min
+                if printable_x_max + shift_x <= x_max_stepper:
+                    printable_x_min += shift_x
+                    printable_x_max += shift_x
+
+        p_y_min_val = user_ctx.get("printable_y_min")
+        printable_y_min = float(p_y_min_val) if p_y_min_val is not None else (y_min_stepper if y_min_stepper > 0.0 else 0.0)
+        p_y_max_val = user_ctx.get("printable_y_max")
+        printable_y_max = float(p_y_max_val) if p_y_max_val is not None else float(user_ctx.get("y_size", 235.0))
+
+        # Shift printable Y area within physical limits if possible, only if NOT explicitly set by user
+        if p_y_min_val is None and p_y_max_val is None:
+            if printable_y_max > y_max_stepper:
+                shift_y = printable_y_max - y_max_stepper
+                if printable_y_min - shift_y >= y_min_stepper:
+                    printable_y_min -= shift_y
+                    printable_y_max -= shift_y
+            elif printable_y_min < y_min_stepper:
+                shift_y = y_min_stepper - printable_y_min
+                if printable_y_max + shift_y <= y_max_stepper:
+                    printable_y_min += shift_y
+                    printable_y_max += shift_y
+
         printable_z_max = float(user_ctx.get("printable_z_max", float(user_ctx.get("z_size", 250.0))))
+
+        user_ctx["printable_x_min"] = f"{printable_x_min:g}"
+        user_ctx["printable_x_max"] = f"{printable_x_max:g}"
+        user_ctx["printable_y_min"] = f"{printable_y_min:g}"
+        user_ctx["printable_y_max"] = f"{printable_y_max:g}"
     except (ValueError, TypeError) as e:
         raise GenerationError(f"Invalid numeric value in geometry settings: {e}")
 

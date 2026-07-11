@@ -48,24 +48,58 @@ class PrinterMotionSpace:
         # Derive X printable limits
         if "printable_x_min" in user_data and user_data["printable_x_min"] is not None:
             self.printable_x_min = _safe_float(user_data["printable_x_min"], self.x_min if self.x_min > 0.0 else 0.0)
+            x_min_explicit = True
         else:
             self.printable_x_min = self.x_min if self.x_min > 0.0 else 0.0
+            x_min_explicit = False
 
         if "printable_x_max" in user_data and user_data["printable_x_max"] is not None:
             self.printable_x_max = _safe_float(user_data["printable_x_max"], self.x_size)
+            x_max_explicit = True
         else:
             self.printable_x_max = self.x_size
+            x_max_explicit = False
+
+        # Align printable X area within physical limits if possible, only if NOT explicitly set by user
+        if not (x_min_explicit or x_max_explicit):
+            if self.printable_x_max > self.x_max:
+                shift_x = self.printable_x_max - self.x_max
+                if self.printable_x_min - shift_x >= self.x_min:
+                    self.printable_x_min -= shift_x
+                    self.printable_x_max -= shift_x
+            elif self.printable_x_min < self.x_min:
+                shift_x = self.x_min - self.printable_x_min
+                if self.printable_x_max + shift_x <= self.x_max:
+                    self.printable_x_min += shift_x
+                    self.printable_x_max += shift_x
 
         # Derive Y printable limits
         if "printable_y_min" in user_data and user_data["printable_y_min"] is not None:
             self.printable_y_min = _safe_float(user_data["printable_y_min"], self.y_min if self.y_min > 0.0 else 0.0)
+            y_min_explicit = True
         else:
             self.printable_y_min = self.y_min if self.y_min > 0.0 else 0.0
+            y_min_explicit = False
 
         if "printable_y_max" in user_data and user_data["printable_y_max"] is not None:
             self.printable_y_max = _safe_float(user_data["printable_y_max"], self.y_size)
+            y_max_explicit = True
         else:
             self.printable_y_max = self.y_size
+            y_max_explicit = False
+
+        # Align printable Y area within physical limits if possible, only if NOT explicitly set by user
+        if not (y_min_explicit or y_max_explicit):
+            if self.printable_y_max > self.y_max:
+                shift_y = self.printable_y_max - self.y_max
+                if self.printable_y_min - shift_y >= self.y_min:
+                    self.printable_y_min -= shift_y
+                    self.printable_y_max -= shift_y
+            elif self.printable_y_min < self.y_min:
+                shift_y = self.y_min - self.printable_y_min
+                if self.printable_y_max + shift_y <= self.y_max:
+                    self.printable_y_min += shift_y
+                    self.printable_y_max += shift_y
 
         # Derive Z printable limits
         if "printable_z_max" in user_data and user_data["printable_z_max"] is not None:
