@@ -113,8 +113,8 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         raise GenerationError(f"Printable area width ({printable_x_max - printable_x_min:g}mm) exceeds maximum X travel range ({x_max_stepper - x_min_stepper:g}mm).")
     if (printable_y_max - printable_y_min) > (y_max_stepper - y_min_stepper):
         raise GenerationError(f"Printable area depth ({printable_y_max - printable_y_min:g}mm) exceeds maximum Y travel range ({y_max_stepper - y_min_stepper:g}mm).")
-    if printable_z_max > (z_max_stepper - z_min_stepper):
-        raise GenerationError(f"Printable area height ({printable_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper - z_min_stepper:g}mm).")
+    if printable_z_max > z_max_stepper:
+        raise GenerationError(f"Printable area height ({printable_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper:g}mm).")
 
     # Validate Printable Area inclusion within travel limits
     if printable_x_min < x_min_stepper or printable_x_max > x_max_stepper:

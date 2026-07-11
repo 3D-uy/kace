@@ -257,8 +257,8 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 validation_error = f"Printable area width ({p_x_max - p_x_min:g}mm) exceeds maximum X travel range ({x_max_stepper - x_min_stepper:g}mm)."
             elif (p_y_max - p_y_min) > (y_max_stepper - y_min_stepper):
                 validation_error = f"Printable area depth ({p_y_max - p_y_min:g}mm) exceeds maximum Y travel range ({y_max_stepper - y_min_stepper:g}mm)."
-            elif p_z_max > (z_max_stepper - z_min_stepper):
-                validation_error = f"Printable area height ({p_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper - z_min_stepper:g}mm)."
+            elif p_z_max > z_max_stepper:
+                validation_error = f"Printable area height ({p_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper:g}mm)."
             elif p_x_min < x_min_stepper or p_x_max > x_max_stepper:
                 validation_error = f"Printable X boundary [{p_x_min:g}, {p_x_max:g}] is outside physical X travel limits [{x_min_stepper:g}, {x_max_stepper:g}]."
             elif p_y_min < y_min_stepper or p_y_max > y_max_stepper:
