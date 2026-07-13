@@ -640,6 +640,35 @@ def deploy_avrdude(user_data, artifact_path, mcu_type):
         print("\n\033[93mCommand execution cancelled. You can run it manually.\033[0m")
 
 
+
+
+class _MoonrakerClient:
+    """Thin adapter that wraps core.moonraker functions to match the interface
+    expected by core.moonraker_deployer.Deployer."""
+
+    def __init__(self, host: str, port: int, api_key: str = None):
+        self._host    = host
+        self._port    = port
+        self._api_key = api_key
+
+    def get_klippy_state(self) -> str:
+        from core.moonraker import get_klipper_state
+        return get_klipper_state(self._host, self._port, api_key=self._api_key)
+
+    def get_mcu_versions(self) -> dict:
+        from core.moonraker import get_mcu_versions
+        return get_mcu_versions(self._host, self._port, api_key=self._api_key)
+
+    def upload_and_apply_config(self, printer_cfg_path: str, macros_cfg_path=None):
+        from core.moonraker import upload_printer_cfg
+        upload_printer_cfg(self._host, self._port, printer_cfg_path, api_key=self._api_key)
+        if macros_cfg_path and os.path.isfile(macros_cfg_path):
+            upload_printer_cfg(self._host, self._port, macros_cfg_path, api_key=self._api_key)
+
+    def firmware_restart(self):
+        from core.moonraker import restart_firmware
+        restart_firmware(self._host, self._port, api_key=self._api_key)
+
 def deploy_moonraker(user_data):
     """Deploy printer.cfg to a Klipper host via the Moonraker REST API.
 
@@ -780,40 +809,74 @@ def deploy_moonraker(user_data):
 
         print(f"\033[92m[OK] {t('moonraker.upload_ok')}\033[0m")
 
-        # ── Step 5: Restart prompt ────────────────────────────────────
-        restart_choice = numbered_select(
-            t("moonraker.restart_prompt"),
-            choices=[
-                {"name": t("moonraker.restart_firmware"), "value": "firmware"},
-                {"name": t("moonraker.restart_service"),  "value": "service"},
-                {"name": t("moonraker.restart_skip"),     "value": "skip"},
-            ]
-        )
+        # ── Step 5: Restart / firmware-verified deploy ───────────────────
+        klipper_version = user_data.get("klipper_version", "")
+        mcu_name        = user_data.get("mcu_name", "mcu")
 
-        if restart_choice is None:
-            restart_choice = "skip"
+        if klipper_version:
+            # Firmware was compiled in this KACE run — use the state-machine
+            # path that verifies the new firmware is actually running before
+            # applying printer.cfg.
+            from core.moonraker_deployer import Deployer, DeploymentManifest, McuTarget, DeployState
+            print(f"\n\033[93m[!] Power-cycle your printer (turn it OFF and ON) to flash the new firmware.\033[0m")
+            input("    Press ENTER once the printer has fully rebooted... ")
 
-        if restart_choice == "firmware":
-            restart_ok, restart_msg = restart_firmware(host, port, api_key=api_key)
-        elif restart_choice == "service":
-            restart_ok, restart_msg = restart_klipper_service(host, port, api_key=api_key)
+            _manifest = DeploymentManifest(
+                targets=[McuTarget(name=mcu_name, expected_version=klipper_version)],
+                printer_cfg_path=cfg_path,
+                macros_cfg_path=os.path.expanduser("~/kace/macros.cfg") if macros_uploaded else None,
+            )
+            _client  = _MoonrakerClient(host, port, api_key=api_key)
+            _result  = Deployer(_client, _manifest).run()
+
+            if _result.state is DeployState.DONE:
+                deployed_successfully = True
+                print(f"\n\033[92m[OK] Firmware verified and printer.cfg applied!\033[0m")
+                print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
+            elif _result.state is DeployState.FAILED_FLASH:
+                print(f"\n\033[91m[!] Flash verification FAILED: {_result.detail}\033[0m")
+                print(f"\033[93m    printer.cfg was NOT applied — check the SD card and retry.\033[0m")
+            elif _result.state is DeployState.TIMEOUT:
+                print(f"\n\033[91m[!] Timeout: {_result.detail}\033[0m")
+                print(f"\033[93m    Check that the printer is powered on and Moonraker is reachable.\033[0m")
+            elif _result.state is DeployState.CONFIG_ERROR:
+                print(f"\n\033[91m[!] Klipper boot error after reflash: {_result.detail}\033[0m")
+                print(f"\033[93m    Check the Klipper logs for details. printer.cfg was NOT applied.\033[0m")
+            else:
+                print(f"\n\033[91m[!] Deployment ended in unexpected state: {_result.state.name} — {_result.detail}\033[0m")
         else:
-            restart_ok, restart_msg = True, "skipped"
+            # No firmware compiled in this run — standard config-only deploy.
+            restart_choice = numbered_select(
+                t("moonraker.restart_prompt"),
+                choices=[
+                    {"name": t("moonraker.restart_firmware"), "value": "firmware"},
+                    {"name": t("moonraker.restart_service"),  "value": "service"},
+                    {"name": t("moonraker.restart_skip"),     "value": "skip"},
+                ]
+            )
+            if restart_choice is None:
+                restart_choice = "skip"
 
-        if restart_ok:
+            if restart_choice == "firmware":
+                restart_ok, restart_msg = restart_firmware(host, port, api_key=api_key)
+            elif restart_choice == "service":
+                restart_ok, restart_msg = restart_klipper_service(host, port, api_key=api_key)
+            else:
+                restart_ok, restart_msg = True, "skipped"
+
+            if restart_ok:
+                if restart_choice != "skip":
+                    print(f"\033[92m[OK] {t('moonraker.restart_ok')}\033[0m")
+            else:
+                raise RuntimeError(t('moonraker.restart_fail', error=restart_msg))
+
+            deployed_successfully = True
+            print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
             if restart_choice != "skip":
-                print(f"\033[92m[OK] {t('moonraker.restart_ok')}\033[0m")
-        else:
-            raise RuntimeError(t('moonraker.restart_fail', error=restart_msg))
-
-        # ── Step 6: Post-Deployment Success & Instructions ─────────
-        deployed_successfully = True
-        print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
-        if restart_choice != "skip":
-            print(f"\033[96m[*]\033[0m Klipper restart issued successfully.")
-            print(f"\033[93m[!] TIP: If Klipper doesn't load immediately or reports a connection error,\033[0m")
-            print(f"\033[93m    we recommend power-cycling (turning OFF and ON) your Raspberry Pi and printer.\033[0m")
-        print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
+                print(f"\033[96m[*]\033[0m Klipper restart issued successfully.")
+                print(f"\033[93m[!] TIP: If Klipper does not load immediately or reports a connection error,\033[0m")
+                print(f"\033[93m    we recommend power-cycling (turning OFF and ON) your Raspberry Pi and printer.\033[0m")
+            print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
 
     except Exception as e:
         print(f"\033[91mMoonraker deployment failed: {e}\033[0m")

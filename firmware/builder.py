@@ -1,3 +1,4 @@
+import hashlib
 import os
 import time
 import shutil
@@ -98,7 +99,21 @@ def build_firmware_orchestrator(
             env=sub_env,
         )
         
-        # 4. Post-olddefconfig Validation
+        # 4. Compute config fingerprint for firmware verification
+        # sha256 of the resolved .config is deterministic per build configuration,
+        # avoiding shallow-clone / git-describe unreliability (see design notes).
+        _config_sha8 = ""
+        _klipper_version_override = None
+        try:
+            _cfg_file = os.path.join(klipper_path, ".config")
+            if os.path.isfile(_cfg_file):
+                with open(_cfg_file, "rb") as _f:
+                    _config_sha8 = hashlib.sha256(_f.read()).hexdigest()[:8]
+                _klipper_version_override = f"kace-{_config_sha8}"
+        except Exception:
+            pass  # non-fatal; version check will be skipped if sha is absent
+
+        # 4b. Post-olddefconfig Validation
         val_success, val_msg = validate_config(klipper_path)
         if not val_success:
              return {"status": "error", "message": val_msg}
@@ -114,6 +129,10 @@ def build_firmware_orchestrator(
         )
 
         build_cmd = [_make]
+        # Embed the config fingerprint into the binary so Moonraker can return
+        # it via the mcu object's mcu_version field for post-flash verification.
+        if _klipper_version_override:
+            build_cmd.append(f"KLIPPER_VERSION={_klipper_version_override}")
         if build_context.concurrency is not None:
             if build_context.concurrency > 1:
                 build_cmd.append(f"-j{build_context.concurrency}")
@@ -268,6 +287,8 @@ def build_firmware_orchestrator(
                         "path": dest,
                         "size_warning": size_warning,
                         "size_bytes": artifact_size,
+                        "klipper_version": _klipper_version_override or "",
+                        "mcu_name": "mcu",
                     }
 
         return {"status": "error", "message": t("builder.no_binary")}

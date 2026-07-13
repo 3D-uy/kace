@@ -178,6 +178,9 @@ def run_firmware_wizard(user_data: dict):
         print(f"\033[92mSUCCESS:\033[0m {t('kace.firmware_success', path=result.get('path'))}")
         user_data['mcu_type'] = result.get('mcu')
         user_data['firmware_path'] = result.get('path')
+        if result.get('klipper_version'):
+            user_data['klipper_version'] = result.get('klipper_version')
+            user_data['mcu_name'] = result.get('mcu_name', 'mcu')
 
         # Surface size warning if the builder flagged a suspiciously small artifact.
         # build_mode already printed a detailed block; this adds a concise inline note

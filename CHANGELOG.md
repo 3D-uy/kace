@@ -8,17 +8,25 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.9.3.4] — Unreleased
 
+### Added
+- Integrated a state-machine-driven firmware deployment flow (`core/moonraker_deployer.py`) that handles reboot detection, Klipper readiness verification, and post-flash build identity checking.
+- Added `get_klipper_state` and `get_mcu_versions` endpoints to `core/moonraker.py` to fetch exact Klipper status and active MCU compilation versions.
+- Added automatic configuration SHA fingerprinting during firmware compilation and injected it as a `KLIPPER_VERSION` make override.
+
 ### Refactored
 - Decoupled testing-specific environment variable checks (`KACE_TESTING`, `KACE_REAL_BUILD`) from the production codebase (`core/` and `firmware/`).
 - Introduced generic dependency injection points (`make_command`, `env`, `concurrency`) in `build_firmware_orchestrator` to decouple build-tool resolution.
 - Extracted and encapsulated compiler LTO bypass wrapping logic into a dedicated testing fixture module under `tests/fixtures/`.
 - Reorganized the `docker/` folder structure, moving all CI-specific mocking files and scripts into `docker/ci/`.
 - Simplified test configurations by initializing global test-runner mocks and prepends inside test harness setups (`conftest.py` and `run_tests.py`).
+- Integrated the new state machine into `deploy_moonraker` in `core/deployer.py`, enabling verified deployments when a build manifest exists, while keeping standard config-only uploads unchanged.
 
 ### Cleaned
+- Removed temporary root sketch file `deployer_state_machine.py` after migrating state machine components to production `core/moonraker_deployer.py`.
 - Removed orphaned standalone validation/smoke scripts (`tests/smoke_advanced.py`, `tests/validate_advanced.py`, `tests/validate_display_hw.py`) since their functionality is fully covered by the integrated unit/regression test suite.
 - Updated `.gitignore` to explicitly ignore generated build files (`*.bin`, `*.uf2`, `*.elf.hex`), local `.config` files, and local KACE output files (`printer.cfg`, `macros.cfg`, `jobs.json`, `test_printer.cfg`).
 - Added missing `questionary` package declaration in `requirements.txt` with PyPI sha256 hashes.
+
 
 ---
 

@@ -244,6 +244,72 @@ def check_klipper_ready(host: str, port: int, api_key: str = None) -> tuple[bool
     return False, err_desc
 
 
+
+
+def get_klipper_state(host: str, port: int = DEFAULT_PORT, api_key: str = None) -> str:
+    """Return the exact Klippy state string from GET /printer/info.
+
+    Possible return values:
+        "ready"        - Klipper is up and accepting commands
+        "startup"      - Klipper is initialising (MCUs not yet connected)
+        "shutdown"     - Klipper entered a shutdown state (MCU error etc.)
+        "error"        - Klipper encountered a fatal error
+        "disconnected" - Moonraker cannot reach klippy
+        "unknown"      - Unexpected or unparseable response
+
+    Prefer this over check_klipper_ready() when you need to branch on
+    specific states rather than a simple ready/not-ready boolean.
+    """
+    url = f"{_base_url(host, port)}/printer/info"
+    ok, msg, body = _get(url, api_key=api_key)
+    if not ok:
+        return "disconnected"
+    return body.get("result", {}).get("state", "unknown")
+
+
+def get_mcu_versions(host: str, port: int = DEFAULT_PORT, api_key: str = None) -> dict:
+    """Query all MCU objects and return their mcu_version strings.
+
+    Workflow:
+      1. GET /printer/objects/list  to discover every Moonraker object name.
+      2. Filter for names that are exactly "mcu" or start with "mcu ".
+      3. GET /printer/objects/query?<mcu_names>=mcu_version  to fetch versions.
+
+    Returns a dict keyed by Moonraker object name:
+        {"mcu": "kace-a1b2c3d", "mcu toolboard": "kace-e4f5a6b"}
+
+    Returns an empty dict on any failure (caller treats empty as "not visible").
+    """
+    # Step 1: discover available objects
+    list_url = f"{_base_url(host, port)}/printer/objects/list"
+    ok, _, body = _get(list_url, api_key=api_key)
+    if not ok:
+        return {}
+
+    all_objects = body.get("result", {}).get("objects", [])
+    mcu_names = [o for o in all_objects if o == "mcu" or o.startswith("mcu ")]
+    if not mcu_names:
+        return {}
+
+    # Step 2: query mcu_version for each MCU object
+    # Moonraker query format: /printer/objects/query?obj1=attr&obj2=attr
+    # Spaces in object names must be URL-encoded as %20 (not +).
+    query_parts = [urllib.parse.quote(name, safe="") + "=mcu_version" for name in mcu_names]
+    query_url = f"{_base_url(host, port)}/printer/objects/query?" + "&".join(query_parts)
+    ok, _, body = _get(query_url, api_key=api_key)
+    if not ok:
+        return {}
+
+    status = body.get("result", {}).get("status", {})
+    result = {}
+    for name in mcu_names:
+        obj_data = status.get(name, {})
+        version = obj_data.get("mcu_version")
+        if version:
+            result[name] = version
+    return result
+
+
 def verify_remote_file_exists(host: str, port: int, filename: str, api_key: str = None) -> bool:
     """Verify whether a file exists in the config root by querying server/files/list.
 
