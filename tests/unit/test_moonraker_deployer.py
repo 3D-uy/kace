@@ -265,8 +265,9 @@ class TestMoonrakerDeployer(unittest.TestCase):
     # ── Single-snapshot guarantee (Fix 3) ────────────────────────────────────────
 
     def test_single_mcu_versions_call_per_run(self):
-        """get_mcu_versions() must be called exactly once. Two calls would
-        re-introduce the double round-trip race that Fix 3 eliminated."""
+        """get_mcu_versions() must be called exactly once per connect phase.
+        With Phase 6 added, we have two connect phases (pre-flash verify and post-restart config verify),
+        so it should be called exactly twice."""
         call_count = {"n": 0}
 
         class CountingClient:
@@ -279,7 +280,7 @@ class TestMoonrakerDeployer(unittest.TestCase):
 
         result = _fast_deployer(CountingClient()).run()
         self.assertEqual(result.state, DeployState.DONE)
-        self.assertEqual(call_count["n"], 1)
+        self.assertEqual(call_count["n"], 2)
 
     # ── dev-deploy / verify_firmware=False ────────────────────────────────────────
 
@@ -324,3 +325,46 @@ class TestMoonrakerDeployer(unittest.TestCase):
         self.assertEqual(result.state, DeployState.DONE)
         self.assertIs(result.snapshot, snap)
         self.assertEqual(result.snapshot.deployment_id, "test-uuid")
+
+    # ── Phase 6 Targeted Verification Tests ───────────────────────────────────
+
+    def test_verify_config_success(self):
+        """Klipper restarts, disconnects, then comes back up and reaches ready -> DONE."""
+        client = MockClient(
+            states=["disconnected", "ready", "disconnected", "ready"],
+            versions_seq=[{"mcu": "kace-a1b2c3d"}],
+        )
+        result = _fast_deployer(client).run()
+        self.assertEqual(result.state, DeployState.DONE)
+        self.assertTrue(client.applied)
+        self.assertTrue(client.restarted)
+
+    def test_verify_config_error_triggers_config_error_state(self):
+        """Klipper restarts, disconnects, then comes back but has a config error (shutdown/error) -> CONFIG_ERROR."""
+        client = MockClient(
+            states=["disconnected", "ready", "disconnected", "shutdown"],
+            versions_seq=[{"mcu": "kace-a1b2c3d"}],
+        )
+        result = _fast_deployer(client).run()
+        self.assertEqual(result.state, DeployState.CONFIG_ERROR)
+        self.assertIn("Klipper reported shutdown/error with the new configuration", result.detail)
+        self.assertTrue(client.applied)
+        self.assertTrue(client.restarted)
+
+    def test_verify_config_timeout_triggers_timeout_state(self):
+        """Klipper restarts, disconnects, but never comes back online within the timeout -> TIMEOUT."""
+        # Phase 1 disconnect sees "disconnected".
+        # Phase 2 reconnect sees "ready".
+        # Phase 6 disconnect sees "disconnected".
+        # Phase 6 reconnect sees "disconnected" indefinitely (times out).
+        client = MockClient(
+            states=["disconnected", "ready", "disconnected"] + ["disconnected"] * 10,
+            versions_seq=[{"mcu": "kace-a1b2c3d"}],
+        )
+        result = _fast_deployer(client, reconnect_timeout=0.05).run()
+        self.assertEqual(result.state, DeployState.TIMEOUT)
+        self.assertIn("Printer did not come back online after configuration update", result.detail)
+        self.assertTrue(client.applied)
+        self.assertTrue(client.restarted)
+
+

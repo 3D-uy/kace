@@ -784,6 +784,7 @@ def deploy_moonraker(user_data):
         print("\033[93m[!] Configuration backup skipped (no files found in config root).\033[0m")
 
     deployed_successfully = False
+    bypass_rollback = False
     restart_choice = "skip"
     macros_uploaded = False
 
@@ -851,8 +852,9 @@ def deploy_moonraker(user_data):
                 print(f"\n\033[91m[!] Timeout: {_result.detail}\033[0m")
                 print(f"\033[93m    Check that the printer is powered on and Moonraker is reachable.\033[0m")
             elif _result.state is DeployState.CONFIG_ERROR:
-                print(f"\n\033[91m[!] Klipper boot error after reflash: {_result.detail}\033[0m")
-                print(f"\033[93m    Check the Klipper logs for details. printer.cfg was NOT applied.\033[0m")
+                bypass_rollback = True
+                print(f"\n\033[91m[!] Klipper boot error: {_result.detail}\033[0m")
+                print(f"\033[93m    Bypassing automatic rollback to allow debugging the configuration error.\033[0m")
             else:
                 print(f"\n\033[91m[!] Deployment ended in unexpected state: {_result.state.name} — {_result.detail}\033[0m")
         else:
@@ -892,8 +894,9 @@ def deploy_moonraker(user_data):
     except Exception as e:
         print(f"\033[91mMoonraker deployment failed: {e}\033[0m")
     finally:
-        # Perform rollback if a snapshot was captured and deployment was not successful.
-        if _snap is not None and not deployed_successfully:
+        # Perform rollback if a snapshot was captured, deployment was not successful,
+        # and rollback is not bypassed.
+        if _snap is not None and not deployed_successfully and not bypass_rollback:
             print("\033[93m[!] Initiating automatic rollback of configurations...\033[0m")
             failed_files = restore_snapshot(_snap, host, port, api_key=api_key)
             if failed_files:

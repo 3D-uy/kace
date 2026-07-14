@@ -50,6 +50,7 @@ class DeployState(Enum):
     VERIFYING_FIRMWARE  = auto()
     APPLYING_CONFIG     = auto()
     FIRMWARE_RESTART    = auto()
+    VERIFYING_CONFIG    = auto()  # verifying post-restart config/Klipper health
     DONE                = auto()
     # Terminal failure states
     FAILED_FLASH        = auto()  # reconnected but version mismatch on >=1 MCU
@@ -207,6 +208,24 @@ class Deployer:
         # ── Phase 5: Trigger firmware restart ─────────────────────────────
         self.state = DeployState.FIRMWARE_RESTART
         self.client.firmware_restart()
+
+        # ── Phase 6: Post-restart Verification ─────────────────────────────
+        # Wait for Klipper to reload and confirm it enters the "ready" state
+        # using the new configuration.
+        self.state = DeployState.VERIFYING_CONFIG
+        
+        # Wait for the restart-triggered disconnect to happen
+        self._wait_for_disconnect()
+        
+        # Wait for Klipper to come back up and reach ready
+        outcome, versions = self._wait_for_reconnect()
+        
+        if outcome is self._ReconnectOutcome.ABORTED:
+            return DeployResult(DeployState.ABORTED, "Cancelled by user during post-restart verification")
+        if outcome is self._ReconnectOutcome.TIMEOUT:
+            return DeployResult(DeployState.TIMEOUT, "Printer did not come back online after configuration update")
+        if outcome is self._ReconnectOutcome.CONFIG_ERROR:
+            return DeployResult(DeployState.CONFIG_ERROR, "Klipper reported shutdown/error with the new configuration")
 
         self.state = DeployState.DONE
         return DeployResult(
