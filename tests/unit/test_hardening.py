@@ -403,37 +403,46 @@ class TestBackupRollbackIntegration(unittest.TestCase):
     @patch("time.sleep")
     @patch("core.menu.simple_input")
     @patch("core.moonraker.verify_remote_file_exists")
-    @patch("core.moonraker.download_printer_cfg")
+    @patch("core.moonraker.list_config_files")
+    @patch("core.snapshot.download_printer_cfg")
+    @patch("core.snapshot.upload_printer_cfg")
     @patch("core.moonraker.upload_printer_cfg")
-    @patch("core.moonraker.restart_klipper_service")
+    @patch("core.snapshot.restart_firmware")
     @patch("builtins.print")
     def test_moonraker_unconditional_rollback_on_upload_failure(
-        self, mock_print, mock_restart, mock_upload, mock_download, mock_exists, mock_text, mock_sleep, mock_check_mr
+        self, mock_print, mock_snap_restart, mock_upload, mock_snap_upload,
+        mock_download, mock_list_files, mock_exists, mock_text, mock_sleep, mock_check_mr
     ):
         """Verify Moonraker deployment triggers rollback on exception/upload failure."""
         from core.deployer import deploy_moonraker
-        
+
         # Connection succeeds
         mock_check_mr.return_value = (True, "v1.0.0")
         mock_text.side_effect = ["192.168.1.100", "7125", ""]
-        
-        # Backup exists
+
+        # list_config_files returns the files present on the remote
+        mock_list_files.return_value = ["printer.cfg"]
+
+        # Backup download succeeds
         mock_exists.side_effect = lambda h, p, f, **kw: True if f == "printer.cfg" else False
         mock_download.return_value = (True, b"backup_cfg_content")
-        
+
         # Upload throws an exception (simulating network drop / HTTP timeout)
         mock_upload.side_effect = Exception("HTTP POST Timeout")
-        
+
+        # Snapshot restore upload succeeds so rollback can complete
+        mock_snap_upload.return_value = (True, "printer.cfg")
+
         deploy_moonraker({"moonraker_host": "192.168.1.100", "moonraker_port": 7125})
-        
-        # Verify that upload_printer_cfg was still called to restore printer.cfg in rollback
-        # The first call was the failed attempt (which raised the Exception),
-        # the second call is the rollback restoration.
-        self.assertEqual(mock_upload.call_count, 2)
-        
-        # Verify that restart_klipper_service was called during rollback to recover the service state
-        mock_restart.assert_called_with("192.168.1.100", 7125, api_key="")
-        
+
+        # The moonraker upload was called once (the failed attempt that raised).
+        # The rollback restore goes through core.snapshot.upload_printer_cfg.
+        self.assertEqual(mock_upload.call_count, 1)   # 1 failed deploy upload
+        self.assertEqual(mock_snap_upload.call_count, 1)  # 1 rollback restore
+
+        # Verify restart_firmware was called during rollback
+        mock_snap_restart.assert_called_once_with("192.168.1.100", 7125, api_key="")
+
         printed = [call[0][0] for call in mock_print.call_args_list]
         self.assertTrue(any("Initiating automatic rollback" in msg for msg in printed))
 

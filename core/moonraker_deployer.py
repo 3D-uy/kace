@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Optional
 
 # Network error types treated as "still down" in polling safe wrappers.
 #
@@ -43,6 +44,7 @@ except ImportError:
 
 class DeployState(Enum):
     INIT                = auto()
+    BACKUP              = auto()  # capturing pre-deployment snapshot
     AWAITING_DISCONNECT = auto()
     AWAITING_RECONNECT  = auto()
     VERIFYING_FIRMWARE  = auto()
@@ -76,6 +78,7 @@ class DeployResult:
     state: DeployState
     detail: str = ""
     mcu_versions: dict = field(default_factory=dict)
+    snapshot: Optional[object] = None  # DeploymentSnapshot | None (typed as object to avoid circular import)
 
 
 class Deployer:
@@ -106,10 +109,12 @@ class Deployer:
         TIMEOUT      = auto()  # Deadline elapsed before all conditions met
         ABORTED      = auto()  # KeyboardInterrupt during polling wait
 
-    def __init__(self, client, manifest: DeploymentManifest, verify_firmware: bool = True):
+    def __init__(self, client, manifest: DeploymentManifest, verify_firmware: bool = True,
+                 snapshot: Optional[object] = None):
         self.client          = client
         self.manifest        = manifest
         self.verify_firmware = verify_firmware
+        self.snapshot        = snapshot  # pre-captured DeploymentSnapshot | None
         self.state           = DeployState.INIT
         self._manifest_names = {t.name for t in manifest.targets}
 
@@ -204,7 +209,12 @@ class Deployer:
         self.client.firmware_restart()
 
         self.state = DeployState.DONE
-        return DeployResult(DeployState.DONE, "Deployment verified and applied", mcu_versions=versions)
+        return DeployResult(
+            DeployState.DONE,
+            "Deployment verified and applied",
+            mcu_versions=versions,
+            snapshot=self.snapshot,
+        )
 
     # ── Internals ─────────────────────────────────────────────────────────
 

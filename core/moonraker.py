@@ -327,3 +327,20 @@ def verify_remote_file_exists(host: str, port: int, filename: str, api_key: str 
             return True
     return False
 
+
+def list_config_files(host: str, port: int, api_key: str = None) -> list:
+    """Return the flat list of filenames present in Moonraker's config root.
+
+    Queries GET /server/files/list?root=config and extracts the "path" field
+    from each entry.  Returns an empty list on any failure.
+
+    This is used by capture_snapshot() so it can discover which files actually
+    exist on the target rather than assuming a fixed set of filenames.
+    """
+    url = f"{_base_url(host, port)}/server/files/list?root=config"
+    ok, _, body = _get(url, api_key=api_key)
+    if not ok:
+        return []
+    files = body.get("result", [])
+    return [f["path"] for f in files if isinstance(f, dict) and "path" in f]
+

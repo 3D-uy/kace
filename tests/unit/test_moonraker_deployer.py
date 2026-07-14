@@ -298,3 +298,29 @@ class TestMoonrakerDeployer(unittest.TestCase):
             self.assertTrue(client.applied)
             self.assertTrue(client.restarted)
             self.assertIn("firmware fingerprint check skipped", mock_stdout.getvalue())
+
+    # ── DeploymentSnapshot attached to result ─────────────────────────────────
+
+    def test_snapshot_attached_to_done_result(self):
+        """A DeploymentSnapshot passed to Deployer must be surfaced on the DeployResult."""
+        from core.snapshot import DeploymentSnapshot
+        client = MockClient(
+            states=["disconnected", "ready"],
+            versions_seq=[{"mcu": "kace-a1b2c3d"}],
+        )
+        snap = DeploymentSnapshot(
+            deployment_id="test-uuid",
+            timestamp="2026-01-01T00:00:00+00:00",
+            board="btt_octopus",
+            kace_version="1.0",
+            firmware_fingerprint="mcu=kace-a1b2c3d",
+            mcus=("mcu",),
+            dev_deploy=False,
+            config_files={"printer.cfg": b"[printer]\n"},
+        )
+        d = _fast_deployer(client)
+        d.snapshot = snap
+        result = d.run()
+        self.assertEqual(result.state, DeployState.DONE)
+        self.assertIs(result.snapshot, snap)
+        self.assertEqual(result.snapshot.deployment_id, "test-uuid")

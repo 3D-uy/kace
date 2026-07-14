@@ -761,18 +761,27 @@ def deploy_moonraker(user_data):
     print(f"\033[92m[OK] {t('moonraker.connected', version=info)}\033[0m")
 
     # ── Step 3: Backup existing configs ────────────────────────────
-    printer_cfg_backup = None
-    macros_cfg_backup = None
-    
-    if verify_remote_file_exists(host, port, "printer.cfg", api_key=api_key):
-        dl_ok, dl_data = download_printer_cfg(host, port, "printer.cfg", api_key=api_key)
-        if dl_ok:
-            printer_cfg_backup = dl_data
-            
-    if verify_remote_file_exists(host, port, "macros.cfg", api_key=api_key):
-        dl_ok, dl_data = download_printer_cfg(host, port, "macros.cfg", api_key=api_key)
-        if dl_ok:
-            macros_cfg_backup = dl_data
+    # capture_snapshot() discovers what files exist in the config root and
+    # downloads them into an immutable DeploymentSnapshot. A failure here is
+    # non-fatal: if Moonraker is reachable enough to confirm connectivity but
+    # a specific download fails, we proceed without that file in the backup.
+    from core.snapshot import capture_snapshot, restore_snapshot
+    from core.moonraker import list_config_files
+    _existing_files = list_config_files(host, port, api_key=api_key)
+    _manifest_mcus  = (user_data.get("mcu_name", "mcu"),)
+    _board          = user_data.get("board", "")
+    _snap = capture_snapshot(
+        host, port, _existing_files,
+        manifest_mcus=_manifest_mcus,
+        api_key=api_key,
+        dev_deploy=(os.environ.get("KACE_DEV_DEPLOY", "0") == "1"),
+        board=_board,
+        kace_version=getattr(__import__('kace', fromlist=['']), '__version__', 'unknown'),
+    )
+    if _snap:
+        print(f"\033[96m[*]\033[0m Configuration backup captured ({len(_snap.config_files)} file(s)).")
+    else:
+        print("\033[93m[!] Configuration backup skipped (no files found in config root).\033[0m")
 
     deployed_successfully = False
     restart_choice = "skip"
@@ -829,7 +838,7 @@ def deploy_moonraker(user_data):
             _client  = _MoonrakerClient(host, port, api_key=api_key)
             # verify_firmware=False when kace.py propagated --dev-deploy via KACE_DEV_DEPLOY.
             _verify  = os.environ.get("KACE_DEV_DEPLOY", "0") != "1"
-            _result  = Deployer(_client, _manifest, verify_firmware=_verify).run()
+            _result  = Deployer(_client, _manifest, verify_firmware=_verify, snapshot=_snap).run()
 
             if _result.state is DeployState.DONE:
                 deployed_successfully = True
@@ -883,48 +892,11 @@ def deploy_moonraker(user_data):
     except Exception as e:
         print(f"\033[91mMoonraker deployment failed: {e}\033[0m")
     finally:
-        # Perform rollback if backups exist and deployment wasn't successful
-        if (printer_cfg_backup is not None or macros_cfg_backup is not None) and not deployed_successfully:
+        # Perform rollback if a snapshot was captured and deployment was not successful.
+        if _snap is not None and not deployed_successfully:
             print("\033[93m[!] Initiating automatic rollback of configurations...\033[0m")
-            
-            import tempfile
-            if printer_cfg_backup is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".cfg") as tmp:
-                    tmp.write(printer_cfg_backup)
-                    tmp_name = tmp.name
-                try:
-                    upload_printer_cfg(host, port, tmp_name, filename="printer.cfg", api_key=api_key)
-                    print("[OK] Restored printer.cfg")
-                except Exception as rollback_err:
-                    print(f"Failed to restore printer.cfg from backup: {rollback_err}")
-                finally:
-                    try:
-                        os.remove(tmp_name)
-                    except OSError:
-                        pass
-            
-            if macros_cfg_backup is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".cfg") as tmp:
-                    tmp.write(macros_cfg_backup)
-                    tmp_name = tmp.name
-                try:
-                    upload_printer_cfg(host, port, tmp_name, filename="macros.cfg", api_key=api_key)
-                    print("[OK] Restored macros.cfg")
-                except Exception as rollback_err:
-                    print(f"Failed to restore macros.cfg from backup: {rollback_err}")
-                finally:
-                    try:
-                        os.remove(tmp_name)
-                    except OSError:
-                        pass
-            
-            # Restart Klipper after restoring configuration
-            try:
-                if restart_choice == "firmware":
-                    restart_firmware(host, port, api_key=api_key)
-                else:
-                    restart_klipper_service(host, port, api_key=api_key)
-            except Exception as restart_err:
-                print(f"Failed to restart Klipper during rollback: {restart_err}")
-                
-            print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")
+            failed_files = restore_snapshot(_snap, host, port, api_key=api_key)
+            if failed_files:
+                print(f"\033[91m[!] Rollback incomplete — failed to restore: {', '.join(failed_files)}\033[0m")
+            else:
+                print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")
