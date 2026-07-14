@@ -24,6 +24,8 @@ if len(sys.argv) > 1:
     for i, arg in enumerate(sys.argv):
         if arg == "--auto":
             os.environ["KACE_AUTO"] = "1"
+        if arg == "--dev-deploy":
+            os.environ["KACE_DEV_DEPLOY"] = "1"
 # Resolve make command at the application boundary
 _make_command = "make"
 if os.environ.get("KACE_REAL_BUILD") == "1":

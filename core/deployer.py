@@ -827,7 +827,9 @@ def deploy_moonraker(user_data):
                 macros_cfg_path=os.path.expanduser("~/kace/macros.cfg") if macros_uploaded else None,
             )
             _client  = _MoonrakerClient(host, port, api_key=api_key)
-            _result  = Deployer(_client, _manifest).run()
+            # verify_firmware=False when kace.py propagated --dev-deploy via KACE_DEV_DEPLOY.
+            _verify  = os.environ.get("KACE_DEV_DEPLOY", "0") != "1"
+            _result  = Deployer(_client, _manifest, verify_firmware=_verify).run()
 
             if _result.state is DeployState.DONE:
                 deployed_successfully = True

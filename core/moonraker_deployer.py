@@ -106,10 +106,11 @@ class Deployer:
         TIMEOUT      = auto()  # Deadline elapsed before all conditions met
         ABORTED      = auto()  # KeyboardInterrupt during polling wait
 
-    def __init__(self, client, manifest: DeploymentManifest):
-        self.client   = client
-        self.manifest = manifest
-        self.state    = DeployState.INIT
+    def __init__(self, client, manifest: DeploymentManifest, verify_firmware: bool = True):
+        self.client          = client
+        self.manifest        = manifest
+        self.verify_firmware = verify_firmware
+        self.state           = DeployState.INIT
         self._manifest_names = {t.name for t in manifest.targets}
 
     # ── Safe client wrappers ───────────────────────────────────────────────
@@ -171,14 +172,25 @@ class Deployer:
         # versions was fetched by _wait_for_reconnect at the moment all MCUs
         # became visible — no second call needed.
         self.state = DeployState.VERIFYING_FIRMWARE
-        wrong_version, not_visible = self._check_versions(versions)
-        if wrong_version or not_visible:
-            parts = []
-            if wrong_version:
-                parts.append("running old firmware: " + ", ".join(wrong_version))
-            if not_visible:
-                parts.append("missing from Moonraker: " + ", ".join(not_visible))
-            return DeployResult(DeployState.FAILED_FLASH, "; ".join(parts), mcu_versions=versions)
+        if self.verify_firmware:
+            wrong_version, not_visible = self._check_versions(versions)
+            if wrong_version or not_visible:
+                parts = []
+                if wrong_version:
+                    parts.append("running old firmware: " + ", ".join(wrong_version))
+                if not_visible:
+                    parts.append("missing from Moonraker: " + ", ".join(not_visible))
+                return DeployResult(DeployState.FAILED_FLASH, "; ".join(parts), mcu_versions=versions)
+        else:
+            # --dev-deploy: skip fingerprint check but still surface what versions
+            # are actually running so the user can see the mismatch in the log.
+            print(
+                "\033[93m[DEV] --dev-deploy active — firmware fingerprint check skipped.\033[0m\n"
+                "\033[93m      Do NOT use this flag in production.\033[0m"
+            )
+            if versions:
+                for name, ver in versions.items():
+                    print(f"\033[93m      {name}: {ver} (running)\033[0m")
 
         # ── Phase 4: Apply config ─────────────────────────────────────────
         self.state = DeployState.APPLYING_CONFIG

@@ -280,3 +280,21 @@ class TestMoonrakerDeployer(unittest.TestCase):
         result = _fast_deployer(CountingClient()).run()
         self.assertEqual(result.state, DeployState.DONE)
         self.assertEqual(call_count["n"], 1)
+
+    # ── dev-deploy / verify_firmware=False ────────────────────────────────────────
+
+    def test_dev_deploy_skips_fingerprint_mismatch(self):
+        """When verify_firmware=False, fingerprint check is skipped, and it finishes DONE."""
+        client = MockClient(
+            states=["disconnected", "ready"],
+            versions_seq=[{"mcu": "old-or-mismatched-version"}],
+        )
+        d = _fast_deployer(client)
+        d.verify_firmware = False
+        
+        with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+            result = d.run()
+            self.assertEqual(result.state, DeployState.DONE)
+            self.assertTrue(client.applied)
+            self.assertTrue(client.restarted)
+            self.assertIn("firmware fingerprint check skipped", mock_stdout.getvalue())
