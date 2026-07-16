@@ -49,6 +49,7 @@ class DeployState(Enum):
     AWAITING_RECONNECT  = auto()
     VERIFYING_FIRMWARE  = auto()
     APPLYING_CONFIG     = auto()
+    VERIFYING_UPLOAD    = auto()  # verifying byte-for-byte upload integrity
     FIRMWARE_RESTART    = auto()
     VERIFYING_CONFIG    = auto()  # verifying post-restart config/Klipper health
     DONE                = auto()
@@ -57,6 +58,7 @@ class DeployState(Enum):
     TIMEOUT             = auto()  # never reached "ready" within budget
     CONFIG_ERROR        = auto()  # Klipper shutdown/error after reboot
     ABORTED             = auto()  # user cancelled
+    FAILED_UPLOAD       = auto()  # upload integrity validation failed
 
 
 @dataclass
@@ -204,6 +206,48 @@ class Deployer:
             self.manifest.printer_cfg_path,
             self.manifest.macros_cfg_path,
         )
+
+        # ── Phase 4.5: Verify configuration upload integrity ───────────────
+        self.state = DeployState.VERIFYING_UPLOAD
+        
+        # Verify printer.cfg
+        try:
+            ok, remote_bytes = self.client.download_printer_cfg("printer.cfg")
+        except Exception as e:
+            return DeployResult(DeployState.FAILED_UPLOAD, f"Could not download printer.cfg for verification: {e}")
+            
+        if not ok:
+            err_msg = remote_bytes.decode('utf-8', errors='replace') if isinstance(remote_bytes, bytes) else str(remote_bytes)
+            return DeployResult(DeployState.FAILED_UPLOAD, f"Could not verify printer.cfg: {err_msg}")
+            
+        try:
+            with open(self.manifest.printer_cfg_path, "rb") as f:
+                local_bytes = f.read()
+        except OSError as e:
+            return DeployResult(DeployState.FAILED_UPLOAD, f"Could not read local printer.cfg for verification: {e}")
+            
+        if remote_bytes != local_bytes:
+            return DeployResult(DeployState.FAILED_UPLOAD, "Integrity check failed: printer.cfg content mismatch")
+
+        # Verify macros.cfg if it was uploaded
+        if self.manifest.macros_cfg_path:
+            try:
+                ok, remote_bytes = self.client.download_printer_cfg("macros.cfg")
+            except Exception as e:
+                return DeployResult(DeployState.FAILED_UPLOAD, f"Could not download macros.cfg for verification: {e}")
+                
+            if not ok:
+                err_msg = remote_bytes.decode('utf-8', errors='replace') if isinstance(remote_bytes, bytes) else str(remote_bytes)
+                return DeployResult(DeployState.FAILED_UPLOAD, f"Could not verify macros.cfg: {err_msg}")
+                
+            try:
+                with open(self.manifest.macros_cfg_path, "rb") as f:
+                    local_bytes = f.read()
+            except OSError as e:
+                return DeployResult(DeployState.FAILED_UPLOAD, f"Could not read local macros.cfg for verification: {e}")
+                
+            if remote_bytes != local_bytes:
+                return DeployResult(DeployState.FAILED_UPLOAD, "Integrity check failed: macros.cfg content mismatch")
 
         # ── Phase 5: Trigger firmware restart ─────────────────────────────
         self.state = DeployState.FIRMWARE_RESTART

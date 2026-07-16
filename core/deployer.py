@@ -669,6 +669,10 @@ class _MoonrakerClient:
         from core.moonraker import restart_firmware
         restart_firmware(self._host, self._port, api_key=self._api_key)
 
+    def download_printer_cfg(self, filename: str) -> tuple:
+        from core.moonraker import download_printer_cfg
+        return download_printer_cfg(self._host, self._port, filename, api_key=self._api_key)
+
 def deploy_moonraker(user_data):
     """Deploy printer.cfg to a Klipper host via the Moonraker REST API.
 
@@ -855,6 +859,9 @@ def deploy_moonraker(user_data):
                 bypass_rollback = True
                 print(f"\n\033[91m[!] Klipper boot error: {_result.detail}\033[0m")
                 print(f"\033[93m    Bypassing automatic rollback to allow debugging the configuration error.\033[0m")
+            elif _result.state is DeployState.FAILED_UPLOAD:
+                print(f"\n\033[91m[!] Upload integrity verification FAILED: {_result.detail}\033[0m")
+                print(f"\033[93m    Initiating configuration rollback to restore service...\033[0m")
             else:
                 print(f"\n\033[91m[!] Deployment ended in unexpected state: {_result.state.name} — {_result.detail}\033[0m")
         else:
