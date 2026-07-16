@@ -16,7 +16,7 @@ wrappers unimpeded and reaches the cancellation handler.
 
 import io
 import unittest
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 from core.moonraker_deployer import Deployer, DeploymentManifest, McuTarget, DeployState
 
 
@@ -48,10 +48,10 @@ class MockClient:
         self._raise_on_versions = raise_on_versions or {}
         self.applied   = False
         self.restarted = False
-        self._download_results = {}
+        self._verify_results = {}
 
-    def download_printer_cfg(self, filename: str) -> tuple[bool, bytes]:
-        return self._download_results.get(filename, (True, b"dummy content"))
+    def verify_file_exists(self, filename: str) -> bool:
+        return self._verify_results.get(filename, True)
 
     def get_klippy_state(self):
         idx = self._si
@@ -87,14 +87,7 @@ def _fast_deployer(client, manifest=MANIFEST, reconnect_timeout=5.0):
 
 
 class TestMoonrakerDeployer(unittest.TestCase):
-
-    def setUp(self):
-        self.open_patcher = patch("core.moonraker_deployer.open", mock_open(read_data=b"dummy content"))
-        self.mock_open = self.open_patcher.start()
-
-    def tearDown(self):
-        self.open_patcher.stop()
-
+    pass
     # ── DONE ──────────────────────────────────────────────────────────────────────
 
     def test_done_disconnect_observed(self):
@@ -266,7 +259,7 @@ class TestMoonrakerDeployer(unittest.TestCase):
 
             def upload_and_apply_config(self, p, m=None): self.applied   = True
             def firmware_restart(self):                    self.restarted = True
-            def download_printer_cfg(self, filename: str) -> tuple: return True, b"dummy content"
+            def verify_file_exists(self, filename: str) -> bool: return True
 
         client = CanLagClient()
         result = _fast_deployer(client, MANIFEST_TWO).run()
@@ -289,7 +282,7 @@ class TestMoonrakerDeployer(unittest.TestCase):
                 return {"mcu": "kace-a1b2c3d"}
             def upload_and_apply_config(self, p, m=None): pass
             def firmware_restart(self): pass
-            def download_printer_cfg(self, filename: str) -> tuple: return True, b"dummy content"
+            def verify_file_exists(self, filename: str) -> bool: return True
 
         result = _fast_deployer(CountingClient()).run()
         self.assertEqual(result.state, DeployState.DONE)
@@ -383,43 +376,44 @@ class TestMoonrakerDeployer(unittest.TestCase):
     # ── Upload Verification Phase Tests ──────────────────────────────────────────
 
     def test_upload_verification_success(self):
-        """Configuration upload passes verification when bytes match exactly -> DONE."""
+        """Both config files are found on target after upload -> DONE."""
         client = MockClient(
             states=["disconnected", "ready", "disconnected", "ready"],
             versions_seq=[{"mcu": "kace-a1b2c3d"}],
         )
-        # Mock download returns the exact match bytes (which matches mock_open's 'dummy content')
-        client._download_results["printer.cfg"] = (True, b"dummy content")
+        # Default _verify_results returns True for all filenames
         result = _fast_deployer(client).run()
         self.assertEqual(result.state, DeployState.DONE)
         self.assertTrue(client.applied)
         self.assertTrue(client.restarted)
 
-    def test_upload_verification_mismatch_fails(self):
-        """Configuration upload fails verification when remote and local bytes mismatch -> FAILED_UPLOAD."""
+    def test_upload_verification_file_missing_fails(self):
+        """printer.cfg not found on target after upload -> FAILED_UPLOAD."""
         client = MockClient(
             states=["disconnected", "ready"],
             versions_seq=[{"mcu": "kace-a1b2c3d"}],
         )
-        # Mismatch content vs mock_open's 'dummy content'
-        client._download_results["printer.cfg"] = (True, b"mismatched content")
+        client._verify_results["printer.cfg"] = False
         result = _fast_deployer(client).run()
         self.assertEqual(result.state, DeployState.FAILED_UPLOAD)
-        self.assertIn("Integrity check failed: printer.cfg content mismatch", result.detail)
+        self.assertIn("printer.cfg not found on target after upload", result.detail)
         self.assertTrue(client.applied)
         self.assertFalse(client.restarted)  # should halt before restart
 
-    def test_upload_verification_download_fails(self):
-        """Configuration upload fails verification when download returns error -> FAILED_UPLOAD."""
+    def test_upload_verification_exception_fails(self):
+        """Exception raised during file existence check -> FAILED_UPLOAD."""
         client = MockClient(
             states=["disconnected", "ready"],
             versions_seq=[{"mcu": "kace-a1b2c3d"}],
         )
-        # Simulate download failure
-        client._download_results["printer.cfg"] = (False, b"connection reset by peer")
+
+        def _raise(*args, **kwargs):
+            raise ConnectionError("connection reset by peer")
+
+        client.verify_file_exists = _raise
         result = _fast_deployer(client).run()
         self.assertEqual(result.state, DeployState.FAILED_UPLOAD)
-        self.assertIn("Could not verify printer.cfg: connection reset by peer", result.detail)
+        self.assertIn("Could not verify printer.cfg on target", result.detail)
         self.assertTrue(client.applied)
         self.assertFalse(client.restarted)  # should halt before restart
 

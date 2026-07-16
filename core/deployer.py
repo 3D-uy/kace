@@ -673,6 +673,10 @@ class _MoonrakerClient:
         from core.moonraker import download_printer_cfg
         return download_printer_cfg(self._host, self._port, filename, api_key=self._api_key)
 
+    def verify_file_exists(self, filename: str) -> bool:
+        from core.moonraker import verify_remote_file_exists
+        return verify_remote_file_exists(self._host, self._port, filename, api_key=self._api_key)
+
 def deploy_moonraker(user_data):
     """Deploy printer.cfg to a Klipper host via the Moonraker REST API.
 
