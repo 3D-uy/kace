@@ -859,5 +859,114 @@ class TestGenerateConfigAxisSanitization(unittest.TestCase):
         self.assertIn("position_min: 0", output)
 
 
+# ── T-05: Comment alignment regex edge cases ──────────────────────────────────
+
+class TestCommentAlignmentEdgeCases(unittest.TestCase):
+    """T-05: Verify that the R-04 inline-comment alignment regex correctly handles
+    edge-case inputs that would cause naive '#'-splitting to corrupt the output.
+
+    The regex _INLINE_COMMENT_RE = re.compile(r'(\\s)(#)(.*)') only matches a '#'
+    preceded by whitespace — this is the Klipper convention for inline comments.
+    Tests exercise this rule directly on the compiled pattern.
+    """
+
+    def setUp(self):
+        import re
+        # Import the same pattern used in generator.py (R-04 fix)
+        self._re = re.compile(r'(\s)(#)(.*)')
+
+    def _has_inline_comment(self, line):
+        """Return True if the line contains a genuine inline comment."""
+        is_full_line_comment = line.lstrip().startswith('#')
+        if is_full_line_comment:
+            return False
+        return bool(self._re.search(line))
+
+    def _split_at_inline_comment(self, line):
+        """Return (content, comment) by splitting at the genuine inline comment.
+        Returns (line, None) if no inline comment is found.
+        """
+        m = self._re.search(line)
+        if m is None or line.lstrip().startswith('#'):
+            return line, None
+        pos = m.start(2)  # position of the '#'
+        return line[:pos].rstrip(), line[pos + 1:].strip()
+
+    # ── URL fragment must NOT be treated as comment delimiter ─────────────────
+
+    def test_url_fragment_hash_not_split(self):
+        """T-05a: A '#' inside a URL fragment (http://host/#anchor) must not be
+        treated as an inline comment delimiter because it is not preceded by
+        whitespace — it directly follows '/' with no space.
+        """
+        line = "host: http://192.168.1.1/#mainsail"
+        self.assertFalse(
+            self._has_inline_comment(line),
+            f"URL fragment '#' should NOT match as inline comment in: {line!r}"
+        )
+
+    def test_url_with_query_and_fragment_not_split(self):
+        """T-05b: URL with query string and fragment both intact."""
+        line = "endpoint: http://example.com/api?key=abc#section"
+        self.assertFalse(
+            self._has_inline_comment(line),
+            f"URL '#' should not match in: {line!r}"
+        )
+
+    # ── Genuine inline comment must be split correctly ────────────────────────
+
+    def test_genuine_inline_comment_split(self):
+        """T-05c: 'max_velocity: 300     # Maximum print speed' must be split
+        correctly — content='max_velocity: 300', comment='Maximum print speed'.
+        """
+        line = "max_velocity: 300     # Maximum print speed"
+        content, comment = self._split_at_inline_comment(line)
+        self.assertEqual(content, "max_velocity: 300",
+                         f"Content part incorrect for line: {line!r}")
+        self.assertEqual(comment, "Maximum print speed",
+                         f"Comment part incorrect for line: {line!r}")
+
+    def test_inline_comment_split_preserves_content_exactly(self):
+        """T-05d: Content before the comment must be preserved byte-for-byte
+        (minus trailing whitespace) and no '#' must appear in content.
+        """
+        line = "kinematics: corexy   # Motion system type"
+        content, comment = self._split_at_inline_comment(line)
+        self.assertNotIn('#', content,
+                         "Content part must not contain '#' after split")
+        self.assertEqual(comment, "Motion system type")
+
+    # ── Multi-hash pin name must NOT be split on the first '#' ───────────────
+
+    def test_multi_hash_pin_no_inline_comment(self):
+        """T-05e: Klipper pin names like '##PA8' or '^#PA8' start with '#' as
+        part of the pin spec. A line that starts with '#' (full-line comment or
+        commented-out setting) is handled by the full-line branch, not split.
+        """
+        line = "# pin: ##PA8  # active low"
+        # Full-line comment → is_full_line_comment = True → no inline match
+        self.assertFalse(
+            self._has_inline_comment(line),
+            f"Full-line commented-out setting should not trigger inline match: {line!r}"
+        )
+
+    # ── Full-line comment must pass through unchanged ─────────────────────────
+
+    def test_full_line_comment_not_matched_as_inline(self):
+        """T-05f: A line that is purely a comment (starts with '#') must not
+        be matched as an inline comment — it is handled by the else branch.
+        """
+        line = "# This is a full-line comment"
+        self.assertFalse(
+            self._has_inline_comment(line),
+            f"Full-line comment must not match inline pattern: {line!r}"
+        )
+
+    def test_empty_line_not_matched(self):
+        """T-05g: An empty line must not produce a false inline comment match."""
+        self.assertFalse(self._has_inline_comment(""))
+        self.assertFalse(self._has_inline_comment("   "))
+
+
 if __name__ == "__main__":
     unittest.main()

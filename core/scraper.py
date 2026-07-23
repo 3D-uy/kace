@@ -9,6 +9,10 @@ CACHE_EXPIRY_SECONDS = 3 * 24 * 3600  # 3 days cache duration
 # ── Modular BLTouch database ───────────────────────────────────────────────────
 # Loaded from data/boards.yaml. Hardcoded dict is the fallback when YAML is
 # missing (e.g., older installs or partial clones).
+#
+# WARNING: This hardcoded fallback represents duplicated data from data/boards.yaml.
+# data/boards.yaml is the canonical database. Updates should be made there to avoid
+# two-source-of-truth divergence.
 
 _BLTOUCH_FALLBACK = {
     # ── LPC176x ────────────────────────────────────────────────
@@ -48,8 +52,14 @@ def _load_bltouch_db() -> dict:
             for board_key, pins in entry.get('bltouch', {}).items():
                 if pins:
                     result[board_key] = pins
-        return result if result else _BLTOUCH_FALLBACK
-    except Exception:
+        if result:
+            return result
+        
+        print("\n\033[93m[Warning] No BLTouch entries found in data/boards.yaml. Falling back to hardcoded _BLTOUCH_FALLBACK.\033[0m")
+        return _BLTOUCH_FALLBACK
+    except Exception as e:
+        print(f"\n\033[93m[Warning] Failed to load data/boards.yaml ({e}). Falling back to hardcoded _BLTOUCH_FALLBACK.\033[0m")
+        print("\033[93m          Note: data/boards.yaml is the canonical database source. Divergence risk exists.\033[0m")
         return _BLTOUCH_FALLBACK
 
 # Lazy-loaded cache module-level database
@@ -111,9 +121,15 @@ def fetch_config_list():
             configs = [item['name'] for item in data if item['name'].startswith('generic-') or item['name'].startswith('printer-')]
             
             try:
-                with open(cache_file, 'w', encoding='utf-8') as f:
+                # S-05: Write with owner-only permissions (0o600) — the cache
+                # contains board-selection history that should not be
+                # world-readable on a multi-user system.
+                _fd = os.open(cache_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(_fd, 'w', encoding='utf-8') as f:
                     json.dump(configs, f)
-            except Exception: pass
+            except Exception as _cw_err:
+                if os.environ.get("KACE_DEBUG") == "1":
+                    print(f"[DEBUG] Cache write failed: {_cw_err}")
             
             return configs
     except Exception as api_err:
@@ -136,9 +152,13 @@ def fetch_config_list():
                 if configs:
                     configs = sorted(configs)
                     try:
-                        with open(cache_file, 'w', encoding='utf-8') as f:
+                        # S-05: Same 0o600 permission enforcement as the API path above.
+                        _fd = os.open(cache_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                        with os.fdopen(_fd, 'w', encoding='utf-8') as f:
                             json.dump(configs, f)
-                    except Exception: pass
+                    except Exception as _cw_err:
+                        if os.environ.get("KACE_DEBUG") == "1":
+                            print(f"[DEBUG] Cache write failed: {_cw_err}")
                     return configs
         except Exception:
             pass
@@ -159,9 +179,12 @@ def fetch_config_list():
 def fetch_raw_config(filename):
     """Fetches the raw content of a specific config file."""
     cache_dir = os.path.expanduser("~/.kace_configs_cache")
-    if not os.path.exists(cache_dir):
-        try: os.makedirs(cache_dir)
-        except Exception: pass
+    # R-08: Use exist_ok=True to eliminate the TOCTOU race between the
+    # os.path.exists() check and os.makedirs() call.
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError:
+        pass
         
     cache_file = os.path.join(cache_dir, os.path.basename(filename))
     
@@ -183,7 +206,9 @@ def fetch_raw_config(filename):
             try:
                 with open(cache_file, 'w', encoding='utf-8') as f:
                     f.write(content)
-            except Exception: pass
+            except Exception as _cw_err:
+                if os.environ.get("KACE_DEBUG") == "1":
+                    print(f"[DEBUG] Raw config cache write failed: {_cw_err}")
             return content
     except Exception as e:
         # Fallback to expired cache

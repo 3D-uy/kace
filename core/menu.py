@@ -8,6 +8,7 @@ reliably in any environment: true TTY, bridged PTY, xterm.js SSH, pipes.
 import sys
 import os
 import getpass
+from core.exceptions import WizardExit
 
 class Choice:
     """Class representing a choice for compatibility with questionary.Choice."""
@@ -65,6 +66,7 @@ def parse_choices(choices):
             
     return display_lines, selectable_choices
 
+_MOCK_DEFAULT = object()
 _MOCK_PROMPTS_ACTIVE = False
 
 def set_mock_prompts_active(active: bool) -> None:
@@ -73,16 +75,16 @@ def set_mock_prompts_active(active: bool) -> None:
     _MOCK_PROMPTS_ACTIVE = active
 
 def _check_questionary_mock(helper_name, prompt):
+    # Only run mock hook if testing environment is active
+    if not _MOCK_PROMPTS_ACTIVE:
+        return _MOCK_DEFAULT
+        
     import sys
     from unittest.mock import Mock, MagicMock, DEFAULT
     
-    # Only run mock hook if testing environment is active
-    if not _MOCK_PROMPTS_ACTIVE:
-        return DEFAULT
-        
     q = sys.modules.get('questionary')
     if not q:
-        return DEFAULT
+        return _MOCK_DEFAULT
         
     mock_names = {
         "simple_input": ["text"],
@@ -111,10 +113,12 @@ def _check_questionary_mock(helper_name, prompt):
                 if ask_attr is not None:
                     if isinstance(ask_attr, (Mock, MagicMock)):
                         if ask_attr._mock_return_value is not DEFAULT or ask_attr.side_effect is not None:
-                            return ask_attr()
+                            val = ask_attr()
+                            return _MOCK_DEFAULT if val is DEFAULT else val
                     elif callable(ask_attr):
-                        return ask_attr()
-                return res
+                        val = ask_attr()
+                        return _MOCK_DEFAULT if val is DEFAULT else val
+                return _MOCK_DEFAULT if res is DEFAULT else res
             
             # Otherwise, check the return_value
             ret = mock_func.return_value
@@ -123,10 +127,12 @@ def _check_questionary_mock(helper_name, prompt):
                 if isinstance(ask_attr, (Mock, MagicMock)):
                     if ask_attr._mock_return_value is not DEFAULT or ask_attr.side_effect is not None:
                         mock_func()
-                        return ask_attr()
+                        val = ask_attr()
+                        return _MOCK_DEFAULT if val is DEFAULT else val
                 elif callable(ask_attr):
                     mock_func()
-                    return ask_attr()
+                    val = ask_attr()
+                    return _MOCK_DEFAULT if val is DEFAULT else val
                     
             # If the mock itself has a custom return value set
             if mock_func._mock_return_value is not DEFAULT:
@@ -135,14 +141,16 @@ def _check_questionary_mock(helper_name, prompt):
                 if ask_attr_res is not None:
                     if isinstance(ask_attr_res, (Mock, MagicMock)):
                         if ask_attr_res._mock_return_value is not DEFAULT or ask_attr_res.side_effect is not None:
-                            return ask_attr_res()
+                            val = ask_attr_res()
+                            return _MOCK_DEFAULT if val is DEFAULT else val
                     elif callable(ask_attr_res):
-                        return ask_attr_res()
-                return res
+                        val = ask_attr_res()
+                        return _MOCK_DEFAULT if val is DEFAULT else val
+                return _MOCK_DEFAULT if res is DEFAULT else res
         except Exception:
             pass
             
-    return DEFAULT
+    return _MOCK_DEFAULT
 
 
 def numbered_select(prompt, choices, default=0):
@@ -152,9 +160,8 @@ def numbered_select(prompt, choices, default=0):
     Returns the selected value (str or tuple value).
     default: 0-based index used on empty input.
     """
-    from unittest.mock import DEFAULT
     mock_val = _check_questionary_mock("numbered_select", prompt)
-    if mock_val is not DEFAULT:
+    if mock_val is not _MOCK_DEFAULT:
         return mock_val
 
     display_lines, selectable_choices = parse_choices(choices)
@@ -192,7 +199,9 @@ def numbered_select(prompt, choices, default=0):
             val = input(input_prompt).strip()
         except (KeyboardInterrupt, EOFError):
             print()
-            sys.exit(0)
+            # R-06: Raise WizardExit instead of sys.exit(0) so the top-level
+            # handler in kace.py gets a chance to clean up and log before exit.
+            raise WizardExit
             
         if not val:
             return default_val
@@ -213,9 +222,8 @@ def simple_input(prompt, default=None, validate=None):
     validate: optional callable(str) -> bool/str. Re-prompts on failure.
     Returns stripped string.
     """
-    from unittest.mock import DEFAULT
     mock_val = _check_questionary_mock("simple_input", prompt)
-    if mock_val is not DEFAULT:
+    if mock_val is not _MOCK_DEFAULT:
         return mock_val
 
     if _is_auto():
@@ -253,9 +261,8 @@ def yes_no(prompt, default=False):
     Replace questionary.confirm().
     Returns bool. default shown in prompt as [Y/n] or [y/N].
     """
-    from unittest.mock import DEFAULT
     mock_val = _check_questionary_mock("yes_no", prompt)
-    if mock_val is not DEFAULT:
+    if mock_val is not _MOCK_DEFAULT:
         return mock_val
 
     if _is_auto():
@@ -289,9 +296,8 @@ def autocomplete_select(prompt, choices, default=0):
     candidates (case-insensitive substring match), re-prompts until valid.
     choices: list of str or list of (label, value) tuples.
     """
-    from unittest.mock import DEFAULT
     mock_val = _check_questionary_mock("autocomplete_select", prompt)
-    if mock_val is not DEFAULT:
+    if mock_val is not _MOCK_DEFAULT:
         return mock_val
 
     display_lines, selectable_choices = parse_choices(choices)
@@ -370,9 +376,8 @@ def password_input(prompt):
     Replace questionary.password().
     Uses getpass.getpass() for hidden input.
     """
-    from unittest.mock import DEFAULT
     mock_val = _check_questionary_mock("password_input", prompt)
-    if mock_val is not DEFAULT:
+    if mock_val is not _MOCK_DEFAULT:
         return mock_val
 
     if _is_auto():

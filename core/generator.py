@@ -26,13 +26,12 @@ def has_todo_pins(parsed_data: dict) -> list:
                     todos.append((section, key))
     return todos
 
-def generate_config(parsed_data, user_data, output_path=None, include_macros=False, verbose=True):
-    """Generate printer.cfg from parsed config and user data using Jinja2."""
-    # Avoid in-place mutation of user_data by using a localized context dict
-    user_ctx = dict(user_data)
-    user_ctx["include_macros"] = include_macros
 
-    # Enforce position_min <= position_endstop <= position_max for each axis to prevent Klipper startup errors
+def _validate_and_sanitize_geometry(user_ctx: dict) -> None:
+    """Enforce stepper constraints, sanitize geometry values, and validate printable area.
+
+    Mutates user_ctx in place.
+    """
     _uses_probe = user_ctx.get("probe", "None") != "None"
 
     for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
@@ -162,98 +161,23 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     user_ctx["printable_center_x"] = f"{(printable_x_min + printable_x_max) / 2:g}"
     user_ctx["printable_center_y"] = f"{(printable_y_min + printable_y_max) / 2:g}"
 
-    # Build and serialize the motion space model using the sanitized user_ctx
-    from core.motion_model import PrinterMotionSpace
-    space = PrinterMotionSpace(user_ctx)
-    user_ctx["motion_space"] = space.to_dict()
 
-    # Auto-generate bed_mesh config
-    from core.bed_mesh import generate_bed_mesh_config
-    user_ctx["bed_mesh"] = generate_bed_mesh_config(space, user_ctx, parsed_data)
+def _render_display_blocks(user_ctx, pins_ctx, parsed_data) -> str:
+    """Generate display hardware blocks and strip display pins if display is 'none'.
 
-    # Derive leveling coordinates
-    from core.leveling import derive_leveling_points
-    user_ctx["leveling"] = derive_leveling_points(space, int(user_ctx.get("z_motors") or 1))
-    # Setup Jinja2 environment
-    env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR, encoding='utf-8'))
-    template = env.get_template('printer.cfg.j2')
-
-    # Collect advanced sections (neopixel, adxl345, sx1509 …) and pre-render
-    # them as commented-out passthrough blocks for the template to inject.
-    # We copy parsed_data so the caller's dict is never mutated.
-    pins_ctx = dict(parsed_data)
-    
-    # Apply custom fan assignments if present in user_data
-    fan_part = user_data.get("fan_part_cooling_pin")
-    if fan_part:
-        if fan_part == "none":
-            if "fan" in pins_ctx:
-                del pins_ctx["fan"]
-        elif fan_part != "default":
-            pins_ctx["fan"] = {"pin": fan_part}
-            
-    fan_hotend = user_data.get("fan_hotend_pin")
-    if fan_hotend and fan_hotend != "none":
-        pins_ctx["heater_fan hotend_fan"] = {"pin": fan_hotend}
-
-    pins_ctx['_advanced_sections'] = get_advanced_sections(parsed_data)
-
-    # Render the template with parsed pins and user input
-    output = template.render(
-        pins=pins_ctx,
-        user=user_ctx
-    )
-    
-    # Align inline comments for a professional look
-    aligned_lines = []
-    comment_col = 48
-    # get_lang() is always authoritative: set by the dashboard language picker
-    # before the wizard runs. user_data['language'] is a synced copy of it.
-    language = get_lang()
-    for line in output.splitlines():
-        # Check if line is a commented setting that contains an inline comment
-        is_commented_setting = line.lstrip().startswith('#') and line.count('#') > 1
-        if ('#' in line and not line.lstrip().startswith('#')) or is_commented_setting:
-            if not is_commented_setting:
-                content, comment = line.split('#', 1)
-            else:
-                first_hash = line.find('#')
-                second_hash = line.find('#', first_hash + 1)
-                content, comment = line[:second_hash], line[second_hash+1:]
-
-            content = content.rstrip()
-            comment = comment.strip()
-            
-            # Translate if necessary
-            comment = translate_comment(comment, language)
-            
-            # Ensure at least one space before the comment
-            padding = max(1, comment_col - len(content))
-            aligned_lines.append(f"{content}{' ' * padding}# {comment}")
-        else:
-            # Regular line or normal full-line comment
-            if line.lstrip().startswith('#'):
-                comment = line.lstrip()[1:].strip()
-                translated = translate_comment(comment, language)
-                if comment != translated:
-                    # Update translated full line comment
-                    line = line.replace(f"# {comment}", f"# {translated}")
-            aligned_lines.append(line)
-    
-    final_output = chr(10).join(aligned_lines)
-    
-    # ── Display blocks rendering ──────────────────────────────────────────────
+    Mutates pins_ctx in place.
+    Returns:
+        str: Rendered display section text to append to final config, or empty string.
+    """
     display_blocks = []
-    from core.display_checker import detect_display_sections, classify_hardware_combination, _WIZARD_SKIP_SECTIONS
+    from core.display_checker import (
+        detect_display_sections,
+        classify_hardware_combination,
+        _WIZARD_SKIP_SECTIONS
+    )
  
     display_choice = user_ctx.get("display_choice")
-    board_filename  = user_ctx.get('board', '')
-
-    # ── Respect wizard display choice ─────────────────────────────────────────
-    # "none": user opted out — strip all display sections, generate no blocks.
-    # "recommended:<key>" / "manual:<key>" / "override:<key>": use wizard choice
-    #    as authoritative, ignore whatever the board config may have detected.
-    # None (auto/CI mode): fall through to existing detection-based logic.
+    board_filename = user_ctx.get('board', '')
 
     if display_choice == "none":
         # Strip display-related keys from parsed_data so they don't leak into
@@ -267,9 +191,9 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         for strip_key in list(pins_ctx.keys()):
             if strip_key.split()[0].lower() in _DISPLAY_STRIP_PREFIXES:
                 del pins_ctx[strip_key]
-        # No display_blocks generated — intentional.
+        return ""
 
-    elif display_choice and display_choice not in (None,) and not display_choice.startswith("__"):
+    if display_choice and display_choice not in (None,) and not display_choice.startswith("__"):
         # Extract the section key from the wizard choice prefix
         # e.g. "recommended:uc1701" → "uc1701"
         colon_idx = display_choice.find(":")
@@ -388,8 +312,115 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
                 display_blocks.append("\n".join(lines))
 
     if display_blocks:
-        final_output += "\n\n# ==================================================\n# DISPLAY HARDWARE SECTIONS\n# ==================================================\n"
-        final_output += "\n\n".join(display_blocks) + "\n"
+        return "\n\n# ==================================================\n# DISPLAY HARDWARE SECTIONS\n# ==================================================\n" + "\n\n".join(display_blocks) + "\n"
+    return ""
+
+def generate_config(parsed_data, user_data, output_path=None, include_macros=False, verbose=True):
+    """Generate printer.cfg from parsed config and user data using Jinja2."""
+    # Avoid in-place mutation of user_data by using a localized context dict
+    user_ctx = dict(user_data)
+    user_ctx["include_macros"] = include_macros
+
+    _validate_and_sanitize_geometry(user_ctx)
+
+    # Build and serialize the motion space model using the sanitized user_ctx
+    from core.motion_model import PrinterMotionSpace
+    space = PrinterMotionSpace(user_ctx)
+    user_ctx["motion_space"] = space.to_dict()
+
+    # Auto-generate bed_mesh config
+    from core.bed_mesh import generate_bed_mesh_config
+    user_ctx["bed_mesh"] = generate_bed_mesh_config(space, user_ctx, parsed_data)
+
+    # Derive leveling coordinates
+    from core.leveling import derive_leveling_points
+    user_ctx["leveling"] = derive_leveling_points(space, int(user_ctx.get("z_motors") or 1))
+    # Setup Jinja2 environment
+    env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR, encoding='utf-8'))
+    template = env.get_template('printer.cfg.j2')
+
+    # Q-06: Use deepcopy so fan-pin mutations to pins_ctx cannot bleed back
+    # into the caller's parsed_data through shared nested dict references.
+    import copy
+    pins_ctx = copy.deepcopy(parsed_data)
+    
+    # Apply custom fan assignments if present in user_data
+    fan_part = user_data.get("fan_part_cooling_pin")
+    if fan_part:
+        if fan_part == "none":
+            if "fan" in pins_ctx:
+                del pins_ctx["fan"]
+        elif fan_part != "default":
+            pins_ctx["fan"] = {"pin": fan_part}
+            
+    fan_hotend = user_data.get("fan_hotend_pin")
+    if fan_hotend and fan_hotend != "none":
+        pins_ctx["heater_fan hotend_fan"] = {"pin": fan_hotend}
+
+    pins_ctx['_advanced_sections'] = get_advanced_sections(parsed_data)
+
+    # Render the template with parsed pins and user input
+    output = template.render(
+        pins=pins_ctx,
+        user=user_ctx
+    )
+    
+    # R-04: Use a regex to locate the inline comment boundary rather than a
+    # naive split('#', 1). A '#' inside a URL fragment (http://host/#anchor)
+    # or a multi-hash pin name must NOT be treated as the comment delimiter.
+    # Rule: the comment delimiter is a '#' that is preceded by at least one
+    # whitespace character. This matches Klipper's own config parsing behaviour.
+    import re as _re
+    _INLINE_COMMENT_RE = _re.compile(r'(\s)(#)(.*)')
+
+    aligned_lines = []
+    comment_col = 48
+    # get_lang() is always authoritative: set by the dashboard language picker
+    # before the wizard runs. user_data['language'] is a synced copy of it.
+    language = get_lang()
+    for line in output.splitlines():
+        # Detect whether this line has a genuine inline comment delimiter.
+        # A full-line comment (starts with '#') is handled separately below.
+        is_full_line_comment = line.lstrip().startswith('#')
+        inline_match = None if is_full_line_comment else _INLINE_COMMENT_RE.search(line)
+
+        if inline_match:
+            # Split at the matched '#' to isolate content from comment text.
+            split_pos = inline_match.start(2)  # position of the '#'
+            content = line[:split_pos].rstrip()
+            comment = line[split_pos + 1:].strip()
+
+            # Translate if necessary
+            comment = translate_comment(comment, language)
+
+            # Ensure at least one space before the comment
+            padding = max(1, comment_col - len(content))
+            aligned_lines.append(f"{content}{' ' * padding}# {comment}")
+        elif is_full_line_comment and line.count('#') > 1:
+            # Commented setting lines (## style) — find the second '#'
+            first_hash = line.find('#')
+            second_hash = line.find('#', first_hash + 1)
+            content = line[:second_hash].rstrip()
+            comment = line[second_hash + 1:].strip()
+
+            comment = translate_comment(comment, language)
+
+            padding = max(1, comment_col - len(content))
+            aligned_lines.append(f"{content}{' ' * padding}# {comment}")
+        else:
+            # Regular line or normal full-line comment
+            if line.lstrip().startswith('#'):
+                comment = line.lstrip()[1:].strip()
+                translated = translate_comment(comment, language)
+                if comment != translated:
+                    # Update translated full line comment
+                    line = line.replace(f"# {comment}", f"# {translated}")
+            aligned_lines.append(line)
+    
+    final_output = chr(10).join(aligned_lines)
+    
+    # ── Display blocks rendering ──────────────────────────────────────────────
+    final_output += _render_display_blocks(user_ctx, pins_ctx, parsed_data)
 
 
     # Validation: Do not proceed if generic TODO pins are left active, preventing Klipper startup errors

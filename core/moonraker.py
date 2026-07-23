@@ -8,7 +8,9 @@
 #   - All functions return (success: bool, message: str) tuples.
 #   - No exceptions escape this module; all errors are caught and
 #     returned as structured (False, error_message) results.
-#   - Plain HTTP only; HTTPS/TLS support can be added in a future pass.
+#   - HTTPS/TLS is supported: pass a host starting with 'https://' and Python's
+#     stdlib ssl module will perform full certificate verification against the
+#     system trust store. Plain http:// continues to work for local LAN access.
 
 import json
 import os

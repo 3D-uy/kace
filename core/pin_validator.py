@@ -52,9 +52,13 @@ _REQUIRED_SECTIONS = [
     (re.compile(r"^\[stepper_[a-z]+\]\s*$", re.MULTILINE), "[stepper_x] / [stepper_a] (at least one stepper)"),
 ]
 
-# A [mcu] section without a usable serial: line is just as fatal to Klipper
-# as a missing [mcu] — see klippy.log "Option 'serial' in section 'mcu'".
-_SERIAL_RE = re.compile(r"^\[mcu\][^\[]*?serial:\s*\S+", re.MULTILINE | re.DOTALL)
+# R-05: The previous pattern used re.DOTALL which let [^\[]*? cross section
+# boundaries (newlines), causing a false-negative when [mcu] exists without
+# serial: but a later section does have it. Fix: extract the [mcu] block
+# first (everything from [mcu] up to the next section header or EOF), then
+# check for serial: within that block only. No DOTALL needed.
+_MCU_SECTION_RE = re.compile(r"^\[mcu\](.+?)(?=^\[|\Z)", re.MULTILINE | re.DOTALL)
+_SERIAL_IN_BLOCK_RE = re.compile(r"^\s*serial:\s*\S+", re.MULTILINE)
 
 
 def validate_required_sections(cfg_path):
@@ -75,8 +79,13 @@ def validate_required_sections(cfg_path):
             problems.append(f"missing required section {label}")
 
     # [mcu] present but no serial: → the exact fatal error from the log.
-    if re.search(r"^\[mcu\]\s*$", content, re.MULTILINE) and not _SERIAL_RE.search(content):
-        problems.append("[mcu] section is missing a 'serial:' line")
+    # R-05: Two-pass check: extract the [mcu] block first so we only look for
+    # serial: within that section, not in any subsequent section.
+    if re.search(r"^\[mcu\]\s*$", content, re.MULTILINE):
+        mcu_match = _MCU_SECTION_RE.search(content)
+        mcu_block = mcu_match.group(1) if mcu_match else ""
+        if not _SERIAL_IN_BLOCK_RE.search(mcu_block):
+            problems.append("[mcu] section is missing a 'serial:' line")
 
     # An effectively empty config (only macros/comments) is a structural
     # failure even if individual section markers happen to be absent.

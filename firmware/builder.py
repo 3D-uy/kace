@@ -18,6 +18,25 @@ from core.translations import t
 from core.exceptions import DerivationAmbiguityError
 
 
+def _tmp_is_noexec() -> bool:
+    """R-07: Return True if /tmp is mounted with the noexec option.
+
+    Reads /proc/mounts (Linux only; returns False on any other OS or read
+    error). When /tmp is noexec the LTO cc-wrapper script cannot be executed
+    there, causing a compile failure that looks like a generic LTO error.
+    """
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                # fields: device mountpoint fstype options dump pass
+                if len(parts) >= 4 and parts[1] == "/tmp":
+                    return "noexec" in parts[3].split(",")
+    except OSError:
+        pass
+    return False
+
+
 class BuildContext:
     """Constrained execution options for the Klipper build process."""
     def __init__(
@@ -155,7 +174,19 @@ def build_firmware_orchestrator(
         except subprocess.CalledProcessError as compile_err:
             stderr_out = compile_err.stderr or ""
             stdout_out = compile_err.stdout or ""
-            if wrapper_dir_obj is None and ("ltrans" in stderr_out or "lto-wrapper" in stderr_out or "cannot find /tmp/cc" in stderr_out):
+            # R-07: Also trigger the LTO retry when /tmp is mounted noexec,
+            # because the cc-wrapper script cannot be executed from /tmp in
+            # that configuration, producing failures identical to LTO errors.
+            _noexec = _tmp_is_noexec()
+            _lto_triggered = (
+                "ltrans" in stderr_out
+                or "lto-wrapper" in stderr_out
+                or "cannot find /tmp/cc" in stderr_out
+                or _noexec
+            )
+            if wrapper_dir_obj is None and _lto_triggered:
+                if _noexec:
+                    print("\n  \033[93m[!] /tmp is mounted noexec — LTO wrapper script cannot execute there.\033[0m")
                 print("\n  \033[93m[!] LTO linker failure detected (likely low memory or toolchain bug).\033[0m")
                 print("  \033[93m    Retrying compilation with LTO disabled...\033[0m\n")
                 
@@ -163,40 +194,13 @@ def build_firmware_orchestrator(
                     wrapper_dir_obj = tempfile.TemporaryDirectory(prefix="kace_cc_wrapper_")
                     w_dir = wrapper_dir_obj.name
                     
-                    wrapper_code = (
-                        "#!/usr/bin/env python3\n"
-                        "import sys\n"
-                        "import os\n"
-                        "import subprocess\n"
-                        "\n"
-                        "def main():\n"
-                        "    cmd_name = os.path.basename(sys.argv[0])\n"
-                        "    wrapper_dir = os.path.dirname(os.path.abspath(sys.argv[0]))\n"
-                        "    real_compiler = None\n"
-                        "    paths = os.environ.get('PATH', '').split(os.pathsep)\n"
-                        "    for p in paths:\n"
-                        "        if not p:\n"
-                        "            continue\n"
-                        "        abs_p = os.path.abspath(p)\n"
-                        "        if abs_p == wrapper_dir:\n"
-                        "            continue\n"
-                        "        candidate = os.path.join(p, cmd_name)\n"
-                        "        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):\n"
-                        "            real_compiler = candidate\n"
-                        "            break\n"
-                        "    if not real_compiler:\n"
-                        "        sys.exit(f'Compiler wrapper error: Could not find real {cmd_name} in PATH')\n"
-                        "    args = sys.argv[1:]\n"
-                        "    filtered_args = []\n"
-                        "    for arg in args:\n"
-                        "        if arg.startswith('-flto') or arg == '-fwhole-program' or arg == '-fno-use-linker-plugin':\n"
-                        "            continue\n"
-                        "        filtered_args.append(arg)\n"
-                        "    res = subprocess.run([real_compiler] + filtered_args)\n"
-                        "    sys.exit(res.returncode)\n"
-                        "if __name__ == '__main__':\n"
-                        "    main()\n"
+                    cc_wrapper_src = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "scripts",
+                        "cc_wrapper.py"
                     )
+                    with open(cc_wrapper_src, "r", encoding="utf-8") as f_src:
+                        wrapper_code = f_src.read()
                     
                     for comp in ["arm-none-eabi-gcc", "avr-gcc"]:
                         wrapper_path = os.path.join(w_dir, comp)
@@ -225,7 +229,9 @@ def build_firmware_orchestrator(
                         env=sub_env,
                     )
                 except Exception as retry_err:
-                    raise compile_err
+                    # Q-08: Preserve the retry failure context in the chain so both
+                    # the original LTO error and the retry failure are visible.
+                    raise compile_err from retry_err
             else:
                 raise compile_err
 

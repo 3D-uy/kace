@@ -83,59 +83,44 @@ def _detect_ram_mb():
 
 
 # paramiko is an optional dependency — only needed for SSH deployment.
-# It is imported lazily here so users who never use SSH deploy do not
-# pay the install cost. On first SSH use, KACE will install it
-# automatically via pip if it is not already present.
+# Install it with: pip install -r requirements-ssh.txt
+# KACE will never auto-install it at runtime to avoid supply-chain risk.
+
+
+# ── S-07: Cache the KACE version at module import time ─────────────
+# Using a dynamic __import__() inside a deployment function is fragile and
+# silently falls back to 'unknown' on any import error. Caching here is safe
+# because deployer is always imported after kace.py has run.
+try:
+    from kace import __version__ as _KACE_VERSION  # noqa: PLC0415
+except ImportError:
+    _KACE_VERSION = "unknown"
 
 
 def _require_paramiko():
-    """Return the paramiko module, installing it on-demand if needed."""
+    """Return the paramiko module, or None if not installed.
+
+    Security note (S-01): KACE deliberately does NOT auto-install paramiko at
+    runtime via pip. Doing so would allow an attacker who can write to
+    requirements-ssh.txt before the first SSH use to install arbitrary
+    packages. Install it manually with:
+
+        pip install -r requirements-ssh.txt
+    """
     try:
         import paramiko  # noqa: PLC0415
         return paramiko
     except ImportError:
         print("\n\033[96m[SSH Deployment]\033[0m")
-        print("\033[93m[*] SSH support requires the 'paramiko' library.\033[0m")
-        print("\033[93m[*] Downloading and installing (this may take a moment)...\033[0m")
-        try:
-            # Locate requirements-ssh.txt relative to this file to enforce hash verification
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            req_path = os.path.abspath(os.path.join(current_dir, "..", "requirements-ssh.txt"))
-            pip_cmd = [sys.executable, "-m", "pip", "install", "-r", req_path, "--require-hashes"]
-            # Only append --break-system-packages if running globally (outside a venv)
-            in_venv = sys.prefix != sys.base_prefix or hasattr(sys, 'real_prefix')
-            if platform.system() != "Windows" and not in_venv:
-                pip_cmd.append("--break-system-packages")
-            subprocess.check_output(
-                pip_cmd,
-                stderr=subprocess.STDOUT
-            )
-            import importlib
-            importlib.invalidate_caches()
-            for k in list(sys.modules.keys()):
-                if k == 'paramiko' or k.startswith('paramiko.'):
-                    sys.modules.pop(k, None)
-            import paramiko  # noqa: PLC0415
-            print("\033[92m[OK] paramiko installed successfully.\033[0m\n")
-            return paramiko
-        except subprocess.CalledProcessError as e:
-            output = e.output.decode('utf-8', errors='ignore') if e.output else ""
-            print(f"\n\033[91m[!] ERROR: Failed to install paramiko automatically.\033[0m")
-            if "SSL" in output or "certificate" in output:
-                print("\033[93m    System time might be out of sync, causing SSL certificate validation to fail.\033[0m")
-            elif "NewConnectionError" in output or "Network is unreachable" in output:
-                print("\033[93m    Network unreachable. Please check your internet connection.\033[0m")
-            else:
-                print(f"\033[93m    Pip error output:\n    {output.strip()}\033[0m")
-                
-            print("\n\033[96mTo use SSH deployment, please install it manually:\033[0m")
-            print("    pip3 install paramiko==3.4.0 --break-system-packages")
-            print("\033[96mContinuing without SSH support...\033[0m\n")
-            return None
-        except Exception as e:
-            print(f"\n\033[91m[!] Unexpected error installing paramiko: {e}\033[0m")
-            print("\033[96mContinuing without SSH support...\033[0m\n")
-            return None
+        print("\033[91m[!] SSH support requires the 'paramiko' library, which is not installed.\033[0m")
+        print("\033[93m    Install it with one of the following commands and then retry:\033[0m")
+        print()
+        print("        pip install -r requirements-ssh.txt")
+        print("        # or on a system Python (outside venv):")
+        print("        pip install -r requirements-ssh.txt --break-system-packages")
+        print()
+        print("\033[96mContinuing without SSH support...\033[0m\n")
+        return None
 
 
 class _InteractiveHostKeyPolicy:
@@ -318,6 +303,13 @@ def deploy_config(user_data):
                 restart_klipper_service(host, port)
             else:
                 print("\033[96m[*]\033[0m Restarting Klipper via SSH command...")
+                # S-02 Security note: sudo -n (non-interactive) is used here to avoid
+                # prompting for a password over the SSH channel. For least-privilege
+                # hardening, scope the sudoers entry on the Pi to only this command:
+                #
+                #   %klipper ALL=(ALL) NOPASSWD: /bin/systemctl restart klipper
+                #
+                # See KACE security documentation for the recommended sudoers snippet.
                 ssh.exec_command(
                     "sudo -n systemctl restart klipper || systemctl --user restart klipper || systemctl restart klipper",
                     timeout=10
@@ -382,6 +374,10 @@ def deploy_config(user_data):
                         timeout=10
                     )
                     sftp = ssh.open_sftp()
+                    # S-06: Zero out the in-memory password immediately after the
+                    # reconnect so it does not linger in the stack frame for the
+                    # remainder of the rollback operation.
+                    password_for_reconnect = None
                     print("\033[92m[OK] Reconnection successful. Proceeding with rollback...\033[0m")
                 except Exception as reconnect_err:
                     print(f"\033[91m[!] Reconnection failed: {reconnect_err}. Automatic rollback aborted.\033[0m")
@@ -391,8 +387,11 @@ def deploy_config(user_data):
                 if printer_backup_created:
                     try:
                         sftp.remove(dest_file)
-                    except Exception:
-                        pass
+                    except Exception as _rm_err:
+                        # R-03: Log removal outcome — partial uploads may not create
+                        # the file at all, so ENOENT here is expected and non-fatal.
+                        if os.environ.get("KACE_DEBUG") == "1":
+                            print(f"[DEBUG] sftp.remove({dest_file!r}) skipped/failed: {_rm_err}")
                     try:
                         sftp.rename(dest_file + ".bak", dest_file)
                         print("[OK] Restored printer.cfg")
@@ -401,8 +400,10 @@ def deploy_config(user_data):
                 if macros_backup_created:
                     try:
                         sftp.remove(dest_macros)
-                    except Exception:
-                        pass
+                    except Exception as _rm_err:
+                        # R-03: Same debug-level logging as the printer.cfg removal above.
+                        if os.environ.get("KACE_DEBUG") == "1":
+                            print(f"[DEBUG] sftp.remove({dest_macros!r}) skipped/failed: {_rm_err}")
                     try:
                         sftp.rename(dest_macros + ".bak", dest_macros)
                         print("[OK] Restored macros.cfg")
@@ -446,6 +447,39 @@ def deploy_config(user_data):
                 pass
 
 
+def _copy_artifacts(user_data, dest, artifact_type) -> bool:
+    success = False
+    if artifact_type in ["config", "all"]:
+        cfg_path = os.path.expanduser('~/kace/printer.cfg')
+        if os.path.exists(cfg_path):
+            print(f"Copying printer.cfg to {dest}...")
+            shutil.copy2(cfg_path, os.path.join(dest, 'printer.cfg'))
+            success = True
+        
+        # Copy macros.cfg if it exists
+        macros_path = os.path.expanduser('~/kace/macros.cfg')
+        if os.path.exists(macros_path):
+            print(f"Copying macros.cfg to {dest}...")
+            shutil.copy2(macros_path, os.path.join(dest, 'macros.cfg'))
+    
+    if artifact_type in ["firmware", "all"]:
+        fw_path = user_data.get("firmware_path")
+        if fw_path and os.path.exists(os.path.expanduser(fw_path)):
+            firmware_bin = os.path.expanduser(fw_path)
+            ext = os.path.basename(firmware_bin)
+            print(f"Copying firmware {ext} to {dest}...")
+            shutil.copy2(firmware_bin, os.path.join(dest, ext))
+            success = True
+        else:
+            for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
+                firmware_bin = os.path.expanduser(f'~/kace/{ext}')
+                if os.path.exists(firmware_bin):
+                    print(f"Copying firmware {ext} to {dest}...")
+                    shutil.copy2(firmware_bin, os.path.join(dest, ext))
+                    success = True
+                    
+    return success
+
 def deploy_usb(user_data, artifact_type="all"):
     """Deploys the generated artifact(s) to a USB/SD card."""
     try:
@@ -478,36 +512,7 @@ def deploy_usb(user_data, artifact_type="all"):
             print(f"\033[91mDeployment failed: Invalid path or directory does not exist: {dest}\033[0m")
             return
             
-        success = False
-        
-        if artifact_type in ["config", "all"]:
-            cfg_path = os.path.expanduser('~/kace/printer.cfg')
-            if os.path.exists(cfg_path):
-                print(f"Copying printer.cfg to {dest}...")
-                shutil.copy2(cfg_path, os.path.join(dest, 'printer.cfg'))
-                success = True
-            
-            # Copy macros.cfg if it exists
-            macros_path = os.path.expanduser('~/kace/macros.cfg')
-            if os.path.exists(macros_path):
-                print(f"Copying macros.cfg to {dest}...")
-                shutil.copy2(macros_path, os.path.join(dest, 'macros.cfg'))
-        
-        if artifact_type in ["firmware", "all"]:
-            fw_path = user_data.get("firmware_path")
-            if fw_path and os.path.exists(os.path.expanduser(fw_path)):
-                firmware_bin = os.path.expanduser(fw_path)
-                ext = os.path.basename(firmware_bin)
-                print(f"Copying firmware {ext} to {dest}...")
-                shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                success = True
-            else:
-                for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
-                    firmware_bin = os.path.expanduser(f'~/kace/{ext}')
-                    if os.path.exists(firmware_bin):
-                        print(f"Copying firmware {ext} to {dest}...")
-                        shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                        success = True
+        success = _copy_artifacts(user_data, dest, artifact_type)
                     
         if success:
             print("\033[92mUSB Deployment Successful!\033[0m")
@@ -535,7 +540,7 @@ def deploy_local(user_data, artifact_type="all"):
             
             if not dest:
                 return
-
+ 
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
                     print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not accessible inside Docker.\033[0m")
@@ -544,48 +549,18 @@ def deploy_local(user_data, artifact_type="all"):
                     print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not supported on non-Windows platforms.\033[0m\n")
                 continue
             break
-
+ 
         dest = os.path.expanduser(dest)
         
         if not os.path.exists(dest):
             os.makedirs(dest, exist_ok=True)
             
-        success = False
-        
-        if artifact_type in ["config", "all"]:
-            cfg_path = os.path.expanduser('~/kace/printer.cfg')
-            if os.path.exists(cfg_path):
-                print(f"Copying printer.cfg to {dest}...")
-                shutil.copy2(cfg_path, os.path.join(dest, 'printer.cfg'))
-                success = True
-            
-            # Copy macros.cfg if it exists
-            macros_path = os.path.expanduser('~/kace/macros.cfg')
-            if os.path.exists(macros_path):
-                print(f"Copying macros.cfg to {dest}...")
-                shutil.copy2(macros_path, os.path.join(dest, 'macros.cfg'))
-        
-        if artifact_type in ["firmware", "all"]:
-            fw_path = user_data.get("firmware_path")
-            if fw_path and os.path.exists(os.path.expanduser(fw_path)):
-                firmware_bin = os.path.expanduser(fw_path)
-                ext = os.path.basename(firmware_bin)
-                print(f"Copying firmware {ext} to {dest}...")
-                shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                success = True
-            else:
-                for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
-                    firmware_bin = os.path.expanduser(f'~/kace/{ext}')
-                    if os.path.exists(firmware_bin):
-                        print(f"Copying firmware {ext} to {dest}...")
-                        shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                        success = True
+        success = _copy_artifacts(user_data, dest, artifact_type)
                     
         if success:
             print(f"\033[92mSuccessfully saved to {dest}!\033[0m")
         else:
             print("\033[93mNo requested artifacts found to copy.\033[0m")
-            
     except Exception as e:
         print(f"\033[91mSave failed: {e}\033[0m")
 
@@ -725,15 +700,16 @@ def deploy_moonraker(user_data):
         default=""
     ) or ""
 
-    # Warn if using plain HTTP with an API key
+    # S-04 Security: Hard-block API key transmission over plain HTTP.
+    # An API key sent over http:// is trivially captured by any network observer
+    # on the same LAN segment. This is not a soft-confirm — the user must switch
+    # to https:// before KACE will proceed with an API key.
     if api_key and host.strip().lower().startswith("http://"):
-        warning_ok = yes_no(
-            t("moonraker.http_warning"),
-            default=False
-        )
-        if warning_ok is None or not warning_ok:
-            print(f"\n\033[91m[!] {t('moonraker.http_warning_cancelled')}\033[0m")
-            return
+        print(f"\n\033[91m[!] {t('moonraker.http_warning')}\033[0m")
+        print("\033[91m    Sending an API key over plain HTTP exposes it to any observer on the\033[0m")
+        print("\033[91m    local network. Change the host to use https:// and try again.\033[0m")
+        print(f"\n\033[91m[!] {t('moonraker.http_warning_cancelled')}\033[0m")
+        return
 
     # Persist for potential SSH fallback later
     user_data["moonraker_host"] = host
@@ -784,7 +760,7 @@ def deploy_moonraker(user_data):
         api_key=api_key,
         dev_deploy=(os.environ.get("KACE_DEV_DEPLOY", "0") == "1"),
         board=_board,
-        kace_version=getattr(__import__('kace', fromlist=['']), '__version__', 'unknown'),
+        kace_version=_KACE_VERSION,  # S-07: use module-level cache instead of dynamic __import__
     )
     if _snap:
         print(f"\033[96m[*]\033[0m Configuration backup captured ({len(_snap.config_files)} file(s)).")

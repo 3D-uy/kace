@@ -1,6 +1,6 @@
 # REPOSITORY MANIFEST — `3D-uy/kace`
 
-**Last updated:** 2026-07-07 · **Version:** main
+**Last updated:** 2026-07-23 · **Version:** main
 
 > This is a living document. Update the version number and `Last updated` date at the top on every release cycle.
 
@@ -17,12 +17,12 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 ```
 3D-uy/kace/
 │
-├── kace.py                     # Main entry point — CLI argument parsing + top-level flow orchestration
+├── kace.py                     # Main entry point — CLI argument parsing (argparse) + top-level flow orchestration
 ├── install.sh                  # Linux installer — clones, pins to release tag, installs deps, creates symlink
 ├── VERSION                     # Single source of truth for the release version string (e.g. "main")
 ├── requirements.txt            # Hash-pinned core Python dependencies (pip --require-hashes)
 ├── requirements.in             # Source file for requirements.txt (managed via pip-compile)
-├── requirements-ssh.txt        # Hash-pinned optional SSH/SFTP dependencies (lazy-installed on first use)
+├── requirements-ssh.txt        # Hash-pinned optional SSH/SFTP dependencies (paramiko)
 ├── requirements-ssh.in         # Source file for requirements-ssh.txt
 │
 ├── core/                       # Business logic modules
@@ -34,11 +34,15 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 │   │                           #     a branch in the probe step's next() function — different maintenance surface
 │   ├── display_wizard.py       # Display compatibility sub-wizard (TFT, HDMI, Klipperscreen)
 │   ├── firmware_wizard.py      # Firmware compilation sub-wizard
-│   ├── generator.py            # Jinja2-based printer.cfg generator with comment alignment
-│   ├── scraper.py              # GitHub config scraper (3-day cache, HTML fallback, path-sanitised)
+│   ├── generator.py            # Jinja2-based printer.cfg generator with comment alignment & deepcopy protection
+│   ├── scraper.py              # GitHub config scraper (3-day cache, HTML fallback, 0o600 permissions, path-sanitised)
 │   ├── deployer.py             # Deployment orchestrator — SSH, Moonraker API, USB, SD card
 │   ├── moonraker.py            # Moonraker REST API client (upload + restart, API key support)
-│   ├── translations.py         # All user-facing strings in EN/ES/PT via t() lookup
+│   ├── translations/           # Package — user-facing strings in EN/ES/PT via t() lookup
+│   │   ├── __init__.py         # Re-export API (t, get_lang, set_lang, translate_comment, etc.)
+│   │   ├── _state.py           # Internal language and mode state
+│   │   ├── _strings.py         # UI_STRINGS translation dictionary (EN/ES/PT)
+│   │   └── _t.py               # Lookup logic and comment translation engine
 │   ├── dashboard.py            # System status dashboard — detects Klipper, Moonraker, Mainsail, etc.
 │   ├── display_checker.py      # Display hardware compatibility database and validation
 │   ├── validators.py           # Klipper pin string validation (regex-based)
@@ -47,7 +51,7 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 │   ├── banner.py               # ANSI decorative installer banner (called by install.sh post-clone)
 │   ├── bed_mesh.py             # Bed mesh configuration logic
 │   ├── leveling.py             # Bed leveling strategy selection
-│   ├── loader.py               # YAML data loader with hardcoded fallback dict
+│   ├── loader.py               # YAML data loader with hardcoded fallback dict & exception guards
 │   ├── macro_generator.py      # Klipper macro snippet generation
 │   ├── motion_model.py         # Motion system configuration (CoreXY, delta, cartesian)
 │   ├── probe_offset_visualizer.py  # ASCII probe offset visualizer
@@ -58,6 +62,7 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 │
 ├── firmware/                   # MCU detection and firmware derivation
 │   ├── detector.py             # USB/serial MCU identification (maps device strings to board families)
+│   ├── builder.py              # Firmware compilation engine with LTO retry fallback
 │   └── derivation.py          # YAML-pattern-driven Kconfig parameter derivation engine
 │
 ├── data/                       # Hardware and profile databases
@@ -72,6 +77,7 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 │   │                           #   --update-snapshots, --auto flags
 │   ├── kace_test_case.py       # Shared test case base class
 │   ├── unit/                   # Unit tests for all core modules
+│   │   ├── test_loader.py      # YAML loader and version fallback error path tests
 │   │   ├── test_validators.py
 │   │   ├── test_deployer.py
 │   │   ├── test_moonraker.py
@@ -87,6 +93,7 @@ KACE (Klipper Automated Configuration Ecosystem) is an intelligent CLI wizard fo
 │       └── full_sweep_runner.py
 │
 ├── scripts/                    # Maintainer utilities
+│   ├── cc_wrapper.py           # Compiler wrapper script for LTO retry fallback
 │   └── pre-commit              # Git pre-commit hook — blocks hardcoded UI strings and Windows paths
 │
 ├── docs/                       # User and contributor documentation (multilingual)

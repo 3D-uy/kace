@@ -8,12 +8,45 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.9.3.4] — Unreleased
 
-### Added
+### Security Hardening (Code Audit Phase 2)
+- Removed runtime auto-install of `paramiko` via `pip` in `_require_paramiko()` to eliminate potential supply-chain Remote Code Execution (RCE) vectors. SSH deployment now prompts for manual installation via `pip install -r requirements-ssh.txt` (S-01).
+- Updated Moonraker HTTP API key deployment to perform a hard abort instead of allowing a soft confirm when transmitting sensitive API keys over unencrypted `http://` connections (S-04).
+- Enforced `0o600` (owner-only) file permissions on board database caches in `core/scraper.py` using `os.open()` to protect user hardware history on multi-user systems (S-05).
+- Zeroed in-memory SSH reconnection passwords immediately after connection establishment in `core/deployer.py` (S-06).
+- Cached `_KACE_VERSION` at module import time in `core/deployer.py` to eliminate dynamic `__import__` runtime lookups (S-07).
+- Added least-privilege `sudoers` security documentation for non-interactive systemd Klipper service restarts (S-02).
+
+### Architectural Improvements & Refactoring (Code Audit Phase 1 & 4)
+- **Modular Translations Package (Q-01)**: Refactored the 2,500+ line `core/translations.py` monolith into a clean, modular package (`core/translations/`) comprising `__init__.py`, `_state.py`, `_strings.py`, and `_t.py`.
+- **Standardized CLI Parsing (Q-03)**: Replaced manual `sys.argv` parsing in `kace.py` with `argparse.ArgumentParser(parse_known_args)` and added `--debug` CLI flag support.
+- **Pin Resolution Extraction (D-01)**: Extracted BLTouch/CR-Touch pin resolution logic into `resolve_bltouch_pins()` in `core/wizard/__init__.py`.
+- **DRY Deployment Logic (D-02)**: Extracted `_copy_artifacts()` helper in `core/deployer.py` to consolidate duplicate artifact copying code.
+- **Decomposed Config Generator (D-03)**: Split `generate_config()` into focused private functions (`_validate_and_sanitize_geometry()`, `_render_display_blocks()`).
+- **External Compiler Wrapper (D-06)**: Moved inline string compiler wrapper to `scripts/cc_wrapper.py`.
+- **Line Ending Normalization (Q-04 / Q-05)**: Normalized line endings from CRLF to LF in `core/deployer.py` and `core/moonraker.py` to match repository `.gitattributes`.
+- **Deepcopy Protection (Q-06)**: Replaced `dict()` shallow copy in `core/generator.py` with `copy.deepcopy()` to prevent nested fan-pin mutation leakage across calls.
+
+### Reliability & Bug Fixes (Code Audit Phase 3)
+- **YAML Loader Hardening (R-01 / R-02)**: Standardized `load_boards_yaml()`, `load_displays_yaml()`, and `load_advanced_modules_yaml()` to handle `FileNotFoundError`, `PermissionError`, and `yaml.YAMLError` cleanly by raising descriptive `RuntimeError`s. `read_version()` now falls back to `"v?.?.?"` on error.
+- **URL & Comment Regex Alignment (R-04 / T-05)**: Replaced naive string splitting in `core/generator.py` with a whitespace-anchored inline comment regex (`(\s)(#)(.*)`), preventing corruption of URLs containing `#` fragment anchors (e.g. `http://host/#anchor`).
+- **MCU Pin Namespace Validation (R-05)**: Restricted serial pin regex check to `[mcu]` blocks to avoid false-negatives across section boundaries.
+- **Wizard Exit Signal Standardization (R-06)**: Replaced bare `sys.exit(0)` on Ctrl-C/EOF in `core/menu.py` with `raise WizardExit`.
+- **Noexec `/tmp` Detection (R-07)**: Added `/proc/mounts` inspection in `firmware/builder.py` to trigger LTO retry heuristics when `/tmp` is mounted with `noexec`.
+- **TOCTOU Elimination (R-08)**: Updated `core/scraper.py` to use `os.makedirs(..., exist_ok=True)`.
+
+### Test Coverage Gaps Resolved (Code Audit Phase 5)
+- **T-01**: Added tests for `_require_paramiko()` `ModuleNotFoundError` handling and `deploy_config()` short-circuiting when `paramiko` is absent (`tests/unit/test_deployer.py`).
+- **T-02**: Added unit test suite `tests/unit/test_loader.py` covering error paths (`FileNotFoundError`, `PermissionError`, `YAMLError`) for all YAML loaders and version fallback.
+- **T-03**: Added `TestDeployConfigRollback` integration tests in `tests/unit/test_ssh_operations.py` verifying full SSH backup creation, upload failure, and `sftp.rename` restoration.
+- **T-04**: Added `TestDeployMoonrakerSSHFallbackMenuPrompts` in `tests/unit/test_deployer.py` patching `core.menu` prompt functions during Moonraker SSH fallback.
+- **T-05**: Added `TestCommentAlignmentEdgeCases` in `tests/unit/test_generator.py` testing comment alignment with URLs, query strings, and multi-hash pin names.
+
+### Added (Other)
 - Integrated a state-machine-driven firmware deployment flow (`core/moonraker_deployer.py`) that handles reboot detection, Klipper readiness verification, and post-flash build identity checking.
 - Added `get_klipper_state` and `get_mcu_versions` endpoints to `core/moonraker.py` to fetch exact Klipper status and active MCU compilation versions.
 - Added automatic configuration SHA fingerprinting during firmware compilation and injected it as a `KLIPPER_VERSION` make override.
 
-### Refactored
+### Refactored (Other)
 - Decoupled testing-specific environment variable checks (`KACE_TESTING`, `KACE_REAL_BUILD`) from the production codebase (`core/` and `firmware/`).
 - Introduced generic dependency injection points (`make_command`, `env`, `concurrency`) in `build_firmware_orchestrator` to decouple build-tool resolution.
 - Extracted and encapsulated compiler LTO bypass wrapping logic into a dedicated testing fixture module under `tests/fixtures/`.
@@ -21,7 +54,7 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Simplified test configurations by initializing global test-runner mocks and prepends inside test harness setups (`conftest.py` and `run_tests.py`).
 - Integrated the new state machine into `deploy_moonraker` in `core/deployer.py`, enabling verified deployments when a build manifest exists, while keeping standard config-only uploads unchanged.
 
-### Cleaned
+### Cleaned (Other)
 - Removed temporary root sketch file `deployer_state_machine.py` after migrating state machine components to production `core/moonraker_deployer.py`.
 - Removed orphaned standalone validation/smoke scripts (`tests/smoke_advanced.py`, `tests/validate_advanced.py`, `tests/validate_display_hw.py`) since their functionality is fully covered by the integrated unit/regression test suite.
 - Updated `.gitignore` to explicitly ignore generated build files (`*.bin`, `*.uf2`, `*.elf.hex`), local `.config` files, and local KACE output files (`printer.cfg`, `macros.cfg`, `jobs.json`, `test_printer.cfg`).

@@ -896,5 +896,105 @@ class TestDeployConfigDestPathConstruction(unittest.TestCase):
         )
 
 
+# ── T-03: SSH → upload failure → rollback integration tests ──────────────────
+
+class TestDeployConfigRollback(unittest.TestCase):
+    """T-03: Verify that deploy_config() correctly initiates rollback when
+    sftp.put() raises after a backup has already been created.
+
+    The rollback path (lines 340-433 of deployer.py) must:
+      1. Call sftp.rename(dest_file + ".bak", dest_file) to restore the backup.
+      2. Print a message containing "Rollback" or "Restored".
+      3. Skip rename when no backup was created (sftp.stat raised on backup step).
+    """
+
+    _USER_DATA = {
+        'host': '192.168.1.10',
+        'user': 'pi',
+        'dest_path': '/home/pi/printer_data/config/',
+    }
+
+    def _build_sftp_with_existing_file(self, mock_sftp, upload_error=None):
+        """Configure mock_sftp so that:
+          - stat() succeeds (remote file exists) → backup will be created
+          - rename() succeeds (backup rename succeeds)
+          - put() raises upload_error (or succeeds if None)
+        """
+        mock_sftp.stat.return_value = MagicMock()   # file exists
+        mock_sftp.rename.return_value = None         # rename succeeds
+        if upload_error is not None:
+            mock_sftp.put.side_effect = upload_error
+        else:
+            mock_sftp.put.return_value = None
+
+    def _run_deploy(self, upload_error=None, stat_raises=False):
+        """Helper: run deploy_config() with a fully mocked SSH/SFTP stack.
+
+        Returns the list of printed messages.
+        """
+        mock_p, mock_client, mock_sftp = _make_ssh_stack()
+
+        if stat_raises:
+            # Remote file doesn't exist → no backup created
+            mock_sftp.stat.side_effect = FileNotFoundError("No such file")
+        else:
+            self._build_sftp_with_existing_file(mock_sftp, upload_error=upload_error)
+
+        captured = []
+
+        with patch('core.deployer._require_paramiko', return_value=mock_p), \
+             patch('core.deployer.os.path.isfile', return_value=True), \
+             patch('core.deployer.os.path.exists', return_value=False), \
+             patch('builtins.print',
+                   side_effect=lambda *a, **kw: captured.append(' '.join(map(str, a)))):
+            deploy_config(dict(self._USER_DATA))
+
+        return captured, mock_sftp
+
+    def test_rollback_calls_sftp_rename_to_restore_backup(self):
+        """T-03a: When upload fails after backup was created, rollback must call
+        sftp.rename(dest_file+'.bak', dest_file) to restore the original file.
+        """
+        _msgs, mock_sftp = self._run_deploy(upload_error=OSError("Disk quota exceeded"))
+
+        rename_calls = mock_sftp.rename.call_args_list
+        # First rename is the backup (dest → dest.bak); second is the restore (dest.bak → dest)
+        restore_calls = [c for c in rename_calls
+                         if len(c[0]) == 2 and c[0][0].endswith('.bak')]
+        self.assertTrue(
+            len(restore_calls) >= 1,
+            f"sftp.rename() must be called to restore the .bak backup. "
+            f"Rename calls were: {rename_calls}"
+        )
+
+    def test_rollback_prints_restored_message(self):
+        """T-03b: A rollback completion message must be printed to inform the user."""
+        msgs, _sftp = self._run_deploy(upload_error=OSError("Connection reset"))
+        combined = ' '.join(msgs)
+        self.assertTrue(
+            'Rollback' in combined or 'Restored' in combined or 'rollback' in combined,
+            f"Expected rollback/restore message in output but got: {msgs}"
+        )
+
+    def test_no_rollback_rename_when_no_backup_created(self):
+        """T-03c: When no backup was created (remote file didn't exist), the
+        rollback restore rename must NOT be called on upload failure.
+
+        The stat() call raising FileNotFoundError means printer_backup_created
+        stays False, so the rename-back path is never entered.
+        """
+        _msgs, mock_sftp = self._run_deploy(
+            upload_error=OSError("Upload failed"), stat_raises=True
+        )
+        # The only rename call(s) should be absent, or if stat raised during
+        # rollback ping too, rename is not called for restore.
+        restore_calls = [c for c in mock_sftp.rename.call_args_list
+                         if len(c[0]) == 2 and c[0][0].endswith('.bak')]
+        self.assertEqual(
+            len(restore_calls), 0,
+            "sftp.rename() must NOT be called for restore when no backup was created"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

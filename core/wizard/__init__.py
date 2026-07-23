@@ -87,6 +87,74 @@ def discover_mcu():
     return discover_mcu_hardware()
 
 
+def resolve_bltouch_pins(user_data: dict, parsed_data: dict) -> None:
+    """Ensure BLTouch/CR-Touch sensor_pin and control_pin are populated.
+
+    Called by kace.py after the wizard returns when the probe choice is
+    BLTouch or CR-Touch.  If the board database already supplied both pins
+    (via boards.yaml or the wizard's bltouch_pins step) this function is a
+    no-op.  When either pin is still missing or a TODO placeholder, the user
+    is prompted interactively to enter the values.
+
+    Mutates *parsed_data* in place (``parsed_data["bltouch"]``) so that
+    ``generate_config()`` receives fully-resolved pin values.
+
+    Args:
+        user_data:   Live wizard result dict (may contain ``bltouch_sensor_pin``
+                     and ``bltouch_control_pin`` keys set by the bltouch_pins step).
+        parsed_data: Parsed board config dict.  ``parsed_data["bltouch"]`` is
+                     created if absent.
+    """
+    from core.menu import simple_input
+
+    _blt = parsed_data.setdefault("bltouch", {})
+    if user_data.get("bltouch_sensor_pin"):
+        _blt["sensor_pin"] = user_data["bltouch_sensor_pin"]
+    if user_data.get("bltouch_control_pin"):
+        _blt["control_pin"] = user_data["bltouch_control_pin"]
+
+    def _is_missing(p):
+        if not p:
+            return True
+        p_clean = str(p).strip().upper().lstrip("^!~")
+        return p_clean == "TODO" or p_clean == ""
+
+    _missing_sensor  = _is_missing(_blt.get("sensor_pin"))
+    _missing_control = _is_missing(_blt.get("control_pin"))
+
+    if not (_missing_sensor or _missing_control):
+        return  # Both pins already resolved — nothing to do.
+
+    print(f"\n\033[93m[!] BLTouch/CR-Touch selected but pin mapping is unknown or incomplete for:\033[0m")
+    print(f"\033[93m    {user_data.get('board', 'unknown board')}\033[0m")
+    print(f"\033[96m    Enter the pins manually below (check your board's wiring diagram).\033[0m")
+    print(f"\033[2m    Example — Octopus Pro: sensor_pin=^PB7  control_pin=PB6\033[0m\n")
+
+    pin_validator = make_pin_validator_with_collision_check(user_data)
+
+    if _missing_sensor:
+        import sys
+        _sp = simple_input(
+            "BLTouch sensor_pin (e.g. ^PB7 or ^PC5):",
+            validate=pin_validator,
+        )
+        if not _sp:
+            print(f"\n\033[91m[!] No sensor_pin provided — aborting.\033[0m")
+            sys.exit(1)
+        _blt["sensor_pin"] = _sp.strip()
+
+    if _missing_control:
+        import sys
+        _cp = simple_input(
+            "BLTouch control_pin (e.g. PB6 or PE5):",
+            validate=pin_validator,
+        )
+        if not _cp:
+            print(f"\n\033[91m[!] No control_pin provided — aborting.\033[0m")
+            sys.exit(1)
+        _blt["control_pin"] = _cp.strip()
+
+
 def _check_is_non_stock(board_name: str, printer_profile: str, board_parsed: dict, profile_parsed: dict) -> bool:
     """Determine if the selected board is a non-stock upgrade for the selected printer profile."""
     if not board_name or not printer_profile or not profile_parsed or not board_parsed:

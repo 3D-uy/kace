@@ -35,6 +35,9 @@ def questionary_numeric_validator(value: str) -> Union[bool, str]:
         float(val_strip)
         return True
     except ValueError:
+        # Q-02: Deferred import — validators.py is imported very early in kace.py
+        # before translations is fully initialised. A module-level import here would
+        # create a circular dependency chain. Do NOT move this to the top of the file.
         from core.translations import get_lang
         lang = get_lang()
         if lang == "Español":
@@ -53,6 +56,7 @@ def questionary_pos_numeric_validator(value: str) -> Union[bool, str]:
     try:
         f = float(val_strip)
         if f <= 0:
+            # Q-02: Same deferred import as above — see comment in questionary_numeric_validator.
             from core.translations import get_lang
             lang = get_lang()
             if lang == "Español":
@@ -63,6 +67,7 @@ def questionary_pos_numeric_validator(value: str) -> Union[bool, str]:
                 return "Value must be greater than 0"
         return True
     except ValueError:
+        # Q-02: Same deferred import as above — see comment in questionary_numeric_validator.
         from core.translations import get_lang
         lang = get_lang()
         if lang == "Español":

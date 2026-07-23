@@ -36,23 +36,12 @@ class TestDeployer(unittest.TestCase):
             p.stop()
 
     def test_lazy_paramiko_offline_handling(self):
-        """Simulate a network failure during pip install of paramiko."""
-        
-        # Save originals
-        orig_check_output = subprocess.check_output
+        """S-01: _require_paramiko() must never auto-install; it returns None
+        and prints manual install instructions when paramiko is absent."""
         orig_print = builtins.print
         orig_paramiko = sys.modules.get('paramiko')
 
-        # Mock a CalledProcessError representing a network failure
-        def mock_check_output(*args, **kwargs):
-            raise subprocess.CalledProcessError(
-                returncode=1,
-                cmd=args[0],
-                output=b"NewConnectionError: Failed to establish a new connection: [Errno -3] Temporary failure in name resolution"
-            )
-
-        subprocess.check_output = mock_check_output
-        sys.modules['paramiko'] = None  # Force ImportError
+        sys.modules['paramiko'] = None  # Force ImportError path
 
         logs = []
         def mock_print(*args, **kwargs):
@@ -61,11 +50,14 @@ class TestDeployer(unittest.TestCase):
 
         try:
             result = _require_paramiko()
-            self.assertIsNone(result, "Should return None on installation failure")
-            self.assertTrue(any("Network unreachable" in log for log in logs), "Did not detect network error")
+            self.assertIsNone(result, "Should return None when paramiko is not installed")
+            # Must tell the user to install manually, not auto-install
+            joined = " ".join(logs)
+            self.assertIn("requirements-ssh.txt", joined, "Should show manual install command")
+            # Must NOT have attempted a pip install
+            self.assertNotIn("Downloading and installing", joined)
+            self.assertNotIn("installed successfully", joined)
         finally:
-            # Restore originals
-            subprocess.check_output = orig_check_output
             builtins.print = orig_print
             if orig_paramiko is not None:
                 sys.modules['paramiko'] = orig_paramiko
@@ -247,30 +239,27 @@ class TestDeployer(unittest.TestCase):
     @patch('questionary.confirm')
     @patch('questionary.select')
     @patch('core.moonraker.check_moonraker')
-    @patch('core.moonraker.upload_printer_cfg')
-    @patch('core.moonraker.restart_firmware')
     @patch('builtins.print')
-    def test_deploy_moonraker_warning_http_accepted(self, mock_print, mock_restart, mock_upload, mock_check, mock_select, mock_confirm, mock_text):
-        """Test http warning triggered and accepted by user."""
+    def test_deploy_moonraker_warning_http_accepted(self, mock_print, mock_check, mock_select, mock_confirm, mock_text):
+        """S-04: http:// + API key must be a hard block — no confirmation prompt,
+        no deployment proceeds, check_moonraker is never reached."""
         mock_text.side_effect = [
             MagicMock(ask=lambda: "http://192.168.1.50"), # host starts with http://
             MagicMock(ask=lambda: "7125"),          # port
             MagicMock(ask=lambda: "secret_key"),    # api key
         ]
-        mock_confirm.side_effect = [
-            MagicMock(ask=lambda: True),            # Warning confirm: Yes
-        ]
-        mock_check.return_value = (True, "v0.1.0")
-        mock_upload.return_value = (True, "Success")
-        mock_select.return_value = MagicMock(ask=lambda: "firmware")
-        mock_restart.return_value = (True, "Restarted")
-        
+
         from core.deployer import deploy_moonraker
         deploy_moonraker({})
-        
-        mock_check.assert_called_once_with("http://192.168.1.50", 7125, api_key="secret_key")
-        mock_upload.assert_called_once()
-        mock_restart.assert_called_once_with("http://192.168.1.50", 7125, api_key="secret_key")
+
+        # Hard block: must not proceed to check reachability
+        mock_check.assert_not_called()
+        # Must print a clear security error
+        printed = " ".join(str(c[0][0]) for c in mock_print.call_args_list if c[0])
+        self.assertTrue(
+            "plain HTTP" in printed or "http_warning" in printed or "plain" in printed.lower(),
+            f"Expected plain-HTTP security message. Got: {printed[:300]}"
+        )
 
     @patch('questionary.text')
     @patch('questionary.confirm')
@@ -830,6 +819,7 @@ class TestDeployLocalFirmware(unittest.TestCase):
         printed = [c[0][0] for c in mock_print.call_args_list]
         self.assertTrue(any("Save failed" in msg and "Write access denied" in msg for msg in printed))
 
+
     @patch('questionary.text')
     @patch('core.deployer.os.path.exists', return_value=True)
     @patch('shutil.copy2')
@@ -846,6 +836,132 @@ class TestDeployLocalFirmware(unittest.TestCase):
             os.path.expanduser("~/kace/printer.cfg"),
             os.path.join(expanded, "printer.cfg")
         )
+
+
+# ── T-01: _require_paramiko() additional failure path coverage ────────────────
+
+class TestRequireParamikoFailurePaths(unittest.TestCase):
+    """T-01: Ensure _require_paramiko() handles all ImportError variants correctly.
+
+    The baseline case (paramiko absent → None + manual install message) is
+    already covered by test_lazy_paramiko_offline_handling in TestDeployer.
+    These tests cover the remaining edge cases.
+    """
+
+    def test_require_paramiko_module_not_found_error(self):
+        """T-01a: ModuleNotFoundError (C-extension missing) treated same as ImportError.
+
+        When 'cryptography' or another C extension that paramiko depends on is
+        absent, Python raises ModuleNotFoundError (a subclass of ImportError).
+        _require_paramiko() must return None and print manual install instructions.
+        """
+        orig_print = builtins.print
+        orig_paramiko = sys.modules.get('paramiko', 'ABSENT')
+
+        # Force a ModuleNotFoundError by setting the entry to None
+        sys.modules['paramiko'] = None
+
+        logs = []
+        builtins.print = lambda *a, **kw: logs.append(" ".join(map(str, a)))
+
+        try:
+            result = _require_paramiko()
+            self.assertIsNone(result, "_require_paramiko() must return None when paramiko is absent")
+            joined = " ".join(logs)
+            self.assertIn("requirements-ssh.txt", joined,
+                          "Manual install instructions must reference requirements-ssh.txt")
+            self.assertNotIn("Downloading", joined,
+                             "_require_paramiko() must never auto-install packages")
+        finally:
+            builtins.print = orig_print
+            if orig_paramiko == 'ABSENT':
+                del sys.modules['paramiko']
+            else:
+                sys.modules['paramiko'] = orig_paramiko
+
+    @patch('core.deployer._require_paramiko', return_value=None)
+    @patch('builtins.print')
+    def test_deploy_config_returns_gracefully_when_no_paramiko(self, mock_print, mock_req_p):
+        """T-01b: deploy_config() short-circuits cleanly when _require_paramiko returns None.
+
+        No SSHClient must be instantiated and no exception must propagate.
+        """
+        from core.deployer import deploy_config
+        # Should not raise
+        try:
+            deploy_config({'host': '192.168.1.10', 'user': 'pi', 'dest_path': '~/p'})
+        except Exception as exc:
+            self.fail(f"deploy_config() raised unexpectedly when paramiko is absent: {exc}")
+
+
+# ── T-04: deploy_moonraker() SSH fallback via core.menu wrappers ─────────────
+
+class TestDeployMoonrakerSSHFallbackMenuPrompts(unittest.TestCase):
+    """T-04: deploy_moonraker() SSH fallback branch via core.menu wrappers.
+
+    The existing test_deploy_moonraker_unreachable_ssh_fallback patches
+    'questionary.confirm' and 'questionary.text', but deploy_moonraker()
+    now calls core.menu.yes_no / simple_input / password_input directly
+    (post Q-03 refactor). This class uses the correct patch targets.
+    """
+
+    def setUp(self):
+        self.patches = [
+            patch('core.moonraker.check_moonraker', return_value=(False, "unreachable")),
+            patch('core.moonraker.upload_printer_cfg', return_value=(False, "unreachable")),
+            patch('core.moonraker.restart_firmware', return_value=(False, "unreachable")),
+            patch('core.moonraker.restart_klipper_service', return_value=(False, "unreachable")),
+            patch('core.moonraker.download_printer_cfg', return_value=(False, b"")),
+            patch('core.moonraker.check_klipper_ready', return_value=(False, "unreachable")),
+            patch('core.moonraker.verify_remote_file_exists', return_value=False),
+            patch('time.sleep'),
+        ]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+
+    @patch('builtins.print')
+    @patch('core.deployer.deploy_config')
+    @patch('core.menu.password_input', return_value='raspberry')
+    @patch('core.menu.simple_input', side_effect=[
+        '192.168.1.50',  # moonraker host
+        '7125',          # moonraker port
+        '',              # api key (empty)
+        'pi',            # ssh user
+        '/home/pi/printer_data/config/',  # ssh dest_path
+    ])
+    @patch('core.menu.yes_no', return_value=True)   # accept SSH fallback
+    def test_ssh_fallback_calls_deploy_config_with_correct_user_data(
+            self, mock_yn, mock_si, mock_pw, mock_deploy, mock_print):
+        """T-04: When Moonraker is unreachable and user accepts SSH fallback,
+        deploy_config() must be called with host, user, dest_path, and password
+        collected from the core.menu prompts.
+        """
+        from core.deployer import deploy_moonraker
+        deploy_moonraker({})
+
+        mock_deploy.assert_called_once()
+        user_data = mock_deploy.call_args[0][0]
+        self.assertEqual(user_data['user'], 'pi')
+        self.assertEqual(user_data['dest_path'], '/home/pi/printer_data/config/')
+        self.assertEqual(user_data['password'], 'raspberry')
+
+    @patch('builtins.print')
+    @patch('core.deployer.deploy_config')
+    @patch('core.menu.password_input', return_value='raspberry')
+    @patch('core.menu.simple_input', side_effect=[
+        '192.168.1.50', '7125', '', 'pi', '/home/pi/printer_data/config/',
+    ])
+    @patch('core.menu.yes_no', return_value=False)  # decline SSH fallback
+    def test_ssh_fallback_declined_does_not_call_deploy_config(
+            self, mock_yn, mock_si, mock_pw, mock_deploy, mock_print):
+        """T-04b: When user declines the SSH fallback, deploy_config must NOT be called."""
+        from core.deployer import deploy_moonraker
+        deploy_moonraker({})
+        mock_deploy.assert_not_called()
 
 
 if __name__ == '__main__':

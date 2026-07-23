@@ -16,16 +16,31 @@ except (AttributeError, OSError):
     pass
 
 # ── Early argument handling (no heavy imports needed) ─────────
-if len(sys.argv) > 1:
-    if sys.argv[1] in ("--version", "-v"):
-        print(f"KACE {__version__}")
-        sys.exit(0)
+# Q-03: Migrated from manual sys.argv loop to argparse so the CLI surface
+# scales cleanly as new flags are added. parse_known_args() is used here
+# so unrecognised args are silently ignored rather than causing a hard error
+# before the main import block runs.
+import argparse as _argparse
+_ap = _argparse.ArgumentParser(
+    prog="kace",
+    description="Klipper Automated Configuration Ecosystem",
+    add_help=False,  # defer --help to after full imports load
+)
+_ap.add_argument("--version", "-v", action="store_true", help="Print version and exit")
+_ap.add_argument("--auto", action="store_true", help="Non-interactive mode (CI/auto deploy)")
+_ap.add_argument("--dev-deploy", action="store_true", dest="dev_deploy", help="Enable dev-deploy mode")
+_ap.add_argument("--debug", action="store_true", help="Enable KACE_DEBUG verbose output")
+_known, _ = _ap.parse_known_args()
 
-    for i, arg in enumerate(sys.argv):
-        if arg == "--auto":
-            os.environ["KACE_AUTO"] = "1"
-        if arg == "--dev-deploy":
-            os.environ["KACE_DEV_DEPLOY"] = "1"
+if _known.version:
+    print(f"KACE {__version__}")
+    sys.exit(0)
+if _known.auto:
+    os.environ["KACE_AUTO"] = "1"
+if _known.dev_deploy:
+    os.environ["KACE_DEV_DEPLOY"] = "1"
+if _known.debug:
+    os.environ["KACE_DEBUG"] = "1"
 # Resolve make command at the application boundary
 _make_command = "make"
 if os.environ.get("KACE_REAL_BUILD") == "1":
@@ -39,7 +54,7 @@ if os.environ.get("KACE_AUTO") == "1":
     print("\n\033[93m[AUTO MODE]\033[0m User interactions disabled. Using safe defaults for all prompts.", flush=True)
 
 from core.scraper import fetch_raw_config, parse_config
-from core.wizard import run_wizard, make_pin_validator_with_collision_check
+from core.wizard import run_wizard, make_pin_validator_with_collision_check, resolve_bltouch_pins
 from core.exceptions import WizardExit, GenerationError
 from core.style import custom_style
 from core.generator import generate_config, has_todo_pins
@@ -106,46 +121,7 @@ def main():
     # and ask for the pins interactively so the workflow succeeds.
     _probe_choice = user_data.get("probe", "None")
     if _probe_choice in ("BLTouch", "CR-Touch"):
-        _blt = parsed_data.setdefault("bltouch", {})
-        if user_data.get("bltouch_sensor_pin"):
-            _blt["sensor_pin"] = user_data["bltouch_sensor_pin"]
-        if user_data.get("bltouch_control_pin"):
-            _blt["control_pin"] = user_data["bltouch_control_pin"]
-
-        def _is_missing(p):
-            if not p:
-                return True
-            p_clean = str(p).strip().upper().lstrip('^!~')
-            return p_clean == "TODO" or p_clean == ""
-
-        _missing_sensor  = _is_missing(_blt.get("sensor_pin"))
-        _missing_control = _is_missing(_blt.get("control_pin"))
-        if _missing_sensor or _missing_control:
-            print(f"\n\033[93m[!] BLTouch/CR-Touch selected but pin mapping is unknown or incomplete for:\033[0m")
-            print(f"\033[93m    {user_data['board']}\033[0m")
-            print(f"\033[96m    Enter the pins manually below (check your board's wiring diagram).\033[0m")
-            print(f"\033[2m    Example — Octopus Pro: sensor_pin=^PB7  control_pin=PB6\033[0m\n")
-
-            pin_validator = make_pin_validator_with_collision_check(user_data)
-
-            if _missing_sensor:
-                _sp = simple_input(
-                    "BLTouch sensor_pin (e.g. ^PB7 or ^PC5):",
-                    validate=pin_validator
-                )
-                if not _sp:
-                    print(f"\n\033[91m[!] No sensor_pin provided — aborting.\033[0m")
-                    sys.exit(1)
-                _blt["sensor_pin"] = _sp.strip()
-            if _missing_control:
-                _cp = simple_input(
-                    "BLTouch control_pin (e.g. PB6 or PE5):",
-                    validate=pin_validator
-                )
-                if not _cp:
-                    print(f"\n\033[91m[!] No control_pin provided — aborting.\033[0m")
-                    sys.exit(1)
-                _blt["control_pin"] = _cp.strip()
+        resolve_bltouch_pins(user_data, parsed_data)
 
     # ── Display Compatibility Check ───────────────────────────────────────────
     # Run before generation so users can make an informed decision about
