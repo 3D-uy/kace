@@ -240,7 +240,10 @@ def simple_input(prompt, default=None, validate=None):
             val = input(full_prompt).strip()
         except (KeyboardInterrupt, EOFError):
             print()
-            sys.exit(0)
+            # S2-01: Raise WizardExit instead of sys.exit(0) so the top-level
+            # handler in kace.py gets a chance to clean up (e.g. close open SSH
+            # connections) before the process exits.
+            raise WizardExit
             
         if not val and default is not None:
             val = str(default).strip()
@@ -276,7 +279,8 @@ def yes_no(prompt, default=False):
             val = input(full_prompt).strip().lower()
         except (KeyboardInterrupt, EOFError):
             print()
-            sys.exit(0)
+            # S2-01: Raise WizardExit instead of sys.exit(0).
+            raise WizardExit
             
         if not val:
             return default
@@ -324,7 +328,8 @@ def autocomplete_select(prompt, choices, default=0):
             query = input(f"  Search (default: {default_label}): ").strip()
         except (KeyboardInterrupt, EOFError):
             print()
-            sys.exit(0)
+            # S2-01: Raise WizardExit instead of sys.exit(0).
+            raise WizardExit
             
         if not query:
             return default_val
@@ -350,7 +355,8 @@ def autocomplete_select(prompt, choices, default=0):
                 sel = input(f"  Select [1-{len(matches)}] or type new query: ").strip()
             except (KeyboardInterrupt, EOFError):
                 print()
-                sys.exit(0)
+                # S2-01: Raise WizardExit instead of sys.exit(0).
+                raise WizardExit
                 
             if not sel:
                 break
@@ -388,5 +394,6 @@ def password_input(prompt):
         val = getpass.getpass(prompt=f"  {prompt}: ")
     except (KeyboardInterrupt, EOFError):
         print()
-        sys.exit(0)
+        # S2-01: Raise WizardExit instead of sys.exit(0).
+        raise WizardExit
     return val

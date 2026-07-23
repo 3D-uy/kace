@@ -169,7 +169,11 @@ class _InteractiveHostKeyPolicy:
 
 
 def deploy_config(user_data):
-    """Deploys the generated printer.cfg to the Klipper host via SSH/SCP."""
+    """Deploys the generated printer.cfg to the Klipper host via SSH/SCP.
+
+    Note (Q2-02): Intentionally mutates user_data by popping 'password' immediately
+    to minimize in-memory credential exposure duration.
+    """
     # Wipes password from user_data immediately to reduce the credential exposure window
     password = user_data.pop('password', '')
     password_for_reconnect = password
@@ -762,7 +766,10 @@ def deploy_moonraker(user_data):
         board=_board,
         kace_version=_KACE_VERSION,  # S-07: use module-level cache instead of dynamic __import__
     )
+    # R2-01: Explicit boolean flag tracking whether a valid snapshot was captured
+    snapshot_captured = False
     if _snap:
+        snapshot_captured = True
         print(f"\033[96m[*]\033[0m Configuration backup captured ({len(_snap.config_files)} file(s)).")
     else:
         print("\033[93m[!] Configuration backup skipped (no files found in config root).\033[0m")
@@ -812,8 +819,13 @@ def deploy_moonraker(user_data):
             # path that verifies the new firmware is actually running before
             # applying printer.cfg.
             from core.moonraker_deployer import Deployer, DeploymentManifest, McuTarget, DeployState
+            from core.exceptions import WizardExit
             print(f"\n\033[93m[!] Power-cycle your printer (turn it OFF and ON) to flash the new firmware.\033[0m")
-            input("    Press ENTER once the printer has fully rebooted... ")
+            try:
+                input("    Press ENTER once the printer has fully rebooted... ")
+            except (KeyboardInterrupt, EOFError):
+                print(f"\n\033[93mDeployment cancelled.\033[0m")
+                raise WizardExit
 
             _manifest = DeploymentManifest(
                 targets=[McuTarget(name=mcu_name, expected_version=klipper_version)],
@@ -883,7 +895,7 @@ def deploy_moonraker(user_data):
     finally:
         # Perform rollback if a snapshot was captured, deployment was not successful,
         # and rollback is not bypassed.
-        if _snap is not None and not deployed_successfully and not bypass_rollback:
+        if snapshot_captured and _snap is not None and not deployed_successfully and not bypass_rollback:
             print("\033[93m[!] Initiating automatic rollback of configurations...\033[0m")
             failed_files = restore_snapshot(_snap, host, port, api_key=api_key)
             if failed_files:

@@ -1,9 +1,13 @@
 import os
+import re
 from jinja2 import Environment, FileSystemLoader
 from core.translations import translate_comment, get_lang
 from core.macro_generator import generate_starter_macros
 from core.advanced_module_handler import get_advanced_sections
 from core.exceptions import GenerationError
+
+# D2-03: Pre-compiled module-level regex for inline comment boundary matching
+_INLINE_COMMENT_RE = re.compile(r'(\s)(#)(.*)')
 
 # Resolve templates directory relative to this file's location, not the CWD
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -365,14 +369,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         user=user_ctx
     )
     
-    # R-04: Use a regex to locate the inline comment boundary rather than a
-    # naive split('#', 1). A '#' inside a URL fragment (http://host/#anchor)
-    # or a multi-hash pin name must NOT be treated as the comment delimiter.
-    # Rule: the comment delimiter is a '#' that is preceded by at least one
-    # whitespace character. This matches Klipper's own config parsing behaviour.
-    import re as _re
-    _INLINE_COMMENT_RE = _re.compile(r'(\s)(#)(.*)')
-
+    # R-04 / D2-03: Locate the inline comment boundary using pre-compiled regex.
     aligned_lines = []
     comment_col = 48
     # get_lang() is always authoritative: set by the dashboard language picker
@@ -411,10 +408,12 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
             # Regular line or normal full-line comment
             if line.lstrip().startswith('#'):
                 comment = line.lstrip()[1:].strip()
-                translated = translate_comment(comment, language)
-                if comment != translated:
-                    # Update translated full line comment
-                    line = line.replace(f"# {comment}", f"# {translated}")
+                # R2-05: Guard against empty comment lines (e.g. plain '#')
+                if comment:
+                    translated = translate_comment(comment, language)
+                    if comment != translated:
+                        # Update translated full line comment
+                        line = line.replace(f"# {comment}", f"# {translated}")
             aligned_lines.append(line)
     
     final_output = chr(10).join(aligned_lines)

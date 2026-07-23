@@ -6,7 +6,31 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [0.9.3.4] — Unreleased
+## [0.9.3.5] — Unreleased
+
+### Security Hardening (Second-Pass Code Audit)
+- **Menu Exit Signal Hardening (S2-01)**: Replaced `sys.exit(0)` on Ctrl-C/EOF across `simple_input()`, `yes_no()`, `autocomplete_select()`, and `password_input()` in `core/menu.py` with `raise WizardExit`, ensuring top-level cleanup and connection closure.
+- **Raw Board Config Cache Permissions (S2-02)**: Enforced `0o600` (owner-only) file permissions on raw board config caches in `fetch_raw_config()` in `core/scraper.py` using `os.open()`.
+
+### Code Quality & Structural Fixes (Second-Pass Code Audit)
+- **Line Ending Normalization (D2-04)**: Normalized line endings from CRLF to LF in `core/moonraker_deployer.py` to match repository `.gitattributes`.
+- **Pre-compiled Comment Regex (D2-03)**: Promoted inline comment matching regex `_INLINE_COMMENT_RE` to a module-level constant in `core/generator.py`.
+- **Snapshot Exception Narrowing (R2-02)**: Narrowed exception catching in `capture_snapshot()` to network errors (`OSError`, `ConnectionError`, `TimeoutError`), preventing programming bugs from being silently swallowed.
+- **Temp File Safety (R2-03)**: Ensured temporary file paths in `restore_snapshot()` are tracked before byte writes to guarantee cleanup on disk write failure.
+- **Snapshot Deployment State (R2-01)**: Introduced explicit `snapshot_captured` boolean tracking in `deploy_moonraker()` in `core/deployer.py`.
+- **Empty Comment Guard (R2-05)**: Added guard against empty comment lines during translation in `core/generator.py`.
+- **CLI Stdin Guard (Q2-03)**: Wrapped interactive ENTER prompt in `deploy_moonraker()` in `try/except (KeyboardInterrupt, EOFError)` to prevent crashes in CI.
+- **In-Memory Credential Zeroing (Q2-04)**: Added explicit password purging from `user_data` immediately following `deploy_config()` in `kace.py`.
+- **Firmware Restart Disconnect Budget (Q2-05)**: Added dedicated `FIRMWARE_RESTART_DISCONNECT_TIMEOUT_S` constant (5.0s) for Phase 6 post-restart disconnect detection.
+
+### Test Suite Expansions (Second-Pass Code Audit)
+- **T2-01**: Created `tests/unit/test_snapshot.py` with full coverage for `capture_snapshot()` and `restore_snapshot()` (success, partial/total failures, upload order, cleanup).
+- **T2-02**: Added unit tests for `verify_firmware=False` dev-deploy state handling in `tests/unit/test_moonraker_deployer.py`.
+- **T2-03 / T2-04**: Added `PermissionError` tests for `deploy_local()` and `_preflight_check()` abort tests for `deploy_moonraker()` in `tests/unit/test_deployer.py`.
+
+---
+
+## [0.9.3.4] — 2026-07-23
 
 ### Security Hardening (Code Audit Phase 2)
 - Removed runtime auto-install of `paramiko` via `pip` in `_require_paramiko()` to eliminate potential supply-chain Remote Code Execution (RCE) vectors. SSH deployment now prompts for manual installation via `pip install -r requirements-ssh.txt` (S-01).

@@ -963,6 +963,29 @@ class TestDeployMoonrakerSSHFallbackMenuPrompts(unittest.TestCase):
         deploy_moonraker({})
         mock_deploy.assert_not_called()
 
+    @patch('os.makedirs', side_effect=PermissionError("Permission denied"))
+    @patch('core.menu.simple_input', return_value='/root/output')
+    @patch('builtins.print')
+    def test_deploy_local_permission_error(self, mock_print, mock_si, mock_makedirs):
+        """T2-03: PermissionError during os.makedirs is caught and reported safely."""
+        from core.deployer import deploy_local
+        deploy_local({}, artifact_type="config")
+        printed = [c[0][0] for c in mock_print.call_args_list if c[0]]
+        self.assertTrue(any("Save failed: Permission denied" in msg for msg in printed))
+
+    @patch('core.deployer._preflight_check', return_value=False)
+    @patch('core.moonraker.check_moonraker', return_value=(True, "v0.1.0"))
+    @patch('core.moonraker.download_printer_cfg', return_value=(True, b"[mcu]"))
+    @patch('core.deployer._copy_artifacts')
+    @patch('core.menu.simple_input', side_effect=['192.168.1.50', '7125', ''])
+    @patch('builtins.print')
+    def test_deploy_moonraker_preflight_abort(self, mock_print, mock_si, mock_copy, mock_dl, mock_mr, mock_preflight):
+        """T2-04: When _preflight_check fails inside deploy_moonraker, deployment is aborted before upload."""
+        from core.deployer import deploy_moonraker
+        with patch('os.path.isfile', return_value=True):
+            deploy_moonraker({})
+        mock_preflight.assert_called_once()
+
 
 if __name__ == '__main__':
     import unittest.mock

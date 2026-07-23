@@ -121,9 +121,12 @@ def capture_snapshot(
             ok, data = download_printer_cfg(host, port, filename, api_key=api_key)
             if ok and isinstance(data, bytes):
                 captured[filename] = data
-        except Exception:
-            # Network or unexpected error for this file — skip silently.
+        except (OSError, ConnectionError, TimeoutError):
+            # Network error for this file — skip silently.
             pass
+        except Exception as _snap_err:
+            if os.environ.get("KACE_DEBUG") == "1":
+                print(f"[DEBUG] Unexpected error capturing snapshot for '{filename}': {_snap_err}")
 
     # If we attempted downloads but got nothing at all, Moonraker was unreachable.
     # Returning None lets the caller decide whether to abort or proceed without backup.
@@ -188,9 +191,12 @@ def restore_snapshot(
         tmp_path = None
         try:
             # Write bytes to a temp file so upload_printer_cfg can read it.
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".cfg") as tmp:
+            # R2-03: Create file and store tmp_path before writing to guarantee
+            # cleanup in finally block even if tmp.write() raises an exception.
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".cfg")
+            tmp_path = tmp.name
+            with tmp:
                 tmp.write(file_bytes)
-                tmp_path = tmp.name
             ok, msg = upload_printer_cfg(host, port, tmp_path, filename=filename, api_key=api_key)
             if not ok:
                 failed.append(filename)

@@ -99,7 +99,8 @@ class Deployer:
     """
 
     DISCONNECT_COOLDOWN_S = 2.0    # ignore reads right after prompting reboot
-    DISCONNECT_TIMEOUT_S  = 15.0   # how long to wait for Klipper to actually drop
+    DISCONNECT_TIMEOUT_S  = 15.0   # how long to wait for Klipper to actually drop on power-cycle
+    FIRMWARE_RESTART_DISCONNECT_TIMEOUT_S = 5.0 # fast disconnect timeout after FIRMWARE_RESTART
     RECONNECT_TIMEOUT_S   = 90.0   # generous -- CAN toolboards can lag mainboard
     POLL_INTERVAL_S       = 1.0
     POLL_BACKOFF_MAX_S    = 5.0
@@ -236,8 +237,8 @@ class Deployer:
         # using the new configuration.
         self.state = DeployState.VERIFYING_CONFIG
         
-        # Wait for the restart-triggered disconnect to happen
-        self._wait_for_disconnect()
+        # Wait for the restart-triggered disconnect to happen (using faster timeout)
+        self._wait_for_disconnect(timeout=self.FIRMWARE_RESTART_DISCONNECT_TIMEOUT_S)
         
         # Wait for Klipper to come back up and reach ready
         outcome, versions = self._wait_for_reconnect()
@@ -259,15 +260,17 @@ class Deployer:
 
     # ── Internals ─────────────────────────────────────────────────────────
 
-    def _wait_for_disconnect(self) -> bool:
+    def _wait_for_disconnect(self, timeout: float = None) -> bool:
         """Poll until Klippy leaves 'ready'. Returns True if disconnect was
         confirmed, False if the timeout elapsed without observing a drop.
 
         Network exceptions during the reboot window are handled by
         _safe_klippy_state() and treated as 'still disconnecting'.
         """
+        if timeout is None:
+            timeout = self.DISCONNECT_TIMEOUT_S
         time.sleep(self.DISCONNECT_COOLDOWN_S)
-        deadline = time.monotonic() + self.DISCONNECT_TIMEOUT_S
+        deadline = time.monotonic() + timeout
         interval = self.POLL_INTERVAL_S
         while time.monotonic() < deadline:
             if self._safe_klippy_state() != "ready":

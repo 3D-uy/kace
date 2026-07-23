@@ -281,6 +281,9 @@ def main():
         user_data['dest_path'] = dest_path
         if host and user and dest_path:
             deploy_config(user_data)
+            # Q2-04: Zero/remove password from user_data after deployment completes
+            user_data.pop('password', None)
+            password = None
     elif deploy_cfg == "moonraker":
         deploy_moonraker(user_data)
 

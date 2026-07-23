@@ -417,5 +417,23 @@ class TestMoonrakerDeployer(unittest.TestCase):
         self.assertTrue(client.applied)
         self.assertFalse(client.restarted)  # should halt before restart
 
+    def test_dev_deploy_skips_version_check(self):
+        """When verify_firmware=False, wrong MCU version is logged but deployment proceeds to DONE."""
+        client = MockClient(
+            states=["disconnected", "ready"],
+            versions_seq=[{"mcu": "old-unmatched-version"}],
+        )
+        d = Deployer(client, MANIFEST, verify_firmware=False)
+        d.DISCONNECT_COOLDOWN_S = 0
+        d.DISCONNECT_TIMEOUT_S  = 0.1
+        d.RECONNECT_TIMEOUT_S   = 5.0
+        d.POLL_INTERVAL_S       = 0.01
+        d.POLL_BACKOFF_MAX_S    = 0.02
+
+        result = d.run()
+        self.assertEqual(result.state, DeployState.DONE)
+        self.assertTrue(client.applied)
+        self.assertTrue(client.restarted)
+
 
 
