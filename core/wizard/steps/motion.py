@@ -5,7 +5,7 @@ from core.scraper import fetch_raw_config, parse_config, extract_profile_default
 from core.style import custom_style
 from core.translations import t, get_lang
 from core.exceptions import WizardExit
-from core.validators import questionary_numeric_validator, questionary_pos_numeric_validator
+from core.validators import questionary_numeric_validator, questionary_pos_numeric_validator, questionary_thermistor_validator
 from data.profiles import THERMISTOR_PRESETS
 from core.wizard.runner import _BACK, _QUIT
 from core.wizard.ui import _back_choice, _quit_choice
@@ -457,7 +457,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 default=th_choices.index(ht) if ht in THERMISTOR_PRESETS else 0
             )
             if new_th == "Other (Manual Entry)":
-                new_th = simple_input("Enter custom hotend thermistor name:")
+                new_th = simple_input("Enter custom hotend thermistor name:", validate=questionary_thermistor_validator)
             if new_th:
                 staged_user_data["hotend_thermistor"] = new_th
                 staged_defaults["hotend_thermistor"] = new_th
@@ -471,7 +471,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 default=bt_choices.index(bt) if bt in THERMISTOR_PRESETS else 0
             )
             if new_tb == "Other (Manual Entry)":
-                new_tb = simple_input("Enter custom bed thermistor name:")
+                new_tb = simple_input("Enter custom bed thermistor name:", validate=questionary_thermistor_validator)
             if new_tb:
                 staged_user_data["bed_thermistor"] = new_tb
                 staged_defaults["bed_thermistor"] = new_tb

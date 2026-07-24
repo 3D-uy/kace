@@ -415,24 +415,20 @@ class TestDeployMoonrakerWorkflow(unittest.TestCase):
         self.assertEqual(mock_upload.call_count, 1)
         self.assertIn("printer.cfg", mock_upload.call_args[0][2])
 
-    @patch('questionary.text')
+    @patch('core.deployer.simple_input')
     @patch('core.deployer.os.path.exists')
     @patch('core.moonraker.check_moonraker')
     @patch('core.moonraker.upload_printer_cfg')
-    @patch('questionary.select')
+    @patch('core.deployer.numbered_select')
     @patch('builtins.print')
     def test_macros_upload_failure_is_non_fatal(self, mock_print, mock_select, mock_upload, mock_check, mock_exists, mock_text):
         """If macros.cfg upload fails, the deployment continues and does not abort early."""
-        mock_text.side_effect = [
-            MagicMock(ask=lambda: "192.168.1.50"), # host
-            MagicMock(ask=lambda: "7125"),          # port
-            MagicMock(ask=lambda: ""),              # api key
-        ]
+        mock_text.side_effect = ["192.168.1.50", "7125", ""]
         mock_check.return_value = (True, "v0.1.0")
         # printer.cfg succeeds, macros.cfg fails
         mock_upload.side_effect = [(True, "Success"), (False, "Network error")]
         mock_exists.side_effect = lambda path: True if "macros.cfg" in path or "printer.cfg" in path else False
-        mock_select.return_value = MagicMock(ask=lambda: "skip")
+        mock_select.return_value = "skip"
         
         from core.deployer import deploy_moonraker
         deploy_moonraker({})
@@ -445,18 +441,14 @@ class TestDeployMoonrakerWorkflow(unittest.TestCase):
         printed = [c[0][0] for c in mock_print.call_args_list]
         self.assertTrue(any("Failed to upload macros.cfg" in msg for msg in printed))
 
-    @patch('questionary.text')
+    @patch('core.deployer.simple_input')
     @patch('core.moonraker.check_moonraker')
     @patch('core.moonraker.upload_printer_cfg')
-    @patch('questionary.select')
+    @patch('core.deployer.numbered_select')
     @patch('builtins.print')
     def test_printer_cfg_upload_failure_returns_early(self, mock_print, mock_select, mock_upload, mock_check, mock_text):
         """If printer.cfg upload fails, deployment aborts early and does not prompt for restart."""
-        mock_text.side_effect = [
-            MagicMock(ask=lambda: "192.168.1.50"), # host
-            MagicMock(ask=lambda: "7125"),          # port
-            MagicMock(ask=lambda: ""),              # api key
-        ]
+        mock_text.side_effect = ["192.168.1.50", "7125", ""]
         mock_check.return_value = (True, "v0.1.0")
         mock_upload.return_value = (False, "Connection reset")
         

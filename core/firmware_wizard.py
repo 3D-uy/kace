@@ -1,5 +1,6 @@
 import sys
 from core.menu import simple_input, yes_no, numbered_select, Choice
+from core.validators import questionary_arch_validator, questionary_hex_offset_validator
 from core.style import custom_style
 from core.translations import t
 from core.exceptions import DerivationAmbiguityError
@@ -38,7 +39,7 @@ def run_firmware_wizard(user_data: dict):
                     choices=choices
                 )
                 if ans_family == "Enter manually" or ans_family is None:
-                    ans_family = simple_input("Enter Klipper ARCH (e.g. stm32)")
+                    ans_family = simple_input("Enter Klipper ARCH (e.g. stm32)", validate=questionary_arch_validator)
                 if not ans_family:
                     print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
                     sys.exit(0)
@@ -51,7 +52,7 @@ def run_firmware_wizard(user_data: dict):
                     choices=choices
                 )
                 if ans_boot == "Enter manually":
-                    ans_boot = simple_input("Enter HEX offset (e.g. 0x8000)")
+                    ans_boot = simple_input("Enter HEX offset (e.g. 0x8000)", validate=questionary_hex_offset_validator)
                 elif ans_boot == "No bootloader (0x0)" or ans_boot is None:
                     ans_boot = "0x0"
                 else:
@@ -135,7 +136,7 @@ def run_firmware_wizard(user_data: dict):
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             sys.exit(0)
         elif ans_summary == t("builder.edit_arch"):
-            new_arch = simple_input(t("builder.enter_arch"), default=arch)
+            new_arch = simple_input(t("builder.enter_arch"), default=arch, validate=questionary_arch_validator)
             if new_arch: config_dict["CONFIG_MCU"] = f'"{new_arch}"'
         elif ans_summary == t("builder.edit_proc"):
             new_model = simple_input(t("builder.enter_proc"), default=model)
@@ -148,7 +149,7 @@ def run_firmware_wizard(user_data: dict):
             ]
             f_ans = numbered_select(t("builder.select_boot"), choices=opts)
             if f_ans == t("builder.enter_manual"):
-                f_ans = simple_input(t("builder.enter_hex"), default=flash)
+                f_ans = simple_input(t("builder.enter_hex"), default=flash, validate=questionary_hex_offset_validator)
                 if f_ans: config_dict["CONFIG_FLASH_START"] = f_ans
             elif f_ans:
                 config_dict["CONFIG_FLASH_START"] = f_ans.split(" (")[1].replace(")", "")

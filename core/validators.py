@@ -77,3 +77,73 @@ def questionary_pos_numeric_validator(value: str) -> Union[bool, str]:
         else:
             return "Please enter a valid number greater than 0 (e.g. 235) or '<' to go back"
 
+
+def questionary_thermistor_validator(value: str) -> Union[bool, str]:
+    """Validator for custom thermistor name inputs."""
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        from core.translations import get_lang
+        lang = get_lang()
+        if lang == "Español":
+            return "El nombre del termistor no puede contener saltos de línea ni caracteres de control"
+        elif lang == "Português":
+            return "O nome do termistor não pode conter quebras de linha ou caracteres de controle"
+        else:
+            return "Thermistor name cannot contain newlines or control characters"
+    val_strip = value.strip()
+    if val_strip.lower() in ("<", "back", "volver"):
+        return True
+    return True
+
+
+def questionary_arch_validator(value: str) -> Union[bool, str]:
+    """Validator for Klipper MCU architecture inputs."""
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        from core.translations import get_lang
+        lang = get_lang()
+        if lang == "Español":
+            return "La arquitectura no puede contener saltos de línea ni caracteres de control"
+        elif lang == "Português":
+            return "A arquitetura não pode conter quebras de linha ou caracteres de controle"
+        else:
+            return "Architecture cannot contain newlines or control characters"
+    val_strip = value.strip()
+    if val_strip.lower() in ("<", "back", "volver", ""):
+        return True
+    if re.match(r'^[a-zA-Z0-9_]+$', val_strip):
+        return True
+    from core.translations import get_lang
+    lang = get_lang()
+    if lang == "Español":
+        return "Arquitectura inválida. Use solo letras, números y guiones bajos (ej. stm32, rp2040)"
+    elif lang == "Português":
+        return "Arquitetura inválida. Use apenas letras, números e sublinhados (ex. stm32, rp2040)"
+    else:
+        return "Invalid architecture. Use only letters, numbers, and underscores (e.g. stm32, rp2040)"
+
+
+def questionary_hex_offset_validator(value: str) -> Union[bool, str]:
+    """Validator for HEX offset inputs."""
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        from core.translations import get_lang
+        lang = get_lang()
+        if lang == "Español":
+            return "El offset HEX no puede contener saltos de línea ni caracteres de control"
+        elif lang == "Português":
+            return "O offset HEX não pode conter quebras de linha ou caracteres de controle"
+        else:
+            return "HEX offset cannot contain newlines or control characters"
+    val_strip = value.strip()
+    if val_strip.lower() in ("<", "back", "volver", ""):
+        return True
+    if re.match(r'^0[xX][0-9a-fA-F]+$', val_strip):
+        return True
+    from core.translations import get_lang
+    lang = get_lang()
+    if lang == "Español":
+        return "Offset HEX inválido. Debe ser un formato hexadecimal comenzando con 0x (ej. 0x8000, 0x0)"
+    elif lang == "Português":
+        return "Offset HEX inválido. Deve ser um formato hexadecimal começando com 0x (ex. 0x8000, 0x0)"
+    else:
+        return "Invalid HEX offset. Must be a hexadecimal format starting with 0x (e.g. 0x8000, 0x0)"
+
+
