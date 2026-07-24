@@ -896,6 +896,11 @@ patch_systemd_services() {
 
 patch_systemd_services
 
+# Disable background APT daily updates on boot to reduce CPU and SD card I/O
+# contention by ~35 seconds on low-resource SBCs (Pi 3 / Pi 4).
+$SUDO systemctl disable --now apt-daily.service apt-daily-upgrade.service apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+log_ok "APT daily background upgrade services and timers disabled."
+
 # ── 10. Start Services ────────────────────────────────────────────────────────
 log_stage "SERVICES" "Starting Klipper & Moonraker Services"
 # Single daemon-reload for all preceding drop-in and unit file changes
