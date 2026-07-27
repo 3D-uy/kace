@@ -415,11 +415,11 @@ class TestDeployMoonrakerWorkflow(unittest.TestCase):
         self.assertEqual(mock_upload.call_count, 1)
         self.assertIn("printer.cfg", mock_upload.call_args[0][2])
 
-    @patch('core.deployer.simple_input')
+    @patch('core.menu.simple_input')
     @patch('core.deployer.os.path.exists')
     @patch('core.moonraker.check_moonraker')
     @patch('core.moonraker.upload_printer_cfg')
-    @patch('core.deployer.numbered_select')
+    @patch('core.menu.numbered_select')
     @patch('builtins.print')
     def test_macros_upload_failure_is_non_fatal(self, mock_print, mock_select, mock_upload, mock_check, mock_exists, mock_text):
         """If macros.cfg upload fails, the deployment continues and does not abort early."""
@@ -441,10 +441,10 @@ class TestDeployMoonrakerWorkflow(unittest.TestCase):
         printed = [c[0][0] for c in mock_print.call_args_list]
         self.assertTrue(any("Failed to upload macros.cfg" in msg for msg in printed))
 
-    @patch('core.deployer.simple_input')
+    @patch('core.menu.simple_input')
     @patch('core.moonraker.check_moonraker')
     @patch('core.moonraker.upload_printer_cfg')
-    @patch('core.deployer.numbered_select')
+    @patch('core.menu.numbered_select')
     @patch('builtins.print')
     def test_printer_cfg_upload_failure_returns_early(self, mock_print, mock_select, mock_upload, mock_check, mock_text):
         """If printer.cfg upload fails, deployment aborts early and does not prompt for restart."""

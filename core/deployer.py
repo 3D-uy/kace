@@ -93,7 +93,10 @@ def _detect_ram_mb():
 # because deployer is always imported after kace.py has run.
 try:
     from kace import __version__ as _KACE_VERSION  # noqa: PLC0415
-except ImportError:
+except (ImportError, SystemExit):
+    # SystemExit can be raised when kace.py is imported as a module during tests:
+    # its top-level argparse sees pytest's -v/--verbose flag as --version and
+    # calls sys.exit(0) before __version__ is ever defined.
     _KACE_VERSION = "unknown"
 
 
