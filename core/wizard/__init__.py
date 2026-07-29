@@ -74,6 +74,8 @@ from core.wizard.steps.sensors import (
     _step_custom_probe,
     _step_custom_probe_offsets,
     _step_custom_probe_pin,
+    _step_custom_probe_signal_option,
+    _step_custom_probe_review,
     _step_custom_probe_samples_result,
     _step_guided_custom_probe_value,
     _needs_bltouch_pins,
@@ -443,7 +445,15 @@ def run_wizard(user_data_arg=None):
         },
         "custom_probe_pin": {
             "prompt": lambda ud: _step_custom_probe_pin(ud),
-            "next": "custom_probe_x_offset",
+            "next": lambda ans, ud: "custom_probe_pullup",
+        },
+        "custom_probe_pullup": {
+            "prompt": lambda ud: _step_custom_probe_signal_option(ud, "pullup"),
+            "next": lambda ans, ud: "custom_probe_inverted",
+        },
+        "custom_probe_inverted": {
+            "prompt": lambda ud: _step_custom_probe_signal_option(ud, "inverted"),
+            "next": lambda ans, ud: "custom_probe_x_offset",
         },
         "custom_probe_x_offset": {
             "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_x_offset"),
@@ -455,35 +465,39 @@ def run_wizard(user_data_arg=None):
         },
         "custom_probe_z_offset": {
             "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_z_offset"),
-            "next": "custom_probe_samples",
-        },
-        "custom_probe_samples": {
-            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples"),
-            "next": "custom_probe_samples_tolerance",
-        },
-        "custom_probe_samples_tolerance": {
-            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples_tolerance"),
-            "next": "custom_probe_samples_tolerance_retries",
-        },
-        "custom_probe_samples_tolerance_retries": {
-            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples_tolerance_retries"),
-            "next": "custom_probe_speed",
+            "next": lambda ans, ud: "custom_probe_speed",
         },
         "custom_probe_speed": {
             "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_speed"),
-            "next": "custom_probe_samples_result",
+            "next": lambda ans, ud: "custom_probe_samples",
+        },
+        "custom_probe_samples": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples"),
+            "next": lambda ans, ud: "custom_probe_samples_result",
         },
         "custom_probe_samples_result": {
             "prompt": lambda ud: _step_custom_probe_samples_result(ud),
-            "next": "custom_probe_sample_retract_dist",
+            "next": lambda ans, ud: "custom_probe_samples_tolerance",
+        },
+        "custom_probe_samples_tolerance": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples_tolerance"),
+            "next": lambda ans, ud: "custom_probe_samples_tolerance_retries",
+        },
+        "custom_probe_samples_tolerance_retries": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples_tolerance_retries"),
+            "next": lambda ans, ud: "custom_probe_sample_retract_dist",
         },
         "custom_probe_sample_retract_dist": {
             "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_sample_retract_dist"),
-            "next": "custom_probe",
+            "next": lambda ans, ud: "custom_probe",
         },
         "custom_probe": {
             "prompt": lambda ud: _step_custom_probe(ud),
-            "next": "hotend_therm",
+            "next": lambda ans, ud: "custom_probe_review",
+        },
+        "custom_probe_review": {
+            "prompt": lambda ud: _step_custom_probe_review(ud),
+            "next": lambda ans, ud: "hotend_therm",
         },
         "custom_probe_offsets": {
             "prompt": lambda ud: _step_custom_probe_offsets(ud),

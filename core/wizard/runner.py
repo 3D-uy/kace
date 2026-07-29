@@ -103,7 +103,9 @@ class WizardRunner:
                 
             next_func = step_cfg.get("next")
             if next_func:
-                next_id = next_func(ans, self.user_data)
+                # Static transitions are useful for linear guided flows.  Older
+                # steps use callables when the answer changes the route.
+                next_id = next_func(ans, self.user_data) if callable(next_func) else next_func
             else:
                 next_id = self.get_default_next(current_id)
                 

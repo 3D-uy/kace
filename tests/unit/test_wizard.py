@@ -164,6 +164,24 @@ class TestWizard(unittest.TestCase):
 
 class TestWizardRunner(unittest.TestCase):
 
+    def test_runner_accepts_static_next_step(self):
+        """Linear wizard steps may declare their next step as a static id."""
+        from core.wizard import WizardRunner
+
+        steps_config = {
+            "first": {
+                "prompt": lambda user_data: user_data.update({"first": True}) or "ok",
+                "next": "second",
+            },
+            "second": {
+                "prompt": lambda user_data: user_data.update({"second": True}) or "ok",
+            },
+        }
+
+        result = WizardRunner(steps_config, ["first", "second"]).run("first")
+
+        self.assertEqual(result, {"first": True, "second": True})
+
     def test_runner_basic_flow_and_back_pruning(self):
         """Verify that WizardRunner handles forward steps and prunes state on back navigation."""
         from core.wizard import WizardRunner
@@ -744,6 +762,9 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         self.assertIn("probe", captured_config)
         self.assertIn("custom_probe", captured_config)
         self.assertIn("custom_probe_pin", captured_config)
+        self.assertIn("custom_probe_pullup", captured_config)
+        self.assertIn("custom_probe_inverted", captured_config)
+        self.assertIn("custom_probe_review", captured_config)
         self.assertIn("custom_probe_samples", captured_config)
         self.assertIn("bltouch_pins", captured_config)
         
@@ -801,6 +822,19 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         self.assertEqual(user_data["probe_x_offset"], "-12")
         self.assertEqual(user_data["probe_y_offset"], "4.5")
 
+    def test_guided_custom_probe_applies_selected_signal_modifiers_once(self):
+        from core.wizard import _step_custom_probe
+
+        user_data = {
+            "custom_probe_pin": "PA1",
+            "custom_probe_pullup": True,
+            "custom_probe_inverted": True,
+            "custom_probe_x_offset": "0",
+            "custom_probe_y_offset": "0",
+        }
+        self.assertEqual(_step_custom_probe(user_data), "done")
+        self.assertIn("pin: ^!PA1", user_data["custom_probe"].config_text)
+
     @patch("core.wizard.steps.sensors.simple_input", return_value="2")
     def test_guided_custom_probe_default_is_offered_and_accepted(self, mock_input):
         from core.wizard import _step_guided_custom_probe_value
@@ -811,7 +845,7 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         self.assertEqual(mock_input.call_args.kwargs["default"], 2)
 
     @patch("core.wizard.steps.sensors._get_unused_pins", return_value=[("PROBE", "PA1")])
-    @patch("core.wizard.steps.sensors.numbered_select", return_value="PA1")
+    @patch("core.wizard.steps.sensors.autocomplete_select", return_value="PA1")
     def test_guided_custom_probe_prefers_board_derived_pin_choices(self, mock_select, mock_unused):
         from core.wizard import _step_custom_probe_pin
 
@@ -821,6 +855,19 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         choices = mock_select.call_args.kwargs["choices"]
         self.assertEqual(choices[0]["value"], "PA1")
 
+    @patch("core.wizard.steps.sensors._get_parsed", return_value={"bltouch": {"sensor_pin": "^!PC0"}})
+    @patch("core.wizard.steps.sensors._get_unused_pins", return_value=[("PA1", "PA1")])
+    @patch("core.wizard.steps.sensors.autocomplete_select", return_value="PC0")
+    def test_guided_custom_probe_recommends_dedicated_probe_connector(self, mock_select, mock_unused, mock_parsed):
+        from core.wizard import _step_custom_probe_pin
+
+        user_data = {}
+        self.assertEqual(_step_custom_probe_pin(user_data), "done")
+        self.assertEqual(user_data["custom_probe_pin"], "PC0")
+        self.assertTrue(user_data["custom_probe_pullup"])
+        self.assertTrue(user_data["custom_probe_inverted"])
+        self.assertEqual(mock_select.call_args.kwargs["choices"][0]["value"], "PC0")
+
     @patch("core.wizard.steps.sensors._get_parsed", return_value={})
     def test_guided_custom_probe_manual_pin_validation_rejects_impossible_mcu_pin(self, mock_parsed):
         from core.wizard import make_pin_validator_with_collision_check
@@ -828,6 +875,18 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         validator = make_pin_validator_with_collision_check({"mcu_type": "stm32"})
         self.assertTrue(validator("PA1"))
         self.assertNotEqual(validator("not-a-pin"), True)
+
+    @patch("core.wizard.steps.sensors._get_parsed", return_value={
+        "board_pins": {"aliases": "PROBE=P1.30,GND=<GND>,VCC=<5V>,DUP=P1.30"},
+    })
+    def test_guided_probe_candidates_exclude_power_and_duplicates(self, mock_parsed):
+        from core.wizard import _get_unused_pins
+
+        candidates = _get_unused_pins({"mcu_type": "lpc1769"})
+        values = [pin for _, pin in candidates]
+        self.assertNotIn("<GND>", values)
+        self.assertNotIn("<5V>", values)
+        self.assertEqual(len({pin.lower() for pin in values}), len(values))
 
     @patch("builtins.input")
     def test_step_bltouch_pins_prompt_success(self, mock_input):

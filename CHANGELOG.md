@@ -8,6 +8,20 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.9.3.5] — Unreleased
 
+### Added
+- **Guided Custom Probe Setup**: Replaced the raw Klipper configuration paste workflow with a guided custom `[probe]` setup. It collects a validated probe pin, optional pull-up/inversion modifiers, offsets, sampling settings, speed, and retract distance, then presents the generated section for review.
+- **Typed Custom Probe Configuration**: Added `CustomProbeConfig` and the `ProbeConfiguration` strategy integration so generated custom probe sections remain typed, preserve resolved offsets for motion and bed-mesh calculations, and do not duplicate standard probe output.
+- **Board-Aware Probe Pin Selection**: The custom-probe pin step recommends a board-declared probe connector when available, filters unavailable power/control labels and duplicate pins, supports searchable GPIO selection, and retains validated manual entry as a fallback.
+- **SD Firmware Flash Follow-up**: Added firmware-artifact preparation and a Moonraker-backed post-flash workflow that expects the temporary MCU disconnect, waits for Klipper to return, and verifies the compiled firmware fingerprint with recovery guidance on timeout.
+
+### Changed
+- **Guided Probe Review and Defaults**: Centralized conservative defaults for custom probes (`speed=10`, `samples=2`, `samples_tolerance=0.5`, `samples_tolerance_retries=3`, `samples_result=median`, and `sample_retract_dist=5`) and added EN/ES/PT guidance for every question.
+- **Installation Documentation**: Kept the one-line installer as the quick-start path while documenting its trust tradeoff and a download, SHA-256 verification, then execution alternative in the README and installation guides.
+
+### Fixed
+- **Custom Probe Wizard Transition**: Fixed linear wizard transitions declared as static step identifiers; the runner now accepts both static transitions and answer-dependent callbacks, preventing `TypeError: 'str' object is not callable`.
+- **Probe Pin Menu Quality**: Prevented the custom probe selector from presenting `<GND>`, `<5V>`, `<RST>`, `<NC>`, or duplicate GPIO entries.
+
 ### Security Hardening (Second-Pass Code Audit)
 - **Menu Exit Signal Hardening (S2-01)**: Replaced `sys.exit(0)` on Ctrl-C/EOF across `simple_input()`, `yes_no()`, `autocomplete_select()`, and `password_input()` in `core/menu.py` with `raise WizardExit`, ensuring top-level cleanup and connection closure.
 - **Raw Board Config Cache Permissions (S2-02)**: Enforced `0o600` (owner-only) file permissions on raw board config caches in `fetch_raw_config()` in `core/scraper.py` using `os.open()`.

@@ -116,6 +116,21 @@ UI_STRINGS: dict = {
         "Español":   "Seleccione el pin de entrada de la sonda. KACE muestra los pines sin usar de esta placa:",
         "Português": "Selecione o pino de entrada da sonda. KACE lista os pinos não usados desta placa:",
     },
+    "wizard.custom_probe_dedicated_pin": {
+        "English":   "Recommended: board PROBE connector",
+        "Español":   "Recomendado: conector PROBE de la placa",
+        "Português": "Recomendado: conector PROBE da placa",
+    },
+    "wizard.custom_probe_pullup": {
+        "English":   "Enable the internal pull-up (^)? Recommended when the probe output is an open switch to ground.",
+        "Español":   "¿Activar la resistencia pull-up interna (^)? Se recomienda si la sonda es un interruptor a tierra.",
+        "Português": "Ativar o pull-up interno (^)? Recomendado quando a saída da sonda é um interruptor para terra.",
+    },
+    "wizard.custom_probe_inverted": {
+        "English":   "Invert the probe signal (!)? Enable only if Klipper reports triggered when the probe is open.",
+        "Español":   "¿Invertir la señal de la sonda (!)? Actívelo sólo si Klipper informa activada cuando está abierta.",
+        "Português": "Inverter o sinal da sonda (!)? Ative apenas se o Klipper informar acionada quando ela estiver aberta.",
+    },
     "wizard.custom_probe_pin_manual": {
         "English":   "Enter a pin manually (validated against the board)",
         "Español":   "Ingresar un pin manualmente (validado contra la placa)",
@@ -175,6 +190,11 @@ UI_STRINGS: dict = {
         "English":   "Custom probe setup is incomplete. Return to fill in the probe pin and X/Y offsets.",
         "Español":   "La configuración de la sonda personalizada está incompleta. Vuelva para indicar el pin y los desplazamientos X/Y.",
         "Português": "A configuração da sonda personalizada está incompleta. Volte para informar o pino e os deslocamentos X/Y.",
+    },
+    "wizard.custom_probe_review": {
+        "English":   "Generated custom [probe] configuration (review before continuing):",
+        "Español":   "Configuración [probe] personalizada generada (revísela antes de continuar):",
+        "Português": "Configuração [probe] personalizada gerada (revise antes de continuar):",
     },
     "wizard.custom_probe_intro": {
         "English":   "Enter the complete custom Klipper probe block.",

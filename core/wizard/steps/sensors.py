@@ -1,6 +1,6 @@
 import re
 import os
-from core.menu import simple_input, yes_no, numbered_select
+from core.menu import autocomplete_select, simple_input, yes_no, numbered_select
 from core.style import custom_style
 from core.translations import t, get_lang
 from core.exceptions import WizardExit
@@ -125,7 +125,15 @@ def _step_guided_custom_probe_value(user_data, key: str):
 
 def _step_custom_probe_pin(user_data):
     """Prefer board-derived unassigned pins; manual input is a validated fallback."""
+    dedicated = _get_dedicated_probe_pin(user_data)
     candidates = _get_unused_pins(user_data)
+    if dedicated:
+        dedicated_pin, pullup, inverted = dedicated
+        user_data.setdefault("custom_probe_pullup", pullup)
+        user_data.setdefault("custom_probe_inverted", inverted)
+        candidates = [(t("wizard.custom_probe_dedicated_pin"), dedicated_pin)] + [
+            candidate for candidate in candidates if candidate[1].upper() != dedicated_pin.upper()
+        ]
     if candidates:
         choices = [
             {"name": f"{friendly} ({pin})" if friendly != pin else pin, "value": pin}
@@ -135,13 +143,16 @@ def _step_custom_probe_pin(user_data):
             {"name": t("wizard.custom_probe_pin_manual"), "value": "__manual__"},
             _back_choice(), _quit_choice(),
         ])
-        answer = numbered_select(t("wizard.custom_probe_pin"), choices=choices, default=0)
+        answer = autocomplete_select(t("wizard.custom_probe_pin"), choices=choices, default=0)
         if answer == _QUIT or answer is None:
             raise WizardExit()
         if answer == _BACK:
             return _BACK
         if answer != "__manual__":
-            user_data["custom_probe_pin"] = answer
+            base_pin, pullup, inverted = _split_probe_pin_modifiers(answer)
+            user_data["custom_probe_pin"] = base_pin
+            user_data.setdefault("custom_probe_pullup", pullup)
+            user_data.setdefault("custom_probe_inverted", inverted)
             return "done"
 
     value = simple_input(
@@ -151,7 +162,40 @@ def _step_custom_probe_pin(user_data):
     )
     if value is None or str(value).strip().lower() in ("<", "back", "volver"):
         return _BACK
-    user_data["custom_probe_pin"] = str(value).strip()
+    base_pin, pullup, inverted = _split_probe_pin_modifiers(str(value).strip())
+    user_data["custom_probe_pin"] = base_pin
+    user_data.setdefault("custom_probe_pullup", pullup)
+    user_data.setdefault("custom_probe_inverted", inverted)
+    return "done"
+
+
+def _split_probe_pin_modifiers(pin: str) -> tuple[str, bool, bool]:
+    """Separate Klipper input modifiers so the wizard asks about each explicitly."""
+    text = str(pin).strip()
+    pullup = "^" in text[:3]
+    inverted = "!" in text[:3]
+    return text.lstrip("^!~"), pullup, inverted
+
+
+def _get_dedicated_probe_pin(user_data) -> tuple[str, bool, bool] | None:
+    """Return a board-defined probe connector before generic GPIO candidates."""
+    probe_section = _get_parsed(user_data).get("bltouch", {})
+    sensor_pin = probe_section.get("sensor_pin") if isinstance(probe_section, dict) else None
+    if not sensor_pin or "TODO" in str(sensor_pin).upper():
+        return None
+    base_pin, pullup, inverted = _split_probe_pin_modifiers(str(sensor_pin))
+    if not base_pin or base_pin.startswith("<"):
+        return None
+    return base_pin, pullup, inverted
+
+
+def _step_custom_probe_signal_option(user_data, option: str):
+    prompts = {
+        "pullup": "wizard.custom_probe_pullup",
+        "inverted": "wizard.custom_probe_inverted",
+    }
+    default = bool(user_data.get(f"custom_probe_{option}", False))
+    user_data[f"custom_probe_{option}"] = yes_no(t(prompts[option]), default=default)
     return "done"
 
 
@@ -182,8 +226,11 @@ def _step_custom_probe(user_data):
         return "__retry__"
     try:
         z_text = user_data.get("custom_probe_z_offset", "")
+        pin_prefix = ("^" if user_data.get("custom_probe_pullup") else "") + (
+            "!" if user_data.get("custom_probe_inverted") else ""
+        )
         settings = GuidedCustomProbeSettings(
-            pin=user_data["custom_probe_pin"],
+            pin=pin_prefix + user_data["custom_probe_pin"],
             x_offset=float(user_data["custom_probe_x_offset"]),
             y_offset=float(user_data["custom_probe_y_offset"]),
             z_offset=float(z_text) if str(z_text).strip() else None,
@@ -202,6 +249,15 @@ def _step_custom_probe(user_data):
 
     user_data["probe_x_offset"] = f"{settings.x_offset:g}"
     user_data["probe_y_offset"] = f"{settings.y_offset:g}"
+    return "done"
+
+
+def _step_custom_probe_review(user_data):
+    """Show the exact KACE-generated section before continuing the wizard."""
+    custom_probe = user_data.get("custom_probe")
+    if not isinstance(custom_probe, CustomProbeConfig):
+        return "__retry__"
+    print(f"\n{t('wizard.custom_probe_review')}\n\n{custom_probe.config_text}\n")
     return "done"
 
 
@@ -370,7 +426,23 @@ def _get_unused_pins(user_data) -> list:
         if pin.lower() not in used_pins and pin.lower() not in all_alias_pins:
             unused.append((pin, pin.upper()))
             
-    return unused
+    # Alias tables often include power, ground, reset, or no-connect entries.
+    # They are not GPIO inputs and must never be offered as probe candidates.
+    # Keep one friendly name per physical pin to avoid duplicated menu entries.
+    filtered = []
+    seen_pins = set()
+    for friendly, pin in unused:
+        normalized = _parse_and_normalize_pin(pin)
+        if not normalized or normalized.startswith("<"):
+            continue
+        if questionary_pin_validator(normalized) is not True:
+            continue
+        key = normalized.lower()
+        if key in seen_pins:
+            continue
+        seen_pins.add(key)
+        filtered.append((friendly, pin))
+    return filtered
 
 
 def make_pin_validator_with_collision_check(user_data):
