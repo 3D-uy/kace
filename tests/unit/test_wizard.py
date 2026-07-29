@@ -764,6 +764,7 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         self.assertIn("custom_probe_pin", captured_config)
         self.assertIn("custom_probe_pullup", captured_config)
         self.assertIn("custom_probe_inverted", captured_config)
+        self.assertIn("custom_probe_offset_preview", captured_config)
         self.assertIn("custom_probe_review", captured_config)
         self.assertIn("custom_probe_samples", captured_config)
         self.assertIn("bltouch_pins", captured_config)
@@ -786,6 +787,47 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         # 5. Probe BLTouch with mapped pins -> probe_offsets
         with patch("core.wizard._needs_bltouch_pins", return_value=False):
             self.assertEqual(probe_next("BLTouch", {}), "probe_offsets")
+
+        self.assertEqual(
+            captured_config["custom_probe_inverted"]["next"]("done", {}),
+            "custom_probe_offset_preview",
+        )
+
+    @patch("core.wizard.steps.sensors.run_probe_offset_step")
+    def test_predefined_probe_offsets_use_shared_visualizer(self, mock_preview):
+        from core.wizard import _step_probe_offsets
+
+        user_data = {"probe": "BLTouch", "board": "generic-test.cfg"}
+        mock_preview.return_value = {"probe_x_offset": "-38.0", "probe_y_offset": "5.0"}
+
+        self.assertEqual(_step_probe_offsets(user_data), "done")
+        mock_preview.assert_called_once_with(user_data=user_data, board_filename="generic-test.cfg")
+        self.assertEqual(user_data["probe_x_offset"], "-38.0")
+        self.assertEqual(user_data["probe_y_offset"], "5.0")
+
+    @patch("core.wizard.steps.sensors.run_probe_offset_step")
+    def test_guided_custom_probe_uses_shared_visualizer_with_translated_label(self, mock_preview):
+        from core.translations import get_lang, set_lang, t
+        from core.wizard import _step_guided_custom_probe_offsets
+
+        original_lang = get_lang()
+        try:
+            for language in ("English", "Español", "Português"):
+                set_lang(language)
+                user_data = {"probe": "Custom Probe", "board": "generic-test.cfg"}
+                mock_preview.return_value = {"probe_x_offset": "10.0", "probe_y_offset": "-4.0"}
+
+                self.assertEqual(_step_guided_custom_probe_offsets(user_data), "done")
+                preview_data = mock_preview.call_args.kwargs["user_data"]
+                self.assertIsNot(preview_data, user_data)
+                self.assertEqual(preview_data["probe"], t("wizard.probe_custom"))
+                self.assertEqual(mock_preview.call_args.kwargs["board_filename"], "generic-test.cfg")
+                self.assertEqual(user_data["custom_probe_x_offset"], "10.0")
+                self.assertEqual(user_data["custom_probe_y_offset"], "-4.0")
+                self.assertEqual(user_data["probe_x_offset"], "10.0")
+                self.assertEqual(user_data["probe_y_offset"], "-4.0")
+        finally:
+            set_lang(original_lang)
 
     @patch("core.wizard.steps.sensors.simple_input")
     def test_custom_probe_offsets_prompts_only_for_missing_values(self, mock_input):

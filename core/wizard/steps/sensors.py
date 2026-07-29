@@ -67,8 +67,6 @@ def _step_probe(user_data):
 
 
 GUIDED_CUSTOM_PROBE_QUESTIONS = (
-    ("custom_probe_x_offset", "wizard.custom_probe_x_offset", 0.0, "number"),
-    ("custom_probe_y_offset", "wizard.custom_probe_y_offset", 0.0, "number"),
     ("custom_probe_z_offset", "wizard.custom_probe_z_offset", None, "optional_number"),
     ("custom_probe_samples", "wizard.custom_probe_samples", GUIDED_PROBE_DEFAULTS["samples"], "positive_int"),
     ("custom_probe_samples_tolerance", "wizard.custom_probe_samples_tolerance", GUIDED_PROBE_DEFAULTS["samples_tolerance"], "nonnegative_number"),
@@ -120,6 +118,25 @@ def _step_guided_custom_probe_value(user_data, key: str):
     if value is None or str(value).strip().lower() in ("<", "back", "volver"):
         return _BACK
     user_data[key] = str(value).strip()
+    return "done"
+
+
+def _step_guided_custom_probe_offsets(user_data):
+    """Collect custom-probe offsets with the shared live ASCII preview."""
+    preview_data = dict(user_data)
+    preview_data["probe"] = t("wizard.probe_custom")
+    offset_result = run_probe_offset_step(
+        user_data=preview_data,
+        board_filename=user_data.get("board") or "",
+    )
+    if offset_result.get("probe_x_offset") == "__back__" or \
+       offset_result.get("probe_y_offset") == "__back__":
+        return _BACK
+
+    for offset in ("x", "y"):
+        value = offset_result.get(f"probe_{offset}_offset", "0")
+        user_data[f"custom_probe_{offset}_offset"] = value
+        user_data[f"probe_{offset}_offset"] = value
     return "done"
 
 
