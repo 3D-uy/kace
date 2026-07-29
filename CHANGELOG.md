@@ -9,16 +9,23 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.9.3.5] — Unreleased
 
 ### Added
+- **Interactive Terminal Simulation**: Expanded the Docker development testbed with selectable mocked Pi environments, Klipper/Moonraker service state, simulated MCU serial paths, and a Moonraker API mock for exercising the wizard without physical hardware.
+- **Semantic Terminal Color System**: Added a shared ANSI palette for questions, active input, success, warnings, errors, informational/progress messages, section headers, and hints; covered core menu styling with regression tests.
+- **Locale Continuity Regression Coverage**: Added catalog-completeness and runtime tests that ensure the selected EN/ES/PT locale persists through dashboard, wizard, MCU detection, menus, and probe-offset visualization.
 - **Guided Custom Probe Setup**: Replaced the raw Klipper configuration paste workflow with a guided custom `[probe]` setup. It collects a validated probe pin, optional pull-up/inversion modifiers, offsets, sampling settings, speed, and retract distance, then presents the generated section for review.
 - **Typed Custom Probe Configuration**: Added `CustomProbeConfig` and the `ProbeConfiguration` strategy integration so generated custom probe sections remain typed, preserve resolved offsets for motion and bed-mesh calculations, and do not duplicate standard probe output.
 - **Board-Aware Probe Pin Selection**: The custom-probe pin step recommends a board-declared probe connector when available, filters unavailable power/control labels and duplicate pins, supports searchable GPIO selection, and retains validated manual entry as a fallback.
 - **SD Firmware Flash Follow-up**: Added firmware-artifact preparation and a Moonraker-backed post-flash workflow that expects the temporary MCU disconnect, waits for Klipper to return, and verifies the compiled firmware fingerprint with recovery guidance on timeout.
 
 ### Changed
+- **Consistent Interactive Presentation**: Standardized questionnaire colors across the wizard, display selection, firmware summaries, and probe guidance. Step frames and headings now use cyan, while selection, success, warning, error, and hint colors retain their semantic roles.
+- **Probe Offset Visualizer Localization**: Localized the full preview diagram, orientation guidance, reachability warnings, and confirmation text for English, Spanish, and Portuguese; removed ambiguous vertical LEFT/RIGHT labels from the diagram.
 - **Guided Probe Review and Defaults**: Centralized conservative defaults for custom probes (`speed=10`, `samples=2`, `samples_tolerance=0.5`, `samples_tolerance_retries=3`, `samples_result=median`, and `sample_retract_dist=5`) and added EN/ES/PT guidance for every question.
 - **Installation Documentation**: Kept the one-line installer as the quick-start path while documenting its trust tradeoff and a download, SHA-256 verification, then execution alternative in the README and installation guides.
 
 ### Fixed
+- **Locale Fallback and Recovery Flows**: Removed silent fallback to English after language selection, kept the selected locale authoritative in wizard state, and translated the dashboard selector plus the no-MCU diagnostics, retry, and manual serial-path flow.
+- **Display Selection Noise**: Removed the redundant detected-board/MCU block from the display-selection screen.
 - **Custom Probe Wizard Transition**: Fixed linear wizard transitions declared as static step identifiers; the runner now accepts both static transitions and answer-dependent callbacks, preventing `TypeError: 'str' object is not callable`.
 - **Probe Pin Menu Quality**: Prevented the custom probe selector from presenting `<GND>`, `<5V>`, `<RST>`, `<NC>`, or duplicate GPIO entries.
 
