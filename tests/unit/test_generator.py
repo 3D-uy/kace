@@ -32,6 +32,7 @@ _skip_no_jinja2 = unittest.skipUnless(
 if _JINJA2_AVAILABLE:
     from core.generator import generate_config, has_todo_pins
     from core.exceptions import GenerationError
+    from core.custom_probe import GuidedCustomProbeSettings, parse_custom_probe_config
 else:
     generate_config = None
     has_todo_pins = None
@@ -308,6 +309,118 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
         )
         self.assertIn("x_offset: -38", output)
         self.assertIn("y_offset: 2", output)
+
+    def test_cr_touch_keeps_predefined_probe_rendering(self):
+        """CR-Touch remains on the existing structured BLTouch-compatible path."""
+        parsed = _parsed(bltouch={"sensor_pin": "^PB1", "control_pin": "PB0"})
+        output = _generate(
+            parsed,
+            _user(probe="CR-Touch", probe_x_offset="-10", probe_y_offset="4"),
+        )
+        self.assertIn("[cr-touch]", output)
+        self.assertIn("x_offset: -10", output)
+        self.assertIn("[bed_mesh]", output)
+
+    def test_custom_probe_inserts_block_without_standard_probe_section(self):
+        custom = parse_custom_probe_config("""# keep custom comment
+[probe]
+pin: ^PA1
+x_offset: -12
+y_offset: 6
+z_offset: -0.8
+samples: 4
+""")
+        output = _generate(_parsed(), _user(probe="Custom Probe", custom_probe=custom))
+
+        self.assertIn("# keep custom comment", output)
+        self.assertIn("samples: 4", output)
+        self.assertEqual(output.count("[probe]"), 1)
+        self.assertNotIn("[custom probe]", output)
+        self.assertEqual(output.count("x_offset: -12"), 1)
+        self.assertEqual(output.count("y_offset: 6"), 1)
+        self.assertIn("[safe_z_home]", output)
+        self.assertIn("[bed_mesh]", output)
+
+    def test_guided_custom_probe_renders_collected_klipper_values(self):
+        custom = GuidedCustomProbeSettings(
+            pin="^PA1", x_offset=-12, y_offset=6,
+            samples=2, samples_tolerance=0.5, samples_tolerance_retries=3,
+            speed=10.0, samples_result="median", sample_retract_dist=5.0,
+        ).to_config()
+        output = _generate(_parsed(), _user(probe_kind="custom", custom_probe=custom))
+
+        self.assertEqual(output.count("[probe]"), 1)
+        self.assertIn("pin: ^PA1", output)
+        self.assertIn("samples_tolerance: 0.5", output)
+        self.assertIn("samples_tolerance_retries: 3", output)
+        self.assertIn("sample_retract_dist: 5", output)
+
+    def test_custom_probe_block_is_verbatim_and_has_one_generated_boundary_newline(self):
+        block = """# Do not translate this comment
+[probe]
+pin: ^PA1
+x_offset: -12
+y_offset: 6
+unknown_option: keep  # preserve spacing
+
+[gcode_macro ATTACH_PROBE]
+gcode:
+    G1 X230 Y20 F6000
+"""
+        custom = parse_custom_probe_config(block)
+        output = _generate(
+            _parsed(),
+            _user(
+                probe_kind="custom",
+                probe="not used to resolve the strategy",
+                custom_probe=custom,
+            ),
+        )
+
+        self.assertIn(block + "\n[safe_z_home]", output)
+        self.assertNotIn("__KACE_VERBATIM_CUSTOM_PROBE", output)
+
+    def test_custom_probe_rejects_legacy_offset_drift(self):
+        custom = parse_custom_probe_config("[probe]\npin: ^PA1\nx_offset: -12\ny_offset: 6\n")
+        with self.assertRaises(GenerationError):
+            _generate(
+                _parsed(),
+                _user(
+                    probe_kind="custom",
+                    probe="Custom Probe",
+                    custom_probe=custom,
+                    probe_x_offset="0",
+                    probe_y_offset="6",
+                ),
+            )
+
+    def test_custom_dockable_probe_preserves_macros_and_geometry(self):
+        custom = parse_custom_probe_config("""[dockable_probe]
+pin: ^PA1
+x_offset: 20
+y_offset: -5
+
+[gcode_macro ATTACH_PROBE]
+gcode:
+  G1 X230 Y20 F6000
+
+[gcode_macro DETACH_PROBE]
+gcode:
+  G1 X220 Y20 F6000
+""")
+        output = _generate(_parsed(), _user(probe="Custom Probe", custom_probe=custom))
+
+        self.assertIn("[dockable_probe]", output)
+        self.assertIn("[gcode_macro ATTACH_PROBE]", output)
+        self.assertIn("[gcode_macro DETACH_PROBE]", output)
+        self.assertEqual(output.count("x_offset: 20"), 1)
+        self.assertIn("probe:z_virtual_endstop", output)
+        self.assertIn("mesh_min:", output)
+
+    def test_custom_probe_missing_offsets_is_rejected_before_generation(self):
+        custom = parse_custom_probe_config("[probe]\npin: ^PA1\nx_offset: 0\n")
+        with self.assertRaises(GenerationError):
+            _generate(_parsed(), _user(probe="Custom Probe", custom_probe=custom))
 
 
 # ── generate_config() — web interface branch ──────────────────────────────────

@@ -4,6 +4,7 @@ from core.menu import simple_input, yes_no, numbered_select, autocomplete_select
 from core.scraper import fetch_raw_config, parse_config, extract_profile_defaults
 from core.style import custom_style
 from core.translations import t, get_lang
+from core.terminal import DIM, ERROR, INFO, RESET, SECTION, WARNING
 from core.exceptions import WizardExit
 from core.validators import questionary_numeric_validator, questionary_pos_numeric_validator, questionary_thermistor_validator
 from data.profiles import THERMISTOR_PRESETS
@@ -43,11 +44,11 @@ def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict
         is_custom = defaults.get("printer_profile") == "Custom / Scratch Build"
 
     header_key = "profile.custom_header" if is_custom else "profile.detected_header"
-    print(f"\n\033[92m{t(header_key)}\033[0m")
+    print(f"\n{SECTION}{t(header_key)}{RESET}")
 
     def print_val(label: str, val: str, comment_key: str) -> None:
         comment = t(comment_key)
-        dim_comment = f"\033[2m# {comment}\033[0m"
+        dim_comment = f"{DIM}# {comment}{RESET}"
         print(f"  - {label:<24} {str(val):<8} {dim_comment}")
 
     # ── Motion System ─────────────────────────────────────────────────────────
@@ -60,8 +61,8 @@ def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict
     has_motion = bool(kinematics or has_any_axis)
 
     if has_motion:
-        print("  \033[96mMotion System\033[0m")
-        print("  \033[96m─────────────\033[0m")
+        print(f"  {SECTION}Motion System{RESET}")
+        print(f"  {SECTION}─────────────{RESET}")
         print("")
 
         if kinematics:
@@ -87,8 +88,8 @@ def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict
     y_size = (user_data.get('y_size') if user_data else None) or defaults.get('y_size') or parsed.get('stepper_y', {}).get('position_max')
     z_size = (user_data.get('z_size') if user_data else None) or defaults.get('z_size') or parsed.get('stepper_z', {}).get('position_max')
     if x_size and y_size and z_size:
-        print("  \033[96mBuild Volume\033[0m")
-        print("  \033[96m────────────\033[0m")
+        print(f"  {SECTION}Build Volume{RESET}")
+        print(f"  {SECTION}────────────{RESET}")
         print("")
         print_val("Build volume:", f"{x_size} x {y_size} x {z_size}", "profile.comment_build_volume")
         print("")
@@ -97,8 +98,8 @@ def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict
     hotend_therm = parsed.get('extruder', {}).get('sensor_type') or (defaults.get('hotend_thermistor') if is_custom else None)
     bed_therm = parsed.get('heater_bed', {}).get('sensor_type') or (defaults.get('bed_thermistor') if is_custom else None)
     if hotend_therm or bed_therm:
-        print("  \033[96mThermistors\033[0m")
-        print("  \033[96m───────────\033[0m")
+        print(f"  {SECTION}Thermistors{RESET}")
+        print(f"  {SECTION}───────────{RESET}")
         print("")
         if hotend_therm:
             print_val("Hotend thermistor:", hotend_therm, "profile.comment_hotend_therm")
@@ -287,7 +288,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 staged_defaults["printable_y_min"] = f"{p_y_min:g}"
                 staged_defaults["printable_y_max"] = f"{p_y_max:g}"
             except (ValueError, TypeError) as e:
-                print(f"\n\033[91m[!] Validation Error: Invalid numeric value: {e}\033[0m")
+                print(f"\n{ERROR}[!] Validation Error: Invalid numeric value: {e}{RESET}")
                 import time
                 time.sleep(2.0)
                 continue
@@ -306,7 +307,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 validation_error = f"Printable Y boundary [{p_y_min:g}, {p_y_max:g}] is outside physical Y travel limits [{y_min_stepper:g}, {y_max_stepper:g}]."
 
             if validation_error:
-                print(f"\n\033[91m[!] Configuration Validation Failed:\033[0m")
+                print(f"\n{ERROR}[!] Configuration Validation Failed:{RESET}")
                 print(f"    - {validation_error}")
                 import time
                 time.sleep(3.0)
@@ -348,7 +349,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                     adjusted_msg.append(f"{axis.upper()} position_max adjusted to {p_max:g} to accommodate endstop {endstop:g}")
 
             if adjusted_msg and _INTERACTIVE_MODE and os.environ.get("KACE_QUIET") != "1":
-                print("\n\033[93m[!] Automatically adjusted limits to ensure physical consistency:\033[0m")
+                print(f"\n{WARNING}[!] Automatically adjusted limits to ensure physical consistency:{RESET}")
                 for msg in adjusted_msg:
                     print(f"    - {msg}")
                 # Give the user a moment to see the message
@@ -541,10 +542,10 @@ def _step_printer_profile(user_data, printer_configs):
         if ans is None:
             return "__retry__"
 
-    print(f"\n\033[96m>>> Loading defaults for {ans}...\033[0m")
+    print(f"\n{INFO}>>> Loading defaults for {ans}...{RESET}")
     raw = fetch_raw_config(ans)
     if not raw:
-        print(f"\n\033[91m[!] Failed to load printer profile: '{ans}'\033[0m")
+        print(f"\n{ERROR}[!] Failed to load printer profile: '{ans}'{RESET}")
         fallback = yes_no(
             "Continue as Custom / Scratch Build?",
             default=True

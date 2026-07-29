@@ -15,6 +15,7 @@
 # MCU
 # --------------------------------------------------
 [mcu]
+restart_method: command                         # Required for LPC176x boards (SKR 1.4/1.4 Turbo) to prevent USB hang on FIRMWARE_RESTART
 serial: /dev/serial/by-id/usb-Klipper_lpc1768_mock-if00 # Serial connection to the printer controller board. Auto-detected by KACE. Verify in /dev/serial/by-id/ if connection fails.
 
 # --------------------------------------------------

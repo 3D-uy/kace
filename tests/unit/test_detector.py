@@ -6,8 +6,15 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from firmware.detector import discover_mcu_hardware
+from core.translations import get_lang, set_lang
 
 class TestDetector(unittest.TestCase):
+
+    def setUp(self):
+        self.original_language = get_lang()
+
+    def tearDown(self):
+        set_lang(self.original_language)
 
     @patch('glob.glob')
     @patch('builtins.print')
@@ -80,6 +87,25 @@ class TestDetector(unittest.TestCase):
         self.assertTrue(any("No MCU serial devices detected" in msg for msg in printed))
         self.assertTrue(any("USB Connection" in msg for msg in printed))
         self.assertTrue(any("Board Power" in msg for msg in printed))
+
+    @patch('glob.glob', return_value=[])
+    @patch('firmware.detector.numbered_select', return_value='quit')
+    @patch('builtins.print')
+    def test_no_mcu_flow_uses_selected_spanish_locale(self, mock_print, _select, _glob):
+        """The post-dashboard MCU recovery path must not revert to English."""
+        set_lang("Español")
+        with self.assertRaises(SystemExit):
+            discover_mcu_hardware(interactive=True)
+
+        printed = "\n".join(call.args[0] for call in mock_print.call_args_list)
+        self.assertIn("No se detectaron dispositivos seriales", printed)
+        self.assertIn("Conexión USB", printed)
+        self.assertNotIn("No MCU serial devices detected", printed)
+
+        prompt = _select.call_args.args[0]
+        choices = _select.call_args.kwargs["choices"]
+        self.assertEqual(prompt, "¿Cómo desea continuar?")
+        self.assertIn("Reintentar detección de hardware", choices[0]["name"])
 
 if __name__ == '__main__':
     unittest.main()

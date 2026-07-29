@@ -2,6 +2,7 @@ from core.menu import simple_input, yes_no, numbered_select, autocomplete_select
 from core.scraper import fetch_config_list, fetch_raw_config, parse_config, get_reusable_driver_sockets, detect_fan_pins, detect_driver_info
 from core.style import custom_style
 from core.translations import t
+from core.terminal import ERROR, INFO, RESET, WARNING
 from core.exceptions import WizardExit
 from core.validators import questionary_pin_validator
 from core.wizard.runner import _BACK, _QUIT
@@ -295,7 +296,7 @@ def _step_z_socket_assignment(user_data):
         driver_choices.append({"name": t("choice.back") or "Back", "value": "back"})
         driver_choices.append({"name": t("choice.quit_setup"),   "value": "quit"})
 
-        print(f"\n\033[96m{t('wizard.mapping_pins', motor=motor_name)}\033[0m")
+        print(f"\n{INFO}{t('wizard.mapping_pins', motor=motor_name)}{RESET}")
         selected_driver = numbered_select(
             t("wizard.select_driver_z", motor=motor_name.upper()),
             choices=driver_choices
@@ -327,7 +328,7 @@ def _step_z_socket_assignment(user_data):
             dir_pin  = simple_input(t("wizard.custom_dir_pin"),  validate=questionary_pin_validator)
             en_pin   = simple_input(t("wizard.custom_en_pin"),   validate=questionary_pin_validator)
             if not step_pin or not dir_pin or not en_pin:
-                print(f"\n\033[91m{t('kace.abort_valid_pins')}\033[0m")
+                print(f"\n{ERROR}{t('kace.abort_valid_pins')}{RESET}")
                 raise WizardExit()
             parsed_data[motor_name] = {"step_pin": step_pin, "dir_pin": dir_pin, "enable_pin": en_pin}
             assigned_drivers[motor_name] = "custom"
@@ -484,7 +485,7 @@ def _apply_z_tmc_mappings(user_data: dict) -> None:
                         validate=questionary_pin_validator
                     )
                     if not uart_pin:
-                        print(f"\n\033[91m{t('kace.abort_no_uart', mode=driver_mode)}\033[0m")
+                        print(f"\n{ERROR}{t('kace.abort_no_uart', mode=driver_mode)}{RESET}")
                         raise WizardExit()
                     parsed_data[dest_tmc] = {pin_key: uart_pin, "run_current": "0.650"}
         else:
@@ -500,6 +501,6 @@ def _apply_z_tmc_mappings(user_data: dict) -> None:
                     break
 
             if not found_tmc and driver_mode in ["UART", "SPI"]:
-                print(f"\n\033[91m{t('kace.abort_no_tmc_map', mode=driver_mode, driver=selected_driver)}\033[0m")
-                print(f"\033[93m{t('kace.abort_generation')}\033[0m")
+                print(f"\n{ERROR}{t('kace.abort_no_tmc_map', mode=driver_mode, driver=selected_driver)}{RESET}")
+                print(f"{WARNING}{t('kace.abort_generation')}{RESET}")
                 raise WizardExit()

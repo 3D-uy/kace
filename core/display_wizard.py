@@ -28,6 +28,7 @@ from core.menu import simple_input, yes_no, numbered_select, autocomplete_select
 
 from core.style import custom_style
 from core.translations import t
+from core.terminal import BOLD, DIM, ERROR, INFO, QUESTION, RESET, SECTION, SUCCESS, WARNING
 from .exceptions import WizardExit
 from core.display_checker import (
     get_recommended_displays,
@@ -62,16 +63,16 @@ def _friendly(section_key: str) -> str:
 
 
 # ── ANSI color helpers ──────────────────────────────────────────────────────
-_G   = "\033[92m"          # green — fully compatible
-_Y   = "\033[93m"          # amber — compatible_with_adapter
-_O   = "\033[38;5;208m"    # orange — experimental
-_R   = "\033[91m"          # red — unsafe / danger
-_C   = "\033[96m"          # cyan — info
-_B   = "\033[1m"           # bold
-_RS  = "\033[0m"           # reset
-_W   = "\033[97m"          # bright white
-_M   = "\033[96m"          # cyan
-_DIM = "\033[2m"           # dim
+_G   = SUCCESS              # fully compatible
+_Y   = WARNING              # attention / adapter required
+_O   = WARNING              # experimental is an attention state
+_R   = ERROR                # unsafe / danger
+_C   = INFO                 # neutral information
+_B   = BOLD
+_RS  = RESET
+_W   = QUESTION
+_M   = SECTION
+_DIM = DIM
 
 # Badge glyphs and colors per compatibility class
 _CLASS_BADGE = {
@@ -98,18 +99,6 @@ _VALIDATION_BADGE = {
 
 
 
-
-
-def _print_board_context(board_filename: str, detected_mcu: str) -> None:
-    """Print a compact board hardware summary before recommendations."""
-    if not board_filename and not detected_mcu:
-        return
-    print(f"\n  {_M}{_B}Detected Board Hardware:{_RS}")
-    if board_filename:
-        print(f"  {_C}  Board  :{_RS} {board_filename}")
-    if detected_mcu:
-        print(f"  {_C}  MCU    :{_RS} {detected_mcu.upper()}")
-    print("")
 
 
 def _print_risk_panel(analysis: dict, display_key: str) -> None:
@@ -380,8 +369,6 @@ def run_display_setup_step(
 
     # ── Step A: Top-level display intent ─────────────────────────────────────
     while True:
-        _print_board_context(board_filename, detected_mcu)
-
         # Build category choices from the catalog (skip unsafe_reference)
         category_choices = [
             {

@@ -279,7 +279,7 @@ class Deployer:
             interval = min(interval * 1.5, self.POLL_BACKOFF_MAX_S)
         return False  # timed out without observing disconnect
 
-    def _wait_for_reconnect(self) -> tuple:
+    def _wait_for_reconnect(self, allow_transient_config_error: bool = False) -> tuple:
         """Poll until Klippy is 'ready' AND every manifest MCU is visible.
 
         Returns (outcome, versions_dict). versions_dict is the last-fetched
@@ -291,15 +291,20 @@ class Deployer:
         wrappers — they are treated as 'not yet ready' and polling continues.
 
         KeyboardInterrupt is caught and returned as ABORTED so the caller can
-        surface a clean cancellation message rather than a stack trace.
+        surface a clean cancellation message rather than a stack trace.  A
+        physical SD-card flash may transiently report ``shutdown`` while the
+        MCU is unpowered; callers can opt to keep polling through that state.
         """
         deadline = time.monotonic() + self.RECONNECT_TIMEOUT_S
         interval = self.POLL_INTERVAL_S
+        last_state = ""
         try:
             while time.monotonic() < deadline:
                 s = self._safe_klippy_state()
+                last_state = s
                 if s in ("shutdown", "error"):
-                    return self._ReconnectOutcome.CONFIG_ERROR, {}
+                    if not allow_transient_config_error:
+                        return self._ReconnectOutcome.CONFIG_ERROR, {}
                 if s == "ready":
                     live = self._safe_mcu_versions()
                     if self._manifest_names.issubset(live.keys()):
@@ -310,6 +315,8 @@ class Deployer:
                 interval = min(interval * 1.5, self.POLL_BACKOFF_MAX_S)
         except KeyboardInterrupt:
             return self._ReconnectOutcome.ABORTED, {}
+        if allow_transient_config_error and last_state in ("shutdown", "error"):
+            return self._ReconnectOutcome.CONFIG_ERROR, {}
         return self._ReconnectOutcome.TIMEOUT, {}
 
     def _check_versions(self, actual: dict) -> tuple:

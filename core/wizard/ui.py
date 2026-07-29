@@ -1,6 +1,7 @@
 import os
 from core.translations import t, get_mode
 from core.wizard.runner import PHASE_MAP, PHASE_KEYS, PHASE_ORDER, _BACK, _QUIT
+from core.terminal import HINT, INPUT, QUESTION, RESET, SECTION
 
 
 def _get_active_phase_steps(phase: str, user_data: dict) -> list:
@@ -99,12 +100,12 @@ def _print_step_header(step_id: str, user_data: dict) -> None:
     hint_text = t(hint_key)
 
     # Styling colors
-    C_BORDER = "\033[36m"   # Cyan border
-    C_PHASE = "\033[1;96m"  # Bold Cyan phase name
-    C_STEP = "\033[1;92m"   # Bold Green step counter
-    C_HEADER = "\033[1;97m" # Bold White step header
-    C_HINT = "\033[37m"     # Light gray hint
-    C_RESET = "\033[0m"
+    C_BORDER = SECTION
+    C_PHASE = SECTION
+    C_STEP = INPUT
+    C_HEADER = QUESTION
+    C_HINT = HINT
+    C_RESET = RESET
 
     lbl_phase = t("wizard.phase_label") or "Phase"
     lbl_step = t("wizard.step_label") or "Step"
@@ -187,4 +188,3 @@ def get_current_board_parsed(user_data) -> dict:
     if not raw:
         return {}
     return parse_config(raw, user_data.get("board") or "", keep_comments=True)
-

@@ -48,26 +48,32 @@ An **intelligent configuration and firmware engine** that:
 
 For production deployments, the installer targets the `main` branch and dependencies are hash-verified.
 
-### Secure Verification (Recommended)
-Verify the installer script before running it:
+### Quick start (recommended for convenience)
 
 ```bash
-# 1. Download the installer script from main branch
-curl -sSL -o install.sh https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+```
 
-# 2. Inspect/verify the script (e.g. check code or hash)
-sha256sum install.sh
+> **Security tradeoff:** this streams code from the network directly to Bash. You cannot inspect or verify the exact downloaded file before it runs. Use it only when you trust the KACE GitHub source and your network path.
 
-# 3. Run the installer
+### Verified installation (recommended when integrity verification matters)
+
+Download the file first, compare its SHA-256 to a value obtained from a **separate trusted channel** (for example, the matching KACE release notes), then execute it:
+
+```bash
+# 1. Choose a release and copy its published installer SHA-256 from a trusted channel.
+INSTALL_REF='vX.Y.Z'
+EXPECTED_SHA256='paste-the-trusted-sha256-here'
+
+# 2. Download the installer, then verify it before execution.
+curl -fsSLo install.sh "https://raw.githubusercontent.com/3D-uy/KACE/${INSTALL_REF}/install.sh"
+printf '%s  %s\n' "$EXPECTED_SHA256" install.sh | sha256sum -c -
+
+# 3. Run only after sha256sum reports "install.sh: OK".
 bash install.sh
 ```
 
-### Quick Install
-Alternatively, run the installer directly:
-
-```bash
-bash <(curl -s https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
-```
+If the check fails, stop and do not run the file. Do not fetch the expected checksum from the same mutable branch as the installer. This check verifies the installer script; the installer itself currently installs KACE from `main`.
 
 > Installs all dependencies with pip hash validation, clones the repository (shallow + sparse), and sets up the global `kace` command.
 

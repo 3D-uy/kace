@@ -44,13 +44,29 @@ Um **motor inteligente de configuração e firmware** que:
 
 ---
 
-## ⚡ Instalação em uma linha
+## ⚡ Instalação em uma linha (recomendada por conveniência)
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
 ```
 
+> **Consideração de segurança:** este comando transmite código da rede diretamente para o Bash. Não é possível inspecionar ou verificar o arquivo exato antes da execução. Use-o somente se você confia na fonte do KACE no GitHub e na sua conexão.
+
 > Instala todas as dependências, clona o repositório (shallow + sparse) e configura o comando global `kace` automaticamente.
+
+### Instalação verificada
+
+```bash
+# Escolha uma release e copie seu SHA-256 publicado de um canal confiável.
+INSTALL_REF='vX.Y.Z'
+EXPECTED_SHA256='cole-aqui-o-sha256-confiável'
+
+curl -fsSLo install.sh "https://raw.githubusercontent.com/3D-uy/KACE/${INSTALL_REF}/install.sh"
+printf '%s  %s\n' "$EXPECTED_SHA256" install.sh | sha256sum -c -
+bash install.sh  # Execute somente se sha256sum informar "install.sh: OK"
+```
+
+Se a verificação falhar, não execute o arquivo. Não baixe a soma esperada da mesma branch mutável que o instalador. Esta verificação cobre o script instalador; atualmente ele instala o KACE a partir de `main`.
 
 ---
 

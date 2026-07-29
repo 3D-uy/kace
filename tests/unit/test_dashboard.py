@@ -1,8 +1,16 @@
+import io
 import unittest
 from unittest.mock import patch, MagicMock
 from core.dashboard import detect_system_state, get_suggestions, run_dashboard
+from core.translations import get_lang, set_lang
 
 class TestDashboard(unittest.TestCase):
+
+    def setUp(self):
+        self.original_language = get_lang()
+
+    def tearDown(self):
+        set_lang(self.original_language)
 
     @patch("firmware.detector.discover_mcu_hardware")
     @patch("core.dashboard._service_active")
@@ -107,6 +115,24 @@ class TestDashboard(unittest.TestCase):
         self.assertEqual(result, "generate")
         self.assertEqual(mock_show_manage.call_count, 0)
         self.assertEqual(mock_input.call_count, 3)
+
+    @patch("core.dashboard._show_manage_view")
+    @patch("core.dashboard.print_kace_banner")
+    @patch("core.dashboard._render_status_panel")
+    @patch("core.dashboard._render_suggestions")
+    @patch("builtins.input", side_effect=["2", "1", "1"])
+    def test_dashboard_uses_selected_locale_for_select_prompt(
+        self, mock_input, _suggestions, _status, _banner, _manage
+    ):
+        state = {"klipper": True, "moonraker": True, "mainsail": True,
+                 "fluidd": False, "crowsnest": False, "printer_cfg": True,
+                 "mcu": None, "mcu_path": None}
+        with patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(run_dashboard(state), "generate")
+
+        prompts = [call.args[0] for call in mock_input.call_args_list]
+        self.assertIn("Seleccione [1-2]:", prompts[1])
+        self.assertIn("Seleccione [1-2]:", prompts[2])
 
 if __name__ == "__main__":
     unittest.main()

@@ -265,7 +265,7 @@ def _select_mode() -> None:
     print(f"    1) {t('wizard.mode.beginner')}")
     print(f"    2) {t('wizard.mode.advanced')}")
     try:
-        choice = input(f"  {_Y}Select [1-2]:{_R} ").strip()
+        choice = input(f"  {_Y}{t('menu.select_range', count=2)}{_R} ").strip()
     except (KeyboardInterrupt, EOFError):
         sys.exit(0)
 
@@ -308,7 +308,7 @@ def run_dashboard(state: dict) -> str:
         print(f"    1) {t('dashboard.action_generate')}")
         print(f"    2) {t('dashboard.action_quit')}")
         try:
-            action_choice = input(f"  {_Y}Select [1-2]:{_R} ").strip()
+            action_choice = input(f"  {_Y}{t('menu.select_range', count=2)}{_R} ").strip()
         except (KeyboardInterrupt, EOFError):
             sys.exit(0)
 

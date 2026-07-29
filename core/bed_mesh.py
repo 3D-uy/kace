@@ -9,7 +9,12 @@
 
 from core.motion_model import PrinterMotionSpace
 
-def generate_bed_mesh_config(motion_space: PrinterMotionSpace, user_data: dict, parsed_data: dict) -> dict:
+def generate_bed_mesh_config(
+    motion_space: PrinterMotionSpace,
+    user_data: dict,
+    parsed_data: dict,
+    probe_configuration=None,
+) -> dict:
     """Auto-generates intelligent [bed_mesh] settings from real printer geometry.
 
     Args:
@@ -21,7 +26,13 @@ def generate_bed_mesh_config(motion_space: PrinterMotionSpace, user_data: dict, 
         A dictionary of derived bed_mesh parameters, or an empty dict if no probe is configured.
     """
     probe_type = user_data.get("probe", "None")
-    if probe_type == "None":
+    probe_kind = getattr(probe_configuration, "kind", None)
+    generates_bed_mesh = (
+        probe_configuration.generates_bed_mesh
+        if probe_configuration is not None
+        else probe_type != "None"
+    )
+    if not generates_bed_mesh:
         return {}
 
     # 1. Derive mesh_min / mesh_max using probeable_bed_area().
@@ -113,9 +124,9 @@ def generate_bed_mesh_config(motion_space: PrinterMotionSpace, user_data: dict, 
         except ValueError:
             horizontal_move_z = 5
     else:
-        if probe_type in ("BLTouch", "CR-Touch"):
+        if probe_kind in ("bltouch", "cr_touch") or probe_type in ("BLTouch", "CR-Touch"):
             horizontal_move_z = 5
-        elif probe_type == "Inductive":
+        elif probe_kind == "inductive" or probe_type == "Inductive":
             horizontal_move_z = 3
         else:
             horizontal_move_z = 5

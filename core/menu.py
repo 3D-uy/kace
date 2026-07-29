@@ -9,6 +9,8 @@ import sys
 import os
 import getpass
 from core.exceptions import WizardExit
+from core.terminal import ERROR, INPUT, QUESTION, RESET
+from core.translations import t
 
 class Choice:
     """Class representing a choice for compatibility with questionary.Choice."""
@@ -174,7 +176,7 @@ def numbered_select(prompt, choices, default=0):
     if _is_auto():
         return selectable_choices[default][1]
         
-    print(f"\n  \033[96m{prompt}\033[0m")
+    print(f"\n  {QUESTION}{prompt}{RESET}")
     
     selectable_idx = 1
     selectable_map = {}
@@ -183,7 +185,7 @@ def numbered_select(prompt, choices, default=0):
         if is_selectable:
             label, value = item
             if (selectable_idx - 1) == default:
-                print(f"    \033[93m{selectable_idx}) {label}\033[0m")
+                print(f"    {INPUT}{selectable_idx}) {label}{RESET}")
             else:
                 print(f"    {selectable_idx}) {label}")
             selectable_map[str(selectable_idx)] = value
@@ -192,7 +194,7 @@ def numbered_select(prompt, choices, default=0):
             print(f"    {item}")
             
     default_label, default_val = selectable_choices[default]
-    input_prompt = f"  \033[93mSelect [1-{len(selectable_choices)}]:\033[0m "
+    input_prompt = f"  {QUESTION}{t('menu.select_range', count=len(selectable_choices))}{RESET} "
     
     while True:
         try:
@@ -214,7 +216,7 @@ def numbered_select(prompt, choices, default=0):
             if val.lower() == str(label).lower() or val.lower() == str(val_choice).lower():
                 return val_choice
                 
-        print(f"  Invalid choice. Please select a number between 1 and {len(selectable_choices)}.")
+        print(f"  {ERROR}Invalid choice. Please select a number between 1 and {len(selectable_choices)}.{RESET}")
 
 def simple_input(prompt, default=None, validate=None):
     """
@@ -251,10 +253,10 @@ def simple_input(prompt, default=None, validate=None):
         if validate is not None:
             res = validate(val)
             if isinstance(res, str):
-                print(f"  [!] {res}")
+                print(f"  {ERROR}[!] {res}{RESET}")
                 continue
             elif not res:
-                print("  [!] Invalid input. Please try again.")
+                print(f"  {ERROR}[!] Invalid input. Please try again.{RESET}")
                 continue
                 
         return val
@@ -290,7 +292,7 @@ def yes_no(prompt, default=False):
         if val in ('n', 'no'):
             return False
             
-        print("  Please enter 'y' or 'n'.")
+        print(f"  {ERROR}Please enter 'y' or 'n'.{RESET}")
 
 def autocomplete_select(prompt, choices, default=0):
     """

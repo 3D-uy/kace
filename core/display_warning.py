@@ -2,6 +2,7 @@
 from core.menu import simple_input, yes_no
 from core.style import custom_style
 from core.translations import t
+from core.terminal import BOLD, ERROR, INFO, QUESTION, RESET, SUCCESS, WARNING
 
 def print_display_warning(findings: list) -> bool:
     """Print a formatted ANSI display compatibility warning block.
@@ -9,15 +10,15 @@ def print_display_warning(findings: list) -> bool:
     For findings with status 'partial' or 'unsupported', prompts the user
     to confirm before continuing. Returns True to continue, False to abort.
     """
-    Y  = "\033[93m"   # amber / warning
-    R  = "\033[91m"   # red / error
-    C  = "\033[96m"   # cyan / info
-    G  = "\033[92m"   # green / ok
-    B  = "\033[1m"    # bold
-    RS = "\033[0m"    # reset
-    W  = "\033[97m"   # bright white
-    M  = "\033[96m"   # cyan
-    O  = "\033[38;5;208m" # orange for experimental
+    Y  = WARNING
+    R  = ERROR
+    C  = INFO
+    G  = SUCCESS
+    B  = BOLD
+    RS = RESET
+    W  = QUESTION
+    M  = INFO
+    O  = WARNING
 
     _CLASS_COLORS = {
         "fully_compatible":        G,

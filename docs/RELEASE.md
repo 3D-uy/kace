@@ -85,6 +85,13 @@ On GitHub → Releases → Draft a new release:
 - Tag: `v1.0.0`
 - Title: `KACE v1.0.0`
 - Body: paste the CHANGELOG section for this version
+- Generate the installer checksum and attach `install.sh.sha256` to the release:
+
+  ```bash
+  sha256sum install.sh > install.sh.sha256
+  ```
+
+- Include the checksum value in the release body as well. Users must be able to obtain it separately from the tagged `install.sh` download used by the verified-install instructions.
 
 ---
 

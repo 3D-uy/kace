@@ -61,8 +61,7 @@ cs_pin: PB5
             
         output = f.getvalue()
         
-        # Verify cyan headers exist
-        # Verify cyan headers exist
+        # Section headings use the shared semantic section color.
         self.assertIn("\033[96mMotion System\033[0m", output)
         self.assertIn("\033[96mBuild Volume\033[0m", output)
         self.assertIn("\033[96mThermistors\033[0m", output)

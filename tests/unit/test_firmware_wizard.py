@@ -9,6 +9,8 @@ import sys
 
 from core.firmware_wizard import run_firmware_wizard
 from core.exceptions import DerivationAmbiguityError
+from core.moonraker_deployer import DeployResult, DeployState
+from core.translations import t
 
 class TestFirmwareWizard(unittest.TestCase):
 
@@ -122,6 +124,38 @@ class TestFirmwareWizard(unittest.TestCase):
         mock_build.assert_called_once()
         config_dict = mock_build.call_args[1]["config_dict"]
         self.assertEqual(config_dict.get("CONFIG_FLASH_START"), "0x2000")
+
+    @patch('core.firmware_flash.verify_sd_card_flash')
+    @patch('core.firmware_wizard.deploy_usb', return_value=True)
+    @patch('builtins.input', return_value='')
+    @patch('core.firmware_wizard.yes_no', return_value=True)
+    @patch('core.firmware_wizard.numbered_select')
+    @patch('core.firmware_wizard.build_firmware_orchestrator')
+    def test_sd_card_option_copies_then_verifies_firmware(
+        self, mock_build, mock_select, _mock_confirm, _mock_input, mock_copy, mock_verify
+    ):
+        """The SD-card option starts verification only after a successful copy."""
+        mock_select.side_effect = [
+            t("builder.compile_now"),
+            "sd_verify",
+        ]
+        mock_build.return_value = {
+            "status": "success",
+            "mcu": "stm32f103",
+            "firmware": "klipper.bin",
+            "path": "/fake/kace/klipper.bin",
+            "klipper_version": "kace-new123",
+            "mcu_name": "mcu",
+        }
+        mock_verify.return_value = DeployResult(DeployState.DONE)
+
+        with patch('sys.stdout', new_callable=io.StringIO):
+            run_firmware_wizard({"mcu_type": "stm32f103", "mcu_hint": "usb"})
+
+        mock_copy.assert_called_once()
+        mock_verify.assert_called_once_with(
+            expected_version="kace-new123", mcu_name="mcu", host="localhost", port=7125
+        )
 
 if __name__ == '__main__':
     unittest.main()

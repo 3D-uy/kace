@@ -2,9 +2,17 @@
 # Klipper source: https://www.klipper3d.org/Probe_Calibrate.html
 #
 import unittest
-from core.probe_offset_visualizer import _offset_to_cell, _render_bed
+from unittest.mock import patch
+from core.probe_offset_visualizer import _offset_to_cell, _print_frame, _render_bed
+from core.translations import get_lang, set_lang
 
 class TestProbeOffsetVisualizer(unittest.TestCase):
+
+    def setUp(self):
+        self.original_language = get_lang()
+
+    def tearDown(self):
+        set_lang(self.original_language)
 
     def test_offset_to_cell_calculations(self):
         # Center cell for X (total 14 cells, index 6)
@@ -48,6 +56,16 @@ class TestProbeOffsetVisualizer(unittest.TestCase):
         self.assertIn("P", grid_part_probe)
         self.assertNotIn("N", grid_part_probe)
 
+    @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
+    def test_spanish_preview_has_no_english_guidance(self, stdout):
+        set_lang("Español")
+        _print_frame(0.0, 0.0, 235.0, 235.0, "BLTouch")
+        output = stdout.getvalue()
+        self.assertIn("Vista previa de desplazamientos del sensor", output)
+        self.assertIn("ATRÁS", output)
+        self.assertIn("La boquilla y el sensor se superponen", output)
+        self.assertNotIn("Probe Offset Preview", output)
+        self.assertNotIn("Nozzle and probe overlap", output)
+
 if __name__ == '__main__':
     unittest.main()
-

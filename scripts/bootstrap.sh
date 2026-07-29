@@ -996,8 +996,14 @@ EOF
         log_warn "  sudo systemctl enable --now crowsnest.service"
     fi
 else
-    log_stage "CROWSNEST" "Installing Crowsnest Webcam Streamer"
-    log_ok "Crowsnest was not selected (skipped)."
+    log_stage "CROWSNEST" "Webcam Streamer"
+    if systemctl is-active --quiet crowsnest 2>/dev/null || systemctl is-enabled --quiet crowsnest 2>/dev/null; then
+        $SUDO systemctl stop crowsnest >/dev/null 2>&1 || true
+        $SUDO systemctl disable crowsnest.service >/dev/null 2>&1 || true
+        log_ok "Crowsnest not selected — disabled existing systemd service (saves ~30s boot time)."
+    else
+        log_ok "Crowsnest was not selected (skipped)."
+    fi
 fi
 
 # ── 11. KACE Agent ────────────────────────────────────────────────────────────

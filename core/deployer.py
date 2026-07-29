@@ -504,7 +504,7 @@ def deploy_usb(user_data, artifact_type="all"):
             )
             
             if not dest:
-                return
+                return False
                 
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
@@ -517,7 +517,7 @@ def deploy_usb(user_data, artifact_type="all"):
         
         if not dest or not os.path.isdir(dest):
             print(f"\033[91mDeployment failed: Invalid path or directory does not exist: {dest}\033[0m")
-            return
+            return False
             
         success = _copy_artifacts(user_data, dest, artifact_type)
                     
@@ -525,9 +525,11 @@ def deploy_usb(user_data, artifact_type="all"):
             print("\033[92mUSB Deployment Successful!\033[0m")
         else:
             print("\033[93mNo requested artifacts found to copy.\033[0m")
+        return success
             
     except Exception as e:
         print(f"\033[91mDeployment failed: {e}\033[0m")
+        return False
 
 def deploy_local(user_data, artifact_type="all"):
     """Copies the requested artifact(s) to a local folder on the PC."""
@@ -904,4 +906,4 @@ def deploy_moonraker(user_data):
             if failed_files:
                 print(f"\033[91m[!] Rollback incomplete — failed to restore: {', '.join(failed_files)}\033[0m")
             else:
-                print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")
+                print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")

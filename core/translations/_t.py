@@ -8,15 +8,17 @@ from core.translations._strings import UI_STRINGS
 def t(key: str, **kwargs) -> str:
     """Look up a UI string by key in the current language.
 
-    Falls back to English if the current language is missing a key,
-    then falls back to the key string itself if no entry exists at all.
+    The selected session language is authoritative.  A missing translation is
+    returned as its key instead of silently falling back to English: falling
+    back would switch the interface language partway through a workflow and
+    hides incomplete catalog entries during development.
     Applies str.format(**kwargs) for dynamic substitutions.
     """
     lang = _state._current_lang   # always read live value, not import-time snapshot
     entry = UI_STRINGS.get(key)
     if entry is None:
         return key.format(**kwargs) if kwargs else key
-    text = entry.get(lang) or entry.get("English") or key
+    text = entry.get(lang) or key
     return text.format(**kwargs) if kwargs else text
 
 

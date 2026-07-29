@@ -2,7 +2,7 @@
 # Board: {{ user.board }}
 # Kinematics: {{ user.kinematics }}
 # Stepper Drivers: {{ user.driver_type }} ({{ user.driver_mode }})
-# Probe: {{ user.probe }}
+# Probe: {{ user.probe_configuration.display_name }}
 # Z Drivers: {{ user.z_motors }}
 
 # --------------------------------------------------
@@ -21,6 +21,9 @@
 # MCU
 # --------------------------------------------------
 [mcu]
+{%- if user.mcu_path and ('lpc1769' in user.mcu_path | lower or 'lpc1768' in user.mcu_path | lower) %}
+restart_method: command # Required for LPC176x boards (SKR 1.4/1.4 Turbo) to prevent USB hang on FIRMWARE_RESTART
+{%- endif %}
 serial: {{ user.mcu_path | default('/dev/serial/by-id/TODO') }} # Serial connection to the printer controller board. Auto-detected by KACE. Verify in /dev/serial/by-id/ if connection fails.
 
 # --------------------------------------------------
@@ -83,7 +86,7 @@ rotation_distance: {{ user.rotation_distance_z | default(8) }} # Distance in mm 
 {%- if user.gear_ratio_z %}
 gear_ratio: {{ user.gear_ratio_z }} # Gear ratio of the axis
 {%- endif %}
-{%- if user.probe != 'None' %}
+{%- if user.probe_configuration.uses_virtual_z_endstop %}
 endstop_pin: probe:z_virtual_endstop # Endstop pin. Add or remove "!" to invert logic
 {%- else %}
 endstop_pin: {{ pins['stepper_z'].get('endstop_pin', 'TODO') if 'stepper_z' in pins else 'TODO' }} # Endstop pin. Add or remove "!" to invert logic
@@ -167,27 +170,37 @@ min_temp: 0 # Minimum safe temperature
 max_temp: 250 # Maximum safe temperature
 
 
-{%- if user.probe != 'None' %}
+{%- if user.probe_configuration.generates_safe_z_home or user.probe_configuration.generates_bed_mesh or user.probe_configuration.render_block() %}
 # --------------------------------------------------
 # Probe & Bed Leveling
 # --------------------------------------------------
-
-[{{ user.probe | lower }}]
+{% if user.probe_configuration.render_block() %}
+__KACE_VERBATIM_CUSTOM_PROBE_BEGIN__
+{{ user.probe_configuration.render_block() }}
+__KACE_VERBATIM_CUSTOM_PROBE_END__
+{%- elif user.probe_configuration.renders_structured_section %}
+[{{ user.probe_configuration.structured_section_name }}]
+{%- if user.probe_configuration.kind == 'bltouch' %}
+pin_up_touch_mode_reports_triggered: False # Prevents startup probe verification loop on BLTouch V3/V3.1 and clones
+probe_with_touch_mode: True # Use touch mode for more reliable probing
+{%- endif %}
 {%- set probe_sec = pins.get('bltouch', pins.get('probe', {})) %}
 sensor_pin: {{ probe_sec.get('sensor_pin', '^TODO') }} # Pin connected to the probe sensor
-{%- if user.probe | lower == 'bltouch' or 'control_pin' in probe_sec %}
+{%- if user.probe_configuration.kind == 'bltouch' or 'control_pin' in probe_sec %}
 control_pin: {{ probe_sec.get('control_pin', 'TODO') }} # Pin connected to the probe control
 {%- endif %}
 x_offset: {{ user.probe_x_offset | default(0) }} # distance from nozzle to probe in X (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
 y_offset: {{ user.probe_y_offset | default(0) }} # distance from nozzle to probe in Y (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
 z_offset: 0 # nozzle to bed distance (mm) --- manual configuration --- (set using PROBE_CALIBRATE)
-
+{% endif %}
+{%- if user.probe_configuration.generates_safe_z_home %}
 [safe_z_home]
 home_xy_position: {{ user.printable_center_x | default(user.x_size | int / 2) }}, {{ user.printable_center_y | default(user.y_size | int / 2) }} # XY position to move to before homing Z
 speed: 50 # Speed at which the toolhead is moved to the safe Z home coordinate
 z_hop: 10 # Distance (in mm) to lift the Z axis prior to homing
 z_hop_speed: 5 # Speed (in mm/s) at which the Z axis is lifted prior to homing
-
+{% endif %}
+{%- if user.probe_configuration.generates_bed_mesh %}
 [bed_mesh]
 speed: {{ user.bed_mesh.speed | default(120) }} # Probe speed in mm/s
 horizontal_move_z: {{ user.bed_mesh.horizontal_move_z | default(5) }} # Z height before moving to next probe point
@@ -205,6 +218,7 @@ adaptive_margin: {{ user.bed_mesh.adaptive_margin }} # Adaptive margin for mesh
 fade_start: {{ user.bed_mesh.fade_start | default(1) }} # Z height at which to start fading mesh leveling
 fade_end: {{ user.bed_mesh.fade_end | default(10) }} # Z height at which mesh leveling is completely disabled
 fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to fade towards
+{%- endif %}
 {%- endif %}
 
 {%- if user.z_motors | int >= 2 and not (user.kinematics == 'corexy' and user.z_motors | int >= 3) %}

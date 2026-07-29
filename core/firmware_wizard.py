@@ -3,6 +3,7 @@ from core.menu import simple_input, yes_no, numbered_select, Choice
 from core.validators import questionary_arch_validator, questionary_hex_offset_validator
 from core.style import custom_style
 from core.translations import t
+from core.terminal import BOLD, INFO, RESET, SUCCESS, WARNING
 from core.exceptions import DerivationAmbiguityError
 from firmware.derivation import derive_config
 from firmware.builder import build_firmware_orchestrator, BuildContext
@@ -81,11 +82,11 @@ def run_firmware_wizard(user_data: dict):
         }
         return f"{mapping[f]} ({f})" if f in mapping else f
 
-    _B = "\033[1m"
-    _C = "\033[96m"
-    _Y = "\033[93m"
-    _R = "\033[0m"
-    _M = "\033[96m"
+    _B = BOLD
+    _C = INFO
+    _Y = WARNING
+    _R = RESET
+    _M = INFO
 
     while True:
         arch = config_dict.get("CONFIG_MCU", "Unknown").replace('"', '')
@@ -199,6 +200,7 @@ def run_firmware_wizard(user_data: dict):
             {"name": f"✅  {t('kace.deploy_none')}",   "value": "none"},
             {"name": f"📁  {t('kace.deploy_local')}",  "value": "local"},
             {"name": f"💾  {t('kace.deploy_usb')}",    "value": "usb"},
+            {"name": t('kace.deploy_sd_verify'), "value": "sd_verify"},
         ]
         if result.get('firmware') == 'klipper.elf.hex':
             deploy_options.insert(1, {"name": f"⚡  {t('kace.deploy_avrdude')}", "value": "avrdude"})
@@ -210,6 +212,42 @@ def run_firmware_wizard(user_data: dict):
 
         if deploy_fw == "usb":
             deploy_usb(user_data, artifact_type="firmware")
+        elif deploy_fw == "sd_verify":
+            copied = deploy_usb(user_data, artifact_type="firmware")
+            if not copied:
+                return
+
+            expected_version = user_data.get("klipper_version", "")
+            if not expected_version:
+                print(f"\033[93m{t('kace.sd_verify_unavailable')}\033[0m")
+                return
+
+            print(f"\n\033[93m{t('kace.sd_flash_instructions')}\033[0m")
+            try:
+                input(t("kace.sd_flash_ready_prompt"))
+            except (KeyboardInterrupt, EOFError):
+                print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+                return
+
+            from core.firmware_flash import verify_sd_card_flash
+            from core.moonraker_deployer import DeployState
+
+            result = verify_sd_card_flash(
+                expected_version=expected_version,
+                mcu_name=user_data.get("mcu_name", "mcu"),
+                host=user_data.get("moonraker_host", "localhost"),
+                port=user_data.get("moonraker_port", 7125),
+            )
+            if result.state is DeployState.DONE:
+                print(f"\033[92m{t('kace.sd_verify_success')}\033[0m")
+            elif result.state is DeployState.FAILED_FLASH:
+                print(f"\033[91m{t('kace.sd_verify_wrong_version', detail=result.detail)}\033[0m")
+            elif result.state is DeployState.TIMEOUT:
+                print(f"\033[91m{t('kace.sd_verify_timeout', detail=result.detail)}\033[0m")
+            elif result.state is DeployState.CONFIG_ERROR:
+                print(f"\033[91m{t('kace.sd_verify_config_error', detail=result.detail)}\033[0m")
+            else:
+                print(f"\033[91m{t('kace.sd_verify_failed', detail=result.detail)}\033[0m")
         elif deploy_fw == "local":
             deploy_local(user_data, artifact_type="firmware")
         elif deploy_fw == "avrdude":

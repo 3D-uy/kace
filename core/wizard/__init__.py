@@ -25,6 +25,7 @@ from data.profiles import THERMISTOR_PRESETS
 from core.display_wizard import run_display_setup_step
 from core.probe_offset_visualizer import run_probe_offset_step
 from core.exceptions import WizardExit
+from core.probe_configuration import normalize_probe_kind
 from core.validators import (
     questionary_pin_validator,
     questionary_numeric_validator,
@@ -70,6 +71,11 @@ from core.wizard.steps.motion import (
 )
 from core.wizard.steps.sensors import (
     _step_probe,
+    _step_custom_probe,
+    _step_custom_probe_offsets,
+    _step_custom_probe_pin,
+    _step_custom_probe_samples_result,
+    _step_guided_custom_probe_value,
     _needs_bltouch_pins,
     _get_unused_pins,
     make_pin_validator_with_collision_check,
@@ -255,14 +261,16 @@ def run_wizard(user_data_arg=None):
     returns a fully-populated user_data.
     """
     if os.environ.get("KACE_AUTO") != "1" and os.environ.get("KACE_QUIET") != "1":
-        print("\033[2m  Starting Hardware Discovery...\033[0m")
+        from core.terminal import HINT, RESET
+        print(f"{HINT}  {t('wizard.hardware_discovery_start')}{RESET}")
     mcu_context = discover_mcu()
     mcu_path = mcu_context.get("mcu_path")
     detected_mcu = mcu_context.get("derived_mcu")
     mcu_hint = mcu_context.get("hint")
 
     if os.environ.get("KACE_AUTO") != "1" and os.environ.get("KACE_QUIET") != "1":
-        print("\033[2m  Fetching board database...\033[0m")
+        from core.terminal import HINT, RESET
+        print(f"{HINT}  {t('wizard.board_database_fetch')}{RESET}")
     boards = fetch_config_list()
 
     printer_configs = [b for b in boards if b.startswith("printer-")]
@@ -321,6 +329,7 @@ def run_wizard(user_data_arg=None):
         "z_position_min":        "0",
         "z_position_max":        "250",
         "probe":                 "None",
+        "probe_kind":            "none",
         "hotend_thermistor":     "EPCOS 100K B57560G104F",
         "bed_thermistor":        "EPCOS 100K B57560G104F",
         "driver_type":           None,
@@ -333,6 +342,7 @@ def run_wizard(user_data_arg=None):
         "display_risk_accepted": False,
         "probe_x_offset":        "0",
         "probe_y_offset":        "0",
+        "custom_probe":          None,
         "fan_part_cooling_pin":  None,
         "fan_hotend_pin":        None,
     }
@@ -355,6 +365,8 @@ def run_wizard(user_data_arg=None):
         "y_limits",
         "z_limits",
         "probe",
+        "custom_probe",
+        "custom_probe_offsets",
         "bltouch_pins",
         "probe_offsets",
         "hotend_therm",
@@ -423,9 +435,59 @@ def run_wizard(user_data_arg=None):
         },
         "probe": {
             "prompt": lambda ud: _step_probe(ud),
-            "next":   lambda ans, ud: "hotend_therm" if ans == "None" else (
-                "bltouch_pins" if ans in ("BLTouch", "CR-Touch") and _needs_bltouch_pins(ud) else "probe_offsets"
+            "next":   lambda ans, ud: "hotend_therm" if normalize_probe_kind(ans) == "none" else (
+                "custom_probe_pin" if normalize_probe_kind(ans) == "custom" else (
+                "bltouch_pins" if normalize_probe_kind(ans) in ("bltouch", "cr_touch") and _needs_bltouch_pins(ud) else "probe_offsets"
+                )
             )
+        },
+        "custom_probe_pin": {
+            "prompt": lambda ud: _step_custom_probe_pin(ud),
+            "next": "custom_probe_x_offset",
+        },
+        "custom_probe_x_offset": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_x_offset"),
+            "next": "custom_probe_y_offset",
+        },
+        "custom_probe_y_offset": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_y_offset"),
+            "next": "custom_probe_z_offset",
+        },
+        "custom_probe_z_offset": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_z_offset"),
+            "next": "custom_probe_samples",
+        },
+        "custom_probe_samples": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples"),
+            "next": "custom_probe_samples_tolerance",
+        },
+        "custom_probe_samples_tolerance": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples_tolerance"),
+            "next": "custom_probe_samples_tolerance_retries",
+        },
+        "custom_probe_samples_tolerance_retries": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_samples_tolerance_retries"),
+            "next": "custom_probe_speed",
+        },
+        "custom_probe_speed": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_speed"),
+            "next": "custom_probe_samples_result",
+        },
+        "custom_probe_samples_result": {
+            "prompt": lambda ud: _step_custom_probe_samples_result(ud),
+            "next": "custom_probe_sample_retract_dist",
+        },
+        "custom_probe_sample_retract_dist": {
+            "prompt": lambda ud: _step_guided_custom_probe_value(ud, "custom_probe_sample_retract_dist"),
+            "next": "custom_probe",
+        },
+        "custom_probe": {
+            "prompt": lambda ud: _step_custom_probe(ud),
+            "next": "hotend_therm",
+        },
+        "custom_probe_offsets": {
+            "prompt": lambda ud: _step_custom_probe_offsets(ud),
+            "next":   lambda ans, ud: "hotend_therm"
         },
         "bltouch_pins": {
             "prompt": lambda ud: _step_bltouch_pins(ud),
@@ -451,6 +513,10 @@ def run_wizard(user_data_arg=None):
     user_data = dict(initial_defaults)
     if user_data_arg is not None:
         user_data.update(user_data_arg)
+    # The dashboard selection is session state.  Callers may pass persisted
+    # wizard defaults, but those must never replace the locale selected at
+    # the start of this interactive run.
+    user_data["language"] = get_lang()
     start_step = user_data.pop("start_step", "board")
 
     runner = WizardRunner(steps_config, step_order, initial_data=user_data)

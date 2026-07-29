@@ -3,6 +3,8 @@ import re
 import os
 from core.menu import simple_input, yes_no, numbered_select
 from core.style import custom_style
+from core.terminal import ERROR, INFO, RESET, SUCCESS, WARNING
+from core.translations import t
 
 def discover_mcu_hardware(interactive=True):
     """
@@ -68,19 +70,18 @@ def discover_mcu_hardware(interactive=True):
             if not interactive:
                 return context
             
-            print("\n\033[91m[!] No MCU serial devices detected.\033[0m")
-            print("\033[93mPlease verify the following hardware diagnostics:\033[0m")
-            print("  \033[96m• USB Connection\033[0m: Ensure the USB cable is securely connected to both the Pi and the board. Try another cable/port.")
-            print("  \033[96m• Firmware\033[0m: Verify Klipper firmware has been flashed to the controller. If in bootloader mode, it won't appear.")
-            print("  \033[96m• Board Power\033[0m: Verify the board is powered on (check status LEDs or power supply switches).")
-            print("  \033[96m• Permissions\033[0m: Verify that the current user has access to serial devices (e.g. member of 'dialout').\n")
+            print(f"\n{ERROR}{t('mcu.none_detected')}{RESET}")
+            print(f"{WARNING}{t('mcu.diagnostics_header')}{RESET}")
+            for diagnostic_key in ("mcu.diagnostic_usb", "mcu.diagnostic_firmware", "mcu.diagnostic_power", "mcu.diagnostic_permissions"):
+                label, _, detail = t(diagnostic_key).partition(": ")
+                print(f"  {INFO}• {label}{RESET}: {detail}")
             
             ans = numbered_select(
-                "How would you like to proceed?",
+                t("mcu.proceed_prompt"),
                 choices=[
-                    {"name": "🔄  Retry hardware discovery", "value": "retry"},
-                    {"name": "⌨️   Skip / Enter serial path manually", "value": "manual"},
-                    {"name": "❌  Quit", "value": "quit"}
+                    {"name": f"🔄  {t('mcu.retry')}", "value": "retry"},
+                    {"name": f"⌨️   {t('mcu.manual')}", "value": "manual"},
+                    {"name": f"❌  {t('choice.quit')}", "value": "quit"}
                 ]
             )
 
@@ -88,7 +89,7 @@ def discover_mcu_hardware(interactive=True):
                 continue
             elif ans == "manual":
                 manual_path = simple_input(
-                    "Enter serial path manually (e.g. /dev/ttyUSB0, COM3, or leave blank to skip MCU detection):"
+                    t("mcu.manual_path_prompt")
                 )
                 if manual_path and manual_path.strip():
                     context["mcu_path"] = manual_path.strip()
@@ -96,20 +97,20 @@ def discover_mcu_hardware(interactive=True):
                 # Return context whether or not user gave a path — caller handles None mcu_path
                 return context
             else:
-                print("\033[93mExiting KACE.\033[0m")
+                print(f"{WARNING}{t('mcu.exit')}{RESET}")
                 sys.exit(0)
 
         if interactive:
             if len(ports) == 1:
                 choice = ports[0]
-                print(f"\n\033[92m[✔ ] Connected MCU auto-detected:\033[0m \033[96m{choice}\033[0m\n")
+                print(f"\n{SUCCESS}[✔ ] Connected MCU auto-detected:{RESET} {INFO}{choice}{RESET}\n")
             else:
                 choice = numbered_select(
-                    "Select connected MCU:", choices=ports
+                    t("wizard.detected_mcu"), choices=ports
                 )
 
                 if choice is None:
-                    print("\033[93mExiting KACE.\033[0m")
+                    print(f"{WARNING}{t('mcu.exit')}{RESET}")
                     sys.exit(0)
         else:
             # Non-interactive: prefer Klipper-flashed by-id paths, else first available

@@ -111,13 +111,29 @@ KACE simplifies the ENTIRE process:
 ---
 
 
-## ⚡ One-Line Install
+## ⚡ One-Line Install (recommended for convenience)
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
 ```
 
+> **Security tradeoff:** this streams code from the network directly to Bash. You cannot inspect or verify the exact file before it runs. Use it only when you trust the KACE GitHub source and your network path.
+
 > This will install all dependencies, clone the repository, and set up the global `kace` command automatically.
+
+### Verified installation (recommended when integrity verification matters)
+
+```bash
+# Choose a release and copy its published installer SHA-256 from a trusted channel.
+INSTALL_REF='vX.Y.Z'
+EXPECTED_SHA256='paste-the-trusted-sha256-here'
+
+curl -fsSLo install.sh "https://raw.githubusercontent.com/3D-uy/KACE/${INSTALL_REF}/install.sh"
+printf '%s  %s\n' "$EXPECTED_SHA256" install.sh | sha256sum -c -
+bash install.sh  # Run only after sha256sum reports "install.sh: OK"
+```
+
+If verification fails, do not run the file. Do not fetch the expected checksum from the same mutable branch as the installer. This check verifies the installer script; the installer currently installs KACE from `main`.
 
 ## 📦 Final result
 

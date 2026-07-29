@@ -117,16 +117,16 @@ def _render_bed(
         grid[ny][nx] = _OVERLAP
 
     # Build layout lines
-    left_labels = ["  ", "  ", "L ", "E ", "F ", "T ", "  ", "  ", "  "]
-    right_labels = ["", "", " R", " I", " G", " H", " T", "", ""]
+    left_labels = ["  "] * 9
+    right_labels = [""] * 9
     comments = [
         "",
         "",
-        "      <-- Example \"1\" (right+,  back+)",
-        "      <-- Example \"2\" ( left-,  back+)",
-        "      <-- Nozzle",
-        "      <-- Example \"3\" (right+, front-)",
-        "      <-- Example \"4\" ( left-, front-)",
+        f"      <-- {t('probe.example_1')}",
+        f"      <-- {t('probe.example_2')}",
+        f"      <-- {t('probe.nozzle_label')}",
+        f"      <-- {t('probe.example_3')}",
+        f"      <-- {t('probe.example_4')}",
         "",
         ""
     ]
@@ -134,7 +134,7 @@ def _render_bed(
     lines = []
 
     # 1. Top border
-    lines.append(f"  {_CY}+---- {_B}BACK{_RS}{_CY} ----+{_RS}")
+    lines.append(f"  {_CY}+---- {_B}{t('probe.back')}{_RS}{_CY} ----+{_RS}")
 
     # 2. Grid rows
     for r_idx in range(7):
@@ -165,7 +165,7 @@ def _render_bed(
         lines.append(line)
 
     # 3. Bottom border
-    lines.append(f"  {_CY}O---- {_B}FRONT{_RS}{_CY} ---+{_RS}")
+    lines.append(f"  {_CY}O---- {_B}{t('probe.front')}{_RS}{_CY} ---+{_RS}")
 
     return lines
 
@@ -185,8 +185,8 @@ def _print_frame(
     is used, keeping it SSH/Pi safe.
     """
     print()
-    print(f"  {_CY}{_B}Probe Offset Preview{_RS}  {_DIM}({probe_name}){_RS}")
-    print(f"  {_DIM}N = Nozzle  ·  P = Probe (X = Overlap){_RS}")
+    print(f"  {_CY}{_B}{t('probe.preview_title')}{_RS}  {_DIM}({probe_name}){_RS}")
+    print(f"  {_DIM}{t('probe.legend')}{_RS}")
     print()
 
     bed_lines = _render_bed(x_off, y_off, bed_w, bed_h)
@@ -205,7 +205,7 @@ def _print_frame(
     overlap = (px == 6 and py == 3)
 
     if overlap:
-        print(f"  {_YL}[!] Nozzle and probe overlap — confirm offsets are correct{_RS}")
+        print(f"  {_YL}[!] {t('probe.overlap_warning')}{_RS}")
 
     if out_of_range_msg:
         print(f"  {_RD}{out_of_range_msg}{_RS}")
@@ -251,20 +251,20 @@ def _check_reachability(
     prob_y_min, prob_y_max = probeable["y"]
 
     if prob_x_min > bed_x_min:
-        issues.append(f"Probe cannot reach left edge of bed (misses first {prob_x_min:.1f} mm)")
+        issues.append(t('probe.misses_left', distance=prob_x_min))
     if prob_x_max < bed_x_max:
-        issues.append(f"Probe cannot reach right edge of bed (misses last {bed_x_max - prob_x_max:.1f} mm)")
+        issues.append(t('probe.misses_right', distance=bed_x_max - prob_x_max))
 
     if prob_y_min > bed_y_min:
-        issues.append(f"Probe cannot reach front edge of bed (misses first {prob_y_min:.1f} mm)")
+        issues.append(t('probe.misses_front', distance=prob_y_min))
     if prob_y_max < bed_y_max:
-        issues.append(f"Probe cannot reach back edge of bed (misses last {bed_y_max - prob_y_max:.1f} mm)")
+        issues.append(t('probe.misses_back', distance=bed_y_max - prob_y_max))
 
     # Also keep the soft warning if offsets are extremely large
     if abs(x_off) > space.x_size * 0.9:
-        issues.append(f"X offset ({x_off:+.1f} mm) is extremely large relative to bed size")
+        issues.append(t('probe.x_offset_large', offset=x_off))
     if abs(y_off) > space.y_size * 0.9:
-        issues.append(f"Y offset ({y_off:+.1f} mm) is extremely large relative to bed size")
+        issues.append(t('probe.y_offset_large', offset=y_off))
 
     return "  ".join(issues)
 
@@ -321,11 +321,11 @@ def run_probe_offset_step(
         # ── Print initial/current frame ────────────────────────────────────────
         _print_frame(x_off, y_off, bed_w, bed_h, probe_name)
 
-        print(f"  {_CY}Enter the distance from the nozzle to the probe tip.{_RS}")
-        print(f"  {_DIM}  Negative X = probe is LEFT of nozzle{_RS}")
-        print(f"  {_DIM}  Positive X = probe is RIGHT of nozzle{_RS}")
-        print(f"  {_DIM}  Negative Y = probe is in FRONT of nozzle{_RS}")
-        print(f"  {_DIM}  Positive Y = probe is BEHIND nozzle{_RS}")
+        print(f"  {_CY}{t('probe.instructions')}{_RS}")
+        print(f"  {_DIM}  {t('probe.negative_x')}{_RS}")
+        print(f"  {_DIM}  {t('probe.positive_x')}{_RS}")
+        print(f"  {_DIM}  {t('probe.negative_y')}{_RS}")
+        print(f"  {_DIM}  {t('probe.positive_y')}{_RS}")
         print()
 
         # ── X offset ─────────────────────────────────────────────────────────────
@@ -398,8 +398,8 @@ def run_probe_offset_step(
             break
 
     # ── Final confirmation frame ──────────────────────────────────────────────
-    print(f"  {_GR}✓  Probe offset confirmed: X={x_off:+.1f} mm, Y={y_off:+.1f} mm{_RS}")
-    print(f"  {_DIM}  Z offset will be calibrated later with PROBE_CALIBRATE.{_RS}\n")
+    print(f"  {_GR}✓  {t('probe.confirmed', x=x_off, y=y_off)}{_RS}")
+    print(f"  {_DIM}  {t('probe.z_calibration_hint')}{_RS}\n")
 
     result["probe_x_offset"] = f"{x_off}"
     result["probe_y_offset"] = f"{y_off}"

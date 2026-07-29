@@ -1,6 +1,7 @@
 import os
 import copy
 from core.translations import t, get_mode
+from core.terminal import RESET, SUCCESS
 from core.exceptions import WizardExit
 
 _BACK = "__back__"
@@ -75,7 +76,7 @@ class WizardRunner:
                                 if get_mode() == "Beginner":
                                     last_phase_key = PHASE_KEYS.get(last_phase)
                                     translated_last_phase = t(last_phase_key) if last_phase_key else last_phase
-                                    print(f"\033[92m{t('wizard.phase.complete', phase=translated_last_phase)}\033[0m")
+                                    print(f"{SUCCESS}{t('wizard.phase.complete', phase=translated_last_phase)}{RESET}")
             
             # Print the header orientation box for the step
             _print_step_header(current_id, self.user_data)

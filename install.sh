@@ -3,10 +3,22 @@
 #  KACE — Klipper Automated Configuration Ecosystem
 #  Install Script
 #
-#  Safe Usage (inspect & verify script):
-#    curl -sSL -o install.sh https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh
-#    # verify the installer before running: sha256sum install.sh
-#    bash install.sh
+#  Quick start (recommended for convenience):
+#    bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+#
+#  Security tradeoff: the quick-start command streams network content directly
+#  to Bash, so it cannot be inspected or verified before execution.
+#
+#  Verified installation (recommended when integrity verification matters):
+#    INSTALL_REF='vX.Y.Z'  # matching release tag
+#    EXPECTED_SHA256='paste-the-trusted-sha256-here'  # obtain separately
+#    curl -fsSLo install.sh "https://raw.githubusercontent.com/3D-uy/KACE/${INSTALL_REF}/install.sh"
+#    printf '%s  %s\n' "$EXPECTED_SHA256" install.sh | sha256sum -c -
+#    bash install.sh  # only after sha256sum reports "install.sh: OK"
+#
+#  Do not fetch the expected checksum from the same mutable branch as the
+#  installer. Obtain it from a matching release or another trusted channel.
+#  This check covers this installer script; it currently installs KACE from main.
 # ============================================================
 
 set -e

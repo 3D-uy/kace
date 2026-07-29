@@ -9,6 +9,20 @@ from core.probe_offset_visualizer import run_probe_offset_step
 from data.profiles import THERMISTOR_PRESETS
 from core.wizard.runner import _BACK, _QUIT
 from core.wizard.ui import _back_choice, _quit_choice
+from core.custom_probe import (
+    CustomProbeConfig,
+    CustomProbeValidationError,
+    GUIDED_PROBE_DEFAULTS,
+    GuidedCustomProbeSettings,
+)
+from core.probe_configuration import (
+    PROBE_KIND_BLTOUCH,
+    PROBE_KIND_CR_TOUCH,
+    PROBE_KIND_CUSTOM,
+    PROBE_KIND_INDUCTIVE,
+    PROBE_KIND_NONE,
+    normalize_probe_kind,
+)
 
 
 def _get_parsed(user_data):
@@ -18,9 +32,19 @@ def _get_parsed(user_data):
 
 
 def _step_probe(user_data):
-    choices = ["None", "BLTouch", "Inductive", "CR-Touch", _back_choice(), _quit_choice()]
-    default_probe = user_data["probe"]
-    default_idx = choices.index(default_probe) if default_probe in choices[:4] else 0
+    choices = [
+        {"name": "None", "value": PROBE_KIND_NONE},
+        {"name": "BLTouch", "value": PROBE_KIND_BLTOUCH},
+        {"name": "Inductive", "value": PROBE_KIND_INDUCTIVE},
+        {"name": "CR-Touch", "value": PROBE_KIND_CR_TOUCH},
+        {"name": t("wizard.probe_custom"), "value": PROBE_KIND_CUSTOM},
+        _back_choice(), _quit_choice(),
+    ]
+    default_kind = normalize_probe_kind(user_data.get("probe_kind") or user_data.get("probe"))
+    default_idx = [
+        PROBE_KIND_NONE, PROBE_KIND_BLTOUCH, PROBE_KIND_INDUCTIVE,
+        PROBE_KIND_CR_TOUCH, PROBE_KIND_CUSTOM,
+    ].index(default_kind)
     ans = numbered_select(
         t("wizard.select_probe"),
         choices=choices,
@@ -30,8 +54,194 @@ def _step_probe(user_data):
         raise WizardExit()
     if ans == _BACK:
         return _BACK
-    user_data["probe"] = ans
+    display_names = {
+        PROBE_KIND_NONE: "None",
+        PROBE_KIND_BLTOUCH: "BLTouch",
+        PROBE_KIND_INDUCTIVE: "Inductive",
+        PROBE_KIND_CR_TOUCH: "CR-Touch",
+        PROBE_KIND_CUSTOM: "Custom Probe",
+    }
+    user_data["probe_kind"] = ans
+    user_data["probe"] = display_names[ans]  # legacy caller compatibility
     return ans
+
+
+GUIDED_CUSTOM_PROBE_QUESTIONS = (
+    ("custom_probe_x_offset", "wizard.custom_probe_x_offset", 0.0, "number"),
+    ("custom_probe_y_offset", "wizard.custom_probe_y_offset", 0.0, "number"),
+    ("custom_probe_z_offset", "wizard.custom_probe_z_offset", None, "optional_number"),
+    ("custom_probe_samples", "wizard.custom_probe_samples", GUIDED_PROBE_DEFAULTS["samples"], "positive_int"),
+    ("custom_probe_samples_tolerance", "wizard.custom_probe_samples_tolerance", GUIDED_PROBE_DEFAULTS["samples_tolerance"], "nonnegative_number"),
+    ("custom_probe_samples_tolerance_retries", "wizard.custom_probe_samples_tolerance_retries", GUIDED_PROBE_DEFAULTS["samples_tolerance_retries"], "nonnegative_int"),
+    ("custom_probe_speed", "wizard.custom_probe_speed", GUIDED_PROBE_DEFAULTS["speed"], "positive_number"),
+    ("custom_probe_sample_retract_dist", "wizard.custom_probe_sample_retract_dist", GUIDED_PROBE_DEFAULTS["sample_retract_dist"], "positive_number"),
+)
+
+
+def _finite_numeric_validator(value: str, *, allow_empty: bool = False, minimum: float | None = None,
+                              integer: bool = False):
+    text = str(value or "").strip()
+    if not text and allow_empty:
+        return True
+    try:
+        parsed = float(text)
+    except ValueError:
+        return "Enter a finite number."
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return "Enter a finite number."
+    if integer and not parsed.is_integer():
+        return "Enter a whole number."
+    if minimum is not None and parsed < minimum:
+        return f"Enter a value of at least {minimum:g}."
+    return True
+
+
+def _guided_probe_validator(kind: str):
+    validators = {
+        "number": lambda value: _finite_numeric_validator(value),
+        "optional_number": lambda value: _finite_numeric_validator(value, allow_empty=True),
+        "positive_int": lambda value: _finite_numeric_validator(value, minimum=1, integer=True),
+        "nonnegative_int": lambda value: _finite_numeric_validator(value, minimum=0, integer=True),
+        "nonnegative_number": lambda value: _finite_numeric_validator(value, minimum=0),
+        "positive_number": lambda value: _finite_numeric_validator(value, minimum=float.fromhex("0x1p-1022")),
+    }
+    return validators[kind]
+
+
+def _step_guided_custom_probe_value(user_data, key: str):
+    """Ask one reusable common-probe question; strategy-specific flows can extend this list."""
+    question = next(item for item in GUIDED_CUSTOM_PROBE_QUESTIONS if item[0] == key)
+    _, prompt_key, default, validator_kind = question
+    value = simple_input(
+        t(prompt_key),
+        default=user_data.get(key, default),
+        validate=_guided_probe_validator(validator_kind),
+    )
+    if value is None or str(value).strip().lower() in ("<", "back", "volver"):
+        return _BACK
+    user_data[key] = str(value).strip()
+    return "done"
+
+
+def _step_custom_probe_pin(user_data):
+    """Prefer board-derived unassigned pins; manual input is a validated fallback."""
+    candidates = _get_unused_pins(user_data)
+    if candidates:
+        choices = [
+            {"name": f"{friendly} ({pin})" if friendly != pin else pin, "value": pin}
+            for friendly, pin in candidates
+        ]
+        choices.extend([
+            {"name": t("wizard.custom_probe_pin_manual"), "value": "__manual__"},
+            _back_choice(), _quit_choice(),
+        ])
+        answer = numbered_select(t("wizard.custom_probe_pin"), choices=choices, default=0)
+        if answer == _QUIT or answer is None:
+            raise WizardExit()
+        if answer == _BACK:
+            return _BACK
+        if answer != "__manual__":
+            user_data["custom_probe_pin"] = answer
+            return "done"
+
+    value = simple_input(
+        t("wizard.custom_probe_pin_manual_prompt"),
+        default=user_data.get("custom_probe_pin", ""),
+        validate=make_pin_validator_with_collision_check(user_data),
+    )
+    if value is None or str(value).strip().lower() in ("<", "back", "volver"):
+        return _BACK
+    user_data["custom_probe_pin"] = str(value).strip()
+    return "done"
+
+
+def _step_custom_probe_samples_result(user_data):
+    choices = [
+        {"name": t("wizard.custom_probe_samples_result_median"), "value": "median"},
+        {"name": t("wizard.custom_probe_samples_result_average"), "value": "average"},
+        _back_choice(), _quit_choice(),
+    ]
+    default = GUIDED_PROBE_DEFAULTS["samples_result"]
+    current = user_data.get("custom_probe_samples_result", default)
+    answer = numbered_select(t("wizard.custom_probe_samples_result"), choices=choices,
+                             default=0 if current == "median" else 1)
+    if answer == _QUIT or answer is None:
+        raise WizardExit()
+    if answer == _BACK:
+        return _BACK
+    user_data["custom_probe_samples_result"] = answer
+    return "done"
+
+
+def _step_custom_probe(user_data):
+    """Build the validated typed custom probe payload from guided wizard answers."""
+    required = ("custom_probe_pin", "custom_probe_x_offset", "custom_probe_y_offset")
+    missing = [key for key in required if user_data.get(key) in (None, "")]
+    if missing:
+        print(f"\n[!] {t('wizard.custom_probe_missing_fields')}\n")
+        return "__retry__"
+    try:
+        z_text = user_data.get("custom_probe_z_offset", "")
+        settings = GuidedCustomProbeSettings(
+            pin=user_data["custom_probe_pin"],
+            x_offset=float(user_data["custom_probe_x_offset"]),
+            y_offset=float(user_data["custom_probe_y_offset"]),
+            z_offset=float(z_text) if str(z_text).strip() else None,
+            samples=int(float(user_data.get("custom_probe_samples", GUIDED_PROBE_DEFAULTS["samples"]))),
+            samples_tolerance=float(user_data.get("custom_probe_samples_tolerance", GUIDED_PROBE_DEFAULTS["samples_tolerance"])),
+            samples_tolerance_retries=int(float(user_data.get("custom_probe_samples_tolerance_retries", GUIDED_PROBE_DEFAULTS["samples_tolerance_retries"]))),
+            speed=float(user_data.get("custom_probe_speed", GUIDED_PROBE_DEFAULTS["speed"])),
+            samples_result=user_data.get("custom_probe_samples_result", GUIDED_PROBE_DEFAULTS["samples_result"]),
+            sample_retract_dist=float(user_data.get("custom_probe_sample_retract_dist", GUIDED_PROBE_DEFAULTS["sample_retract_dist"])),
+        )
+        user_data["custom_probe_settings"] = settings
+        user_data["custom_probe"] = settings.to_config()
+    except (ValueError, CustomProbeValidationError) as exc:
+        print(f"\n[!] {t('wizard.custom_probe_invalid')}: {exc}\n")
+        return "__retry__"
+
+    user_data["probe_x_offset"] = f"{settings.x_offset:g}"
+    user_data["probe_y_offset"] = f"{settings.y_offset:g}"
+    return "done"
+
+
+def _custom_offset_validator(value: str):
+    try:
+        parsed = float(value.strip())
+    except (TypeError, ValueError):
+        return "Enter a finite number (for example: -38, 0, or 23.5)."
+    return parsed == parsed and parsed not in (float("inf"), float("-inf"))
+
+
+def _step_custom_probe_offsets(user_data):
+    """Ask only for offsets absent from the custom block, then append them once."""
+    custom_probe = user_data.get("custom_probe")
+    if not isinstance(custom_probe, CustomProbeConfig):
+        print("\n[!] Custom probe data is missing. Please enter the configuration again.\n")
+        return _BACK
+
+    supplied = {}
+    if custom_probe.x_offset is None:
+        value = simple_input(t("wizard.custom_probe_x_offset"), validate=_custom_offset_validator)
+        if value is None:
+            return _BACK
+        supplied["x_offset"] = value
+    if custom_probe.y_offset is None:
+        value = simple_input(t("wizard.custom_probe_y_offset"), validate=_custom_offset_validator)
+        if value is None:
+            return _BACK
+        supplied["y_offset"] = value
+
+    try:
+        custom_probe = custom_probe.with_missing_offsets(**supplied)
+    except CustomProbeValidationError as exc:
+        print(f"\n[!] Invalid custom probe offsets: {exc}\n")
+        return "__retry__"
+
+    user_data["custom_probe"] = custom_probe
+    user_data["probe_x_offset"] = str(custom_probe.x_offset)
+    user_data["probe_y_offset"] = str(custom_probe.y_offset)
+    return "done"
 
 
 def _needs_bltouch_pins(user_data) -> bool:

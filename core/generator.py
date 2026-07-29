@@ -5,9 +5,15 @@ from core.translations import translate_comment, get_lang
 from core.macro_generator import generate_starter_macros
 from core.advanced_module_handler import get_advanced_sections
 from core.exceptions import GenerationError
+from core.probe_configuration import (
+    apply_probe_compatibility_context,
+    resolve_probe_configuration,
+)
 
 # D2-03: Pre-compiled module-level regex for inline comment boundary matching
 _INLINE_COMMENT_RE = re.compile(r'(\s)(#)(.*)')
+_VERBATIM_CUSTOM_BEGIN = "__KACE_VERBATIM_CUSTOM_PROBE_BEGIN__"
+_VERBATIM_CUSTOM_END = "__KACE_VERBATIM_CUSTOM_PROBE_END__"
 
 # Resolve templates directory relative to this file's location, not the CWD
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,7 +42,7 @@ def _validate_and_sanitize_geometry(user_ctx: dict) -> None:
 
     Mutates user_ctx in place.
     """
-    _uses_probe = user_ctx.get("probe", "None") != "None"
+    _uses_probe = bool(user_ctx.get("probe_uses_virtual_z_endstop"))
 
     for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
         # When a probe is active (BLTouch/CR-Touch), the Z axis uses
@@ -324,6 +330,9 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     # Avoid in-place mutation of user_data by using a localized context dict
     user_ctx = dict(user_data)
     user_ctx["include_macros"] = include_macros
+    probe_configuration = resolve_probe_configuration(user_ctx)
+    apply_probe_compatibility_context(user_ctx, probe_configuration)
+    user_ctx["probe_configuration"] = probe_configuration
 
     _validate_and_sanitize_geometry(user_ctx)
 
@@ -334,7 +343,9 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
 
     # Auto-generate bed_mesh config
     from core.bed_mesh import generate_bed_mesh_config
-    user_ctx["bed_mesh"] = generate_bed_mesh_config(space, user_ctx, parsed_data)
+    user_ctx["bed_mesh"] = generate_bed_mesh_config(
+        space, user_ctx, parsed_data, probe_configuration=probe_configuration
+    )
 
     # Derive leveling coordinates
     from core.leveling import derive_leveling_points
@@ -369,6 +380,89 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         user=user_ctx
     )
     
+    final_output = _postprocess_generated_output(output)
+
+    # â”€â”€ Display blocks rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    final_output += _render_display_blocks(user_ctx, pins_ctx, parsed_data)
+
+
+    # Validation: Do not proceed if generic TODO pins are left active, preventing Klipper startup errors
+    active_todos = []
+    current_section = "unknown"
+    for line in final_output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and "]" in stripped:
+            current_section = stripped
+        elif "TODO" in line and not line.lstrip().startswith("#"):
+            key = line.split(":")[0].strip().lstrip("#").strip()
+            active_todos.append((current_section, key))
+
+    if active_todos:
+        if verbose:
+            print("\n\033[91mCRITICAL ERROR: Configuration generated with unresolved 'TODO' values!\033[0m")
+            print("\033[93mThis usually happens if your board does not map all required pins natively.\033[0m")
+            for section, key in active_todos:
+                print(f"TODO_FOUND: {section} -> {key}")
+            print("\033[91mGeneration aborted to guarantee it starts without errors in Klipper.\033[0m")
+        raise GenerationError(
+            "Configuration has unresolved TODO pins â€” generation aborted.",
+            todos=active_todos,
+        )
+
+    # Write to printer.cfg
+    if not output_path:
+        base_path = os.path.expanduser('~/kace')
+        os.makedirs(base_path, exist_ok=True)
+        cfg_file = os.path.join(base_path, 'printer.cfg')
+    else:
+        parent = os.path.dirname(os.path.abspath(output_path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        cfg_file = output_path
+
+    with open(cfg_file, 'w', encoding='utf-8') as f:
+        f.write(final_output)
+
+    if include_macros or user_data.get("macros_generated"):
+        output_dir = os.path.dirname(cfg_file)
+        generate_starter_macros(output_dir)
+
+    return {
+        "content": final_output,
+        "motion_space": user_ctx["motion_space"],
+        "bed_mesh": user_ctx.get("bed_mesh")
+    }
+
+
+def _postprocess_generated_output(output: str) -> str:
+    """Align generated text while leaving custom blocks byte-for-byte intact.
+
+    The template emits sentinel lines around a custom block.  The only allowed
+    change to that block is one newline inserted after it when needed to keep
+    the following generated section on a separate line.
+    """
+    if _VERBATIM_CUSTOM_BEGIN not in output:
+        return _align_and_translate_generated_output(output)
+    begin = f"{_VERBATIM_CUSTOM_BEGIN}\n"
+    end = f"\n{_VERBATIM_CUSTOM_END}"
+    if output.count(begin) != 1 or output.count(end) != 1:
+        raise GenerationError("Invalid custom probe rendering boundary.")
+    prefix, remainder = output.split(begin, 1)
+    custom_block, suffix = remainder.split(end, 1)
+    processed_prefix = _align_and_translate_generated_output(prefix)
+    prefix_boundary = "" if not processed_prefix or processed_prefix.endswith("\n") else "\n"
+    boundary = "" if custom_block.endswith("\n") else "\n"
+    return (
+        processed_prefix
+        + prefix_boundary
+        + custom_block
+        + boundary
+        + _align_and_translate_generated_output(suffix)
+    )
+
+
+def _align_and_translate_generated_output(output: str) -> str:
+    """Apply KACE's existing comment formatting only to KACE-generated text."""
     # R-04 / D2-03: Locate the inline comment boundary using pre-compiled regex.
     aligned_lines = []
     comment_col = 48
@@ -415,56 +509,5 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
                         # Update translated full line comment
                         line = line.replace(f"# {comment}", f"# {translated}")
             aligned_lines.append(line)
-    
-    final_output = chr(10).join(aligned_lines)
-    
-    # ── Display blocks rendering ──────────────────────────────────────────────
-    final_output += _render_display_blocks(user_ctx, pins_ctx, parsed_data)
 
-
-    # Validation: Do not proceed if generic TODO pins are left active, preventing Klipper startup errors
-    active_todos = []
-    current_section = "unknown"
-    for line in final_output.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and "]" in stripped:
-            current_section = stripped
-        elif "TODO" in line and not line.lstrip().startswith("#"):
-            key = line.split(":")[0].strip().lstrip("#").strip()
-            active_todos.append((current_section, key))
-
-    if active_todos:
-        if verbose:
-            print("\n\033[91mCRITICAL ERROR: Configuration generated with unresolved 'TODO' values!\033[0m")
-            print("\033[93mThis usually happens if your board does not map all required pins natively.\033[0m")
-            for section, key in active_todos:
-                print(f"TODO_FOUND: {section} -> {key}")
-            print("\033[91mGeneration aborted to guarantee it starts without errors in Klipper.\033[0m")
-        raise GenerationError(
-            "Configuration has unresolved TODO pins — generation aborted.",
-            todos=active_todos,
-        )
-        
-    # Write to printer.cfg
-    if not output_path:
-        base_path = os.path.expanduser('~/kace')
-        os.makedirs(base_path, exist_ok=True)
-        cfg_file = os.path.join(base_path, 'printer.cfg')
-    else:
-        parent = os.path.dirname(os.path.abspath(output_path))
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        cfg_file = output_path
-        
-    with open(cfg_file, 'w', encoding='utf-8') as f:
-        f.write(final_output)
-
-    if include_macros or user_data.get("macros_generated"):
-        output_dir = os.path.dirname(cfg_file)
-        generate_starter_macros(output_dir)
-
-    return {
-        "content": final_output,
-        "motion_space": user_ctx["motion_space"],
-        "bed_mesh": user_ctx.get("bed_mesh")
-    }
+    return chr(10).join(aligned_lines)

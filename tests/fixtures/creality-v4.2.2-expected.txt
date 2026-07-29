@@ -88,6 +88,8 @@ max_temp: 250                                   # Maximum safe temperature
 # --------------------------------------------------
 
 [bltouch]
+pin_up_touch_mode_reports_triggered: False      # Prevents startup probe verification loop on BLTouch V3/V3.1 and clones
+probe_with_touch_mode: True                     # Use touch mode for more reliable probing
 sensor_pin: ^PB1                                # Pin connected to the probe sensor
 control_pin: PB0                                # Pin connected to the probe control
 x_offset: 0                                     # distance from nozzle to probe in X (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
