@@ -18,7 +18,6 @@ Both functions have hardcoded fallback schemas so they work even
 when advanced_modules.yaml is missing.
 """
 
-import os
 import textwrap
 
 # ---------------------------------------------------------------------------

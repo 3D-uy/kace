@@ -1,10 +1,9 @@
 import re
 import os
 from core.menu import autocomplete_select, simple_input, yes_no, numbered_select
-from core.style import custom_style
 from core.translations import t, get_lang
 from core.exceptions import WizardExit
-from core.validators import questionary_pin_validator, questionary_numeric_validator
+from core.validators import questionary_pin_validator
 from core.probe_offset_visualizer import run_probe_offset_step
 from data.profiles import THERMISTOR_PRESETS
 from core.wizard.runner import _BACK, _QUIT

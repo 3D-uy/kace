@@ -15,7 +15,6 @@ from .build_mode import (
     FIRMWARE_MINIMUM_SIZE_BYTES,
 )
 from core.translations import t
-from core.exceptions import DerivationAmbiguityError
 
 
 def _tmp_is_noexec() -> bool:

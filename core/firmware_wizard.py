@@ -1,9 +1,8 @@
 import sys
-from core.menu import simple_input, yes_no, numbered_select, Choice
+from core.menu import simple_input, yes_no, numbered_select
 from core.validators import questionary_arch_validator, questionary_hex_offset_validator
-from core.style import custom_style
 from core.translations import t
-from core.terminal import BOLD, INFO, RESET, SUCCESS, WARNING
+from core.terminal import BOLD, INFO, RESET, WARNING
 from core.exceptions import DerivationAmbiguityError
 from firmware.derivation import derive_config
 from firmware.builder import build_firmware_orchestrator, BuildContext

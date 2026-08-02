@@ -1,4 +1,3 @@
-import os
 
 # ── Firmware configuration database ───────────────────────────────────────────
 # Loaded from data/boards.yaml (mcu_firmware section).

@@ -2,8 +2,7 @@ import copy
 import os
 from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
 from core.scraper import fetch_raw_config, parse_config, extract_profile_defaults
-from core.style import custom_style
-from core.translations import t, get_lang
+from core.translations import t
 from core.terminal import DIM, ERROR, INFO, RESET, SECTION, WARNING
 from core.exceptions import WizardExit
 from core.validators import questionary_numeric_validator, questionary_pos_numeric_validator, questionary_thermistor_validator

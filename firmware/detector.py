@@ -1,8 +1,7 @@
 import glob
 import re
 import os
-from core.menu import simple_input, yes_no, numbered_select
-from core.style import custom_style
+from core.menu import simple_input, numbered_select
 from core.terminal import ERROR, INFO, RESET, SUCCESS, WARNING
 from core.translations import t
 

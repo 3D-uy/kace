@@ -23,10 +23,8 @@
 #   (category → recommendation → manual override with risk analysis) can be
 #   replicated for CAN devices, ADXL345, relay boards, etc.
 
-import sys
 from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator
 
-from core.style import custom_style
 from core.translations import t
 from core.terminal import BOLD, DIM, ERROR, INFO, QUESTION, RESET, SECTION, SUCCESS, WARNING
 from .exceptions import WizardExit

@@ -1,6 +1,6 @@
 import os
 from core.translations import t, get_mode
-from core.wizard.runner import PHASE_MAP, PHASE_KEYS, PHASE_ORDER, _BACK, _QUIT
+from core.wizard.runner import PHASE_MAP, PHASE_KEYS, _BACK, _QUIT
 from core.terminal import HINT, INPUT, QUESTION, RESET, SECTION
 
 

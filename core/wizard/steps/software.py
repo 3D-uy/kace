@@ -1,5 +1,4 @@
-from core.menu import simple_input, yes_no, numbered_select
-from core.style import custom_style
+from core.menu import numbered_select
 from core.translations import t
 from core.exceptions import WizardExit
 from core.display_wizard import run_display_setup_step

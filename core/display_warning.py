@@ -1,6 +1,5 @@
 # core/display_warning.py
 from core.menu import simple_input, yes_no
-from core.style import custom_style
 from core.translations import t
 from core.terminal import BOLD, ERROR, INFO, QUESTION, RESET, SUCCESS, WARNING
 

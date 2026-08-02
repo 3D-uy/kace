@@ -2,8 +2,6 @@
 # All user-facing UI strings keyed by a short dot-separated ID.
 # Each entry maps language name -> display string.
 
-from core.translations._state import _SUPPORTED_LANGS  # noqa: F401 (re-exported)
-
 UI_STRINGS: dict = {
     # ── Wizard prompts ─────────────────────────────────────────
     "wizard.select_mode": {

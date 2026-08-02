@@ -27,8 +27,6 @@
 #   - Never modifies the parsed config
 #   - Never raises exceptions to the caller
 
-import os
-
 # ── Known display section names ────────────────────────────────────────────────
 # All Klipper config section names that indicate a display-related component.
 # Used to filter parsed config keys before database lookup.

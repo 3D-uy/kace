@@ -1,6 +1,5 @@
 from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
-from core.scraper import fetch_config_list, fetch_raw_config, parse_config, get_reusable_driver_sockets, detect_fan_pins, detect_driver_info
-from core.style import custom_style
+from core.scraper import fetch_raw_config, parse_config, get_reusable_driver_sockets, detect_fan_pins, detect_driver_info
 from core.translations import t
 from core.terminal import ERROR, INFO, RESET, WARNING
 from core.exceptions import WizardExit
