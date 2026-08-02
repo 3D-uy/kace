@@ -859,7 +859,8 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         }
         self.assertEqual(_step_custom_probe(user_data), "done")
         self.assertEqual(user_data["custom_probe"].primary_section, "probe")
-        self.assertIsNone(user_data["custom_probe"].z_offset)
+        self.assertEqual(user_data["custom_probe"].z_offset, 0.0)
+        self.assertIn("z_offset: 0", user_data["custom_probe"].config_text)
         self.assertIn("samples: 2", user_data["custom_probe"].config_text)
         self.assertEqual(user_data["probe_x_offset"], "-12")
         self.assertEqual(user_data["probe_y_offset"], "4.5")
