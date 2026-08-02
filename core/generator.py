@@ -37,6 +37,32 @@ def has_todo_pins(parsed_data: dict) -> list:
     return todos
 
 
+def _native_feature_sections(parsed_data: dict) -> dict:
+    """Return idempotent defaults for KACE-managed Klipper features.
+
+    Existing section values are copied verbatim. Defaults are added only when
+    the corresponding option is absent, including case-insensitive matches.
+    """
+    sections = {}
+    for target in ("exclude_object", "force_move"):
+        existing = next(
+            (
+                values
+                for name, values in parsed_data.items()
+                if str(name).strip().casefold() == target
+                and isinstance(values, dict)
+            ),
+            {},
+        )
+        sections[target] = dict(existing)
+
+    force_move = sections["force_move"]
+    if not any(str(key).strip().casefold() == "enable_force_move" for key in force_move):
+        force_move["enable_force_move"] = "True"
+
+    return sections
+
+
 def _validate_and_sanitize_geometry(user_ctx: dict) -> None:
     """Enforce stepper constraints, sanitize geometry values, and validate printable area.
 
@@ -380,6 +406,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         pins_ctx["heater_fan hotend_fan"] = {"pin": fan_hotend}
 
     pins_ctx['_advanced_sections'] = get_advanced_sections(parsed_data)
+    pins_ctx['_native_features'] = _native_feature_sections(parsed_data)
 
     # Render the template with parsed pins and user input
     output = template.render(

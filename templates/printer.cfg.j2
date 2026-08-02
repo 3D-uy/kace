@@ -38,6 +38,17 @@ max_z_velocity: 5 # Maximum velocity (in mm/s) of movement along the z axis
 max_z_accel: 100 # Maximum acceleration (in mm/s^2) of movement along the z axis
 
 # --------------------------------------------------
+# Native utility features
+# --------------------------------------------------
+
+[exclude_object]
+{% for key, value in pins['_native_features']['exclude_object'].items() %}{{ key }}: {{ value }}
+{% endfor %}
+[force_move]
+{% for key, value in pins['_native_features']['force_move'].items() %}{{ key }}: {{ value }}
+{% endfor %}
+
+# --------------------------------------------------
 # Steppers
 # --------------------------------------------------
 

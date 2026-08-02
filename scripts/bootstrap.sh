@@ -36,6 +36,98 @@ log_err() {
     echo -e "${C_RED}✘  $1${C_RESET}" >&2
 }
 
+# BEGIN KACE_CONFIG_DEFAULT_HELPER
+# Add a missing INI-style section or option without changing existing values.
+# Writes are atomic and repeated calls are no-ops once the entry exists.
+ensure_config_entry() {
+    local config_path="$1"
+    local section_name="$2"
+    local option_name="${3:-}"
+    local default_value="${4:-}"
+
+    python3 - "$config_path" "$section_name" "$option_name" "$default_value" <<'PY'
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+section_name = sys.argv[2]
+option_name = sys.argv[3]
+default_value = sys.argv[4]
+
+content = path.read_text(encoding="utf-8") if path.exists() else ""
+newline = "\r\n" if "\r\n" in content else "\n"
+lines = content.splitlines()
+section_re = re.compile(r"^\s*\[\s*([^\]]+?)\s*\]\s*(?:[#;].*)?$", re.IGNORECASE)
+
+section_indexes = []
+for index, line in enumerate(lines):
+    match = section_re.match(line)
+    if match and match.group(1).strip().casefold() == section_name.casefold():
+        section_indexes.append(index)
+
+changed = False
+if not section_indexes:
+    if lines and lines[-1].strip():
+        lines.append("")
+    lines.append(f"[{section_name}]")
+    if option_name:
+        lines.append(f"{option_name}: {default_value}")
+    changed = True
+elif option_name:
+    option_re = re.compile(
+        rf"^\s*{re.escape(option_name)}\s*[:=]", re.IGNORECASE
+    )
+    option_found = False
+    for section_start in section_indexes:
+        section_end = len(lines)
+        for index in range(section_start + 1, len(lines)):
+            if section_re.match(lines[index]):
+                section_end = index
+                break
+        if any(option_re.match(line) for line in lines[section_start + 1:section_end]):
+            option_found = True
+            break
+
+    if not option_found:
+        insert_at = len(lines)
+        for index in range(section_indexes[0] + 1, len(lines)):
+            if section_re.match(lines[index]):
+                insert_at = index
+                break
+        while insert_at > section_indexes[0] + 1 and not lines[insert_at - 1].strip():
+            insert_at -= 1
+        lines.insert(insert_at, f"{option_name}: {default_value}")
+        changed = True
+
+if not changed:
+    raise SystemExit(0)
+
+path.parent.mkdir(parents=True, exist_ok=True)
+mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+fd, temporary_name = tempfile.mkstemp(
+    prefix=f".{path.name}.", suffix=".part", dir=str(path.parent)
+)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as temporary:
+        temporary.write(newline.join(lines) + newline)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+    os.chmod(temporary_name, mode)
+    os.replace(temporary_name, path)
+except BaseException:
+    try:
+        os.unlink(temporary_name)
+    except FileNotFoundError:
+        pass
+    raise
+PY
+}
+# END KACE_CONFIG_DEFAULT_HELPER
+
 wait_for_apt_locks() {
     echo "Checking for package manager locks..."
     local count=0
@@ -411,10 +503,8 @@ mkdir -p "$PRINTER_HOME/printer_data/config"
 mkdir -p "$PRINTER_HOME/printer_data/gcodes"
 mkdir -p "$PRINTER_HOME/printer_data/comms"
 
-# moonraker.conf
-# NOTE: If moonraker.conf exists but lacks the [authorization] section,
-# it will be completely overwritten with our default template.
-if [ ! -f "$PRINTER_HOME/printer_data/config/moonraker.conf" ] || ! grep -q "\[authorization\]" "$PRINTER_HOME/printer_data/config/moonraker.conf"; then
+# moonraker.conf — create a baseline only when no user configuration exists.
+if [ ! -f "$PRINTER_HOME/printer_data/config/moonraker.conf" ]; then
     echo "Creating default moonraker.conf..."
     cat <<EOF > "$PRINTER_HOME/printer_data/config/moonraker.conf"
 [server]
@@ -445,6 +535,10 @@ cors_domains:
 enable_object_processing: True
 EOF
 fi
+
+ensure_config_entry \
+    "$PRINTER_HOME/printer_data/config/moonraker.conf" \
+    "file_manager" "enable_object_processing" "True"
 
 # printer.cfg — [include] line written conditionally per selected dashboard
 if [ "$PREBAKED" = "true" ]; then
@@ -507,6 +601,13 @@ EOF
         fi
     fi
 fi
+
+ensure_config_entry \
+    "$PRINTER_HOME/printer_data/config/printer.cfg" \
+    "exclude_object"
+ensure_config_entry \
+    "$PRINTER_HOME/printer_data/config/printer.cfg" \
+    "force_move" "enable_force_move" "True"
 
 # Make sure permissions are correct
 $SUDO chown -R "${PRINTER_USER}:${PRINTER_GROUP}" "$PRINTER_HOME/printer_data"

@@ -30,6 +30,16 @@ max_z_velocity: 5                               # Maximum velocity (in mm/s) of 
 max_z_accel: 100                                # Maximum acceleration (in mm/s^2) of movement along the z axis
 
 # --------------------------------------------------
+# Native utility features
+# --------------------------------------------------
+
+[exclude_object]
+
+[force_move]
+enable_force_move: True
+
+
+# --------------------------------------------------
 # Steppers
 # --------------------------------------------------
 

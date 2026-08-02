@@ -658,7 +658,7 @@ class TestGenerateConfigMacros(unittest.TestCase):
             )
 
     def test_include_macros_fallback_to_user_data(self):
-        """When include_macros=False but user_data['macros_generated']=True, must still add include and create macros.cfg."""
+        """A persisted macro choice must still add and create macros.cfg."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "printer.cfg")
             user = _user(macros_generated=True)
@@ -671,6 +671,44 @@ class TestGenerateConfigMacros(unittest.TestCase):
                 "macros.cfg must be created when user_data['macros_generated']=True"
             )
 
+
+@_skip_no_jinja2
+class TestGenerateConfigNativeFeatures(unittest.TestCase):
+
+    def test_native_features_are_enabled_by_default(self):
+        output = _generate(_parsed(), _user())
+
+        self.assertEqual(output.count("[exclude_object]"), 1)
+        self.assertEqual(output.count("[force_move]"), 1)
+        self.assertEqual(output.count("enable_force_move: True"), 1)
+
+    def test_existing_force_move_value_is_preserved(self):
+        parsed = _parsed(force_move={"enable_force_move": "False"})
+
+        output = _generate(parsed, _user())
+
+        self.assertEqual(output.count("[force_move]"), 1)
+        self.assertIn("enable_force_move: False", output)
+        self.assertNotIn("enable_force_move: True", output)
+
+    def test_existing_sections_and_options_are_not_duplicated(self):
+        parsed = _parsed(**{
+            "Exclude_Object": {},
+            "Force_Move": {
+                "Enable_Force_Move": "False",
+                "custom_option": "preserved",
+            },
+        })
+
+        first = _generate(parsed, _user())
+        second = _generate(parsed, _user())
+
+        self.assertEqual(first, second)
+        self.assertEqual(first.count("[exclude_object]"), 1)
+        self.assertEqual(first.count("[force_move]"), 1)
+        self.assertEqual(first.lower().count("enable_force_move:"), 1)
+        self.assertIn("Enable_Force_Move: False", first)
+        self.assertIn("custom_option: preserved", first)
 
 # ── generate_config() — user_data mutation side-effect ───────────────────────
 
