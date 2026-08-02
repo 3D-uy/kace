@@ -1,274 +1,213 @@
 <p align="center">
-  <img src="docs/assets/kace_banner.png" width="1000"><br>
+  <img src="docs/assets/kace_banner.png" width="1000" alt="KACE banner">
 </p>
 
-<h1 align="center">🚀 KACE — Klipper Automated Configuration Ecosystem</h1>
+<h1 align="center">KACE</h1>
 
 <p align="center">
-  <a href="https://github.com/3D-uy/kace/actions/workflows/ci.yml">
-    <img src="https://github.com/3D-uy/kace/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI">
-  </a>
-  <img src="https://img.shields.io/badge/version-v0.9.3.3-blue?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/configs%20validated-192-brightgreen?style=flat-square" alt="Configs Validated">
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Raspberry%20Pi-green?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/github/license/3D-uy/KACE?style=flat-square" alt="License">
+  Klipper Automated Configuration Ecosystem
 </p>
 
 <p align="center">
-🌐 <strong>Language</strong><br>
-🇺🇸 English | 🇪🇸 <a href="docs/es/README.md">Español</a> | 🇧🇷 <a href="docs/pt/README.md">Português</a>
+  <a href="https://github.com/3D-uy/KACE/actions/workflows/ci.yml"><img src="https://github.com/3D-uy/KACE/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/status-pre--1.0-yellow" alt="Project status: pre-1.0">
+  <img src="https://img.shields.io/badge/Python-3.11%2B-blue" alt="Python 3.11 or newer">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Raspberry%20Pi-green" alt="Linux and Raspberry Pi">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0 license"></a>
 </p>
 
----
+<p align="center">
+  English · <a href="docs/es/README.md">Español</a> · <a href="docs/pt/README.md">Português</a>
+</p>
 
-## ⚡ Install Klipper without the headaches
+## Overview
 
-KACE automates the entire Klipper setup process — from hardware detection to firmware compilation and ready-to-use configuration generation.
+KACE is the Raspberry Pi-side interactive CLI in the KACE ecosystem. It guides a user through printer hardware choices, derives a Klipper configuration, can build the matching MCU firmware, and deploys the generated artifacts through supported local or remote paths.
 
-👉 Fewer errors  
-👉 Less time  
-👉 More printing
+KACE does not replace Klipper and it does not eliminate printer commissioning. Wiring, pin assignments, motion limits, heaters, sensors, homing, and the first controlled movement must still be verified by the person responsible for the machine.
 
----
+## How KACE and KACE Studio work together
 
-## 🧠 What is KACE?
+The two projects are independent repositories with a deliberately narrow integration boundary:
 
-An **intelligent configuration and firmware engine** that:
+1. [KACE Studio](https://github.com/3D-uy/KACE-studio) writes a Raspberry Pi image and injects network, first-boot, and KACE bootstrap files.
+2. After the Pi boots, Studio discovers it, connects over SSH, and starts the injected `bootstrap.sh`.
+3. The bootstrap provisions Klipper, Moonraker, the selected web interface, optional Crowsnest support, and KACE.
+4. KACE then generates and deploys the printer-specific configuration and firmware artifacts.
 
-- 🔍 Automatically detects your hardware (MCU)
-- 📦 Fetches official Klipper configurations from GitHub
-- ⚙️ Generates a clean, ready-to-use `printer.cfg`
-- 🔥 Compiles firmware (`klipper.bin` / `.uf2` / `.hex`)
-- 🧭 Guides you interactively only when strictly necessary
-- 🌐 Works in English, Spanish, and Portuguese
+Studio pins the KACE bootstrap by immutable Git commit and SHA-256 in CI. The bootstrap, in turn, pins the KACE installer URL, revision, and SHA-256 as one contract. Machine-readable stage and error markers in `scripts/bootstrap.sh` are consumed by the Studio UI and must remain synchronized.
 
----
+## Current status
 
-## ⚡ Installation
+KACE is in active pre-1.0 development. Its configuration generators, snapshot tests, board coverage checks, pinned-Klipper matrices, and containerized firmware builds run in CI. Those automated checks do not substitute for physical validation on every supported controller, probe, display, or printer.
 
-For production deployments, the installer targets the `main` branch and dependencies are hash-verified.
+The authoritative project version is stored in `VERSION`. The `main` branch may change without backward-compatibility guarantees until a stable release process is established.
 
-### Quick start (recommended for convenience)
+## Features
+
+- Guided CLI in English, Spanish, and Portuguese.
+- Board and MCU profile resolution from maintained YAML data.
+- Configuration generation for the implemented Cartesian and CoreXY flows.
+- Probe flows for no probe, BLTouch, CR Touch, inductive, and custom probes.
+- Display compatibility checks and generated display configuration where supported.
+- Klipper configuration and macro generation from project templates.
+- Optional Klipper MCU firmware derivation and build.
+- Local, USB, SSH/SFTP, and Moonraker-oriented deployment paths.
+- Backup, validation, and rollback support around deployment.
+- Stable generated-artifact location under `~/kace/` on the printer host.
+
+Unsupported or contradictory selections are expected to fail safely rather than produce a configuration that is known to be invalid.
+
+## Requirements
+
+### End users
+
+- A Debian-family Linux printer host, normally a Raspberry Pi.
+- Python 3.11 or newer.
+- Git and standard system packages installed by `install.sh`.
+- Network access for installation and for operations that fetch upstream Klipper data.
+- Appropriate access to the chosen deployment target.
+
+### Contributors
+
+- Python 3.11.
+- Git.
+- Docker for the pinned-Klipper validation matrix and containerized firmware builds.
+
+## Installation
+
+### Provision a new printer host with KACE Studio
+
+For a new Raspberry Pi, use [KACE Studio](https://github.com/3D-uy/KACE-studio). Studio handles imaging, first-boot configuration, discovery, SSH access, and the pinned KACE bootstrap flow.
+
+### Install directly on an existing Linux host
+
+The convenience command installs from the mutable `main` branch:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
 ```
 
-> **Security tradeoff:** this streams code from the network directly to Bash. You cannot inspect or verify the exact downloaded file before it runs. Use it only when you trust the KACE GitHub source and your network path.
+This streams network content directly to Bash. For an auditable installation, download `install.sh` from an immutable commit or tag, verify its SHA-256 through a separately trusted value, inspect it, and then execute it. `install.sh` honors `KACE_SOURCE_REF` so an integrator can install the repository content from the same immutable revision as the installer.
 
-### Verified installation (recommended when integrity verification matters)
-
-Download the file first, compare its SHA-256 to a value obtained from a **separate trusted channel** (for example, the matching KACE release notes), then execute it:
+### Run from a source checkout
 
 ```bash
-# 1. Choose a release and copy its published installer SHA-256 from a trusted channel.
-INSTALL_REF='vX.Y.Z'
-EXPECTED_SHA256='paste-the-trusted-sha256-here'
-
-# 2. Download the installer, then verify it before execution.
-curl -fsSLo install.sh "https://raw.githubusercontent.com/3D-uy/KACE/${INSTALL_REF}/install.sh"
-printf '%s  %s\n' "$EXPECTED_SHA256" install.sh | sha256sum -c -
-
-# 3. Run only after sha256sum reports "install.sh: OK".
-bash install.sh
+git clone https://github.com/3D-uy/KACE.git
+cd KACE
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install --require-hashes -r requirements.txt
+python kace.py
 ```
 
-If the check fails, stop and do not run the file. Do not fetch the expected checksum from the same mutable branch as the installer. This check verifies the installer script; the installer itself currently installs KACE from `main`.
+Run `python kace.py --help` for the available CLI options.
 
-> Installs all dependencies with pip hash validation, clones the repository (shallow + sparse), and sets up the global `kace` command.
+## End-to-end workflow
 
----
+1. Provision or prepare the Linux printer host.
+2. Launch KACE with `kace` after installation, or `python kace.py` from a checkout.
+3. Select language and describe the printer, controller, motion system, endstops, bed, heaters, sensors, probe, display, and software choices.
+4. Let KACE resolve the board profile and generate the Klipper configuration under `~/kace/`.
+5. Build the MCU firmware when required by the selected board workflow.
+6. Review the generated artifacts and deploy them using the chosen local or remote target.
+7. Flash the MCU only according to the controller manufacturer's documented procedure.
+8. Start Klipper and complete its official verification sequence before energizing heaters or commanding unrestricted motion.
 
-## 📋 Requirements
+## Architecture
 
-✔ Raspberry Pi running Mainsail OS / FluiddPI (Klipper + Moonraker pre-installed)  
-✔ SSH access to your Pi
-
-❌ You **no longer** need to:
-
-- Manually compile firmware
-- Hand-craft `printer.cfg` files
-
----
-
-## 🎬 Documentation
-
-| Guide | Link |
-|-------|------|
-| Testing Guide | [`docs/en/TESTING.md`](docs/en/TESTING.md) |
-| Contributing | [`docs/en/CONTRIBUTING.md`](docs/en/CONTRIBUTING.md) |
-| Release Engineering | [`docs/RELEASE.md`](docs/RELEASE.md) |
-| Display Compatibility 🖥️ | [`docs/en/DISPLAYS.md`](docs/en/DISPLAYS.md) |
-| Pi Imager Setup 🇺🇸 | [`docs/en/pi_imager.md`](docs/en/pi_imager.md) |
-| Klipper Install 🇺🇸 | [`docs/en/Klipper_install.md`](docs/en/Klipper_install.md) |
-| **Full Sweep Results 📊** | [`SWEEP_RESULTS.md`](SWEEP_RESULTS.md) |
-| Español 🇪🇸 | [`docs/es/README.md`](docs/es/README.md) |
-| Português 🇧🇷 | [`docs/pt/README.md`](docs/pt/README.md) |
-
-
----
-
-## 🟢 Validation Status
-
-KACE has been validated against the **complete official Klipper configuration library** using its automated regression framework.
-
-**Latest full sweep — 192 configs tested against [Klipper master](https://github.com/Klipper3d/klipper/tree/master/config):**
-
-| Result | Count | Meaning |
-|--------|-------|---------|
-| ✅ **PASS** | **192** | Full parse + config generation succeeded |
-| 🔵 **UNSUPPORTED** | **0** | — |
-| 🟠 **SAFE\_ABORT** | **0** | — |
-| 🔴 **FAILURE** | **0** | **Zero hard crashes** |
-
-- **Zero Python exceptions** across all 192 official configs
-- **Zero template failures** — every parseable config generates cleanly
-- **Zero parser regressions** — deterministic output on every run
-- **10 generation warnings** — all delta-kinematics printers where Klipper itself ships `TODO` endstop pins by design
-
-Configs with advanced features (RGB/neopixel, SX1509, ADXL345) are now fully supported via clean commented-out passthrough blocks in the generated output.
-
-📄 **[View the complete sweep results → SWEEP_RESULTS.md](SWEEP_RESULTS.md)**  
-Includes a full per-config breakdown of all 192 boards, printers, and displays.
-
-> Run the sweep yourself: `python3 tests/run_tests.py --full-klipper-sweep`
-
----
-
-## 🧪 Automated Testing
-
-KACE ships with a production-grade test framework built entirely on the Python standard library — **zero test dependencies**.
-
-| What | How |
-|------|-----|
-| Unit tests | Derivation logic, YAML loading, BLTouch injection, offline deployer |
-| Snapshot regression | Golden `.cfg` files locked per board — fails on any character diff |
-| YAML integrity | Schema validation + pattern precedence check on every run |
-| Full config sweep | 192+ official Klipper configs parsed and classified on every `main` push |
-| CI pipeline | GitHub Actions — 5 stages, concurrency cancellation, merge blocking |
-
-```
-Current status: +300 tests passing ✅
-```
-
-```bash
-python3 tests/run_tests.py                   # full suite
-python3 tests/run_tests.py --yaml-check      # YAML integrity only
-python3 tests/run_tests.py --full-klipper-sweep  # 192-config sweep
-```
-
-See [`docs/en/TESTING.md`](docs/en/TESTING.md) for the full testing guide.
-
----
-
-## 🏗️ Architecture Highlights
-
-- **YAML-driven hardware database** — add a new board with a single YAML edit, no Python changes
-- **Modular firmware derivation** — MCU → Kconfig parameters via ordered pattern matching
-- **Automatic fallback recovery** — every data load has a hardcoded fallback; YAML failures never crash production
-- **Sparse + shallow installer** — minimal download footprint on Raspberry Pi hardware
-- **Lazy optional dependencies** — SSH support installs on first use, not at install time
-- **Deterministic config generation** — Jinja2 rendering is snapshot-protected and reproducible
-- **4-code sweep classification** — `PASS / SAFE_ABORT / UNSUPPORTED / FAILURE` for clear diagnostics
-
-See [`docs/en/ARCHITECTURE.md`](docs/en/ARCHITECTURE.md) for the full reference.
-
----
-
-## 🛠️ Key Features
-
-| Feature | Description |
+| Area | Responsibility |
 | --- | --- |
-| 🔍 **MCU Auto-detection** | Identifies your connected board via USB/serial |
-| 🧠 **Intelligent Engine** | Derives firmware config without manual `make menuconfig` |
-| ⚙️ **Config Generator** | Generates a clean `printer.cfg` from official Klipper data |
-| 🔥 **Firmware Builder** | Compiles `klipper.bin` / `.uf2` / `.hex` automatically |
-| 🧪 **Pre-validation** | Catches TODO pins and config errors before they reach your printer |
-| 🌐 **GitHub Scraper** | Always pulls from official, up-to-date Klipper configurations |
-| 💻 **Interactive CLI** | Guided wizard in EN / ES / PT with ANSI colour UI |
-| 📡 **System Dashboard** | Detects Klipper, Moonraker, Mainsail, Fluidd, Crowsnest on startup |
+| `kace.py` | CLI entry point, argument parsing, and top-level orchestration |
+| `core/wizard/` | Interactive workflow and normalized user selections |
+| `core/scraper.py`, `core/hardware_detector.py` | Upstream configuration retrieval and hardware discovery |
+| `core/generator.py`, `core/templates.py` | Klipper configuration and macro generation |
+| `firmware/` | Board-specific firmware derivation, validation, and build |
+| `core/deployer.py`, `core/moonraker.py` | Deployment, remote transfer, backup, and rollback paths |
+| `data/`, `templates/`, `config/` | Board contracts, translations, generated-content templates, and configuration data |
+| `scripts/bootstrap.sh` | Integration contract used by KACE Studio to provision a printer host |
+| `tests/` | Unit, regression, snapshot, schema, sweep, and pinned-Klipper matrix validation |
 
----
+Generated printer artifacts remain separate from the source tree at `~/kace/`.
 
-## 🧭 How it works
+## Technologies
 
-```
-1. 🔍 Detect MCU via USB/serial
-2. 📦 Fetch official Klipper config for your board
-3. 🧠 Derive firmware parameters (MCU family → Kconfig)
-4. 💬 Ask only what can't be safely assumed
-5. ⚙️ Generate printer.cfg (Jinja2, validated, TODO-free)
-6. 🔥 Compile firmware automatically
-7. 📁 Deploy to ~/kace/ (or USB / SSH)
-```
+- Python, Questionary, PyYAML, and Jinja2.
+- Paramiko for the optional SSH/SFTP deployment path.
+- Bash for installation and host provisioning.
+- Docker for reproducible Klipper parsing and MCU build validation.
+- GitHub Actions for CI.
 
----
+## Testing and validation
 
-## 📦 Output
-
-```
-~/kace/
-├── printer.cfg          # Ready-to-use Klipper configuration
-└── klipper.bin          # Compiled firmware (or .uf2 / .hex)
-```
-
----
-
-## 🚀 Next Steps
-
-1. Flash firmware to your board (SD card / USB)
-2. Upload `printer.cfg` to Klipper / Moonraker
-3. Restart:
+Install the locked runtime dependencies, then run the narrow validation needed for the change:
 
 ```bash
-sudo reboot
+python tests/run_tests.py --verbose
+python tests/run_tests.py --yaml-check
+python tests/matrix/run_matrix.py --profile quick
 ```
 
----
-
-## 🙌 Contribute & Feedback
-
-KACE evolves with the community:
-
-* 🐛 [Report bugs](https://github.com/3D-uy/kace/issues)
-* 💡 Suggest improvements
-* 🤝 [Contribute — read the guide](docs/en/CONTRIBUTING.md)
-
----
-
-## ⚠️ Disclaimer
-
-KACE is an open-source tool designed to simplify Klipper configuration.
-
-By using this software, you acknowledge that you do so **at your own risk**.  
-The author assumes **no responsibility for hardware damage, misconfiguration, or unexpected behavior** resulting from the generated configuration.
-
-👉 Always review the generated `printer.cfg` before printing.  
-👉 Verify firmware before flashing.
-
----
-
-## 🗑️ Uninstall
+The full pairwise matrix is intended for manual or pre-release use:
 
 ```bash
-sudo rm -f /usr/local/bin/kace   # or: rm -f ~/.local/bin/kace
-rm -rf ~/kace
+python tests/matrix/run_matrix.py --profile full
 ```
 
----
+The matrix generates configurations through the real KACE flow, validates accepted cases with a fixed Klipper commit inside Docker, distinguishes safe expected rejections from failures, and writes Markdown and JSON reports. The broader upstream configuration sweep is available with:
 
-## 📜 License
+```bash
+python tests/run_tests.py --full-klipper-sweep --verbose
+```
 
-KACE is licensed under GPL-3.0 🛠️
+Snapshot-update modes are maintainer operations and must not be used merely to make a failing test pass. See [Testing](docs/en/TESTING.md) for the test layout and expectations.
 
-For commercial use, distribution in paid products, or rebranding, please contact the author.  
-The "KACE" name and branding may not be used in commercial products without permission.
+## Docker
 
----
+KACE is installed directly on the printer host; it is not shipped as a runtime container. The repository Docker image exists for reproducible development and validation:
 
-<p align="center">
+```bash
+docker build -f docker/ci/Dockerfile -t kace-dev .
+docker run --rm -it -v "$PWD:/workspace" kace-dev
+```
 
-⭐ If you like this project, give it a star  
-🚀 Built to simplify Klipper
+The matrix runner also uses Docker to execute the real configuration loader from its pinned Klipper revision. No physical device is accessed by these validation jobs.
 
-</p>
+## CI/CD
+
+GitHub Actions currently checks:
+
+- Python syntax.
+- Unit and snapshot regression tests.
+- `boards.yaml` schema and precedence rules.
+- A reduced KACE-to-Klipper matrix on pull requests and pushes.
+- The full upstream configuration sweep on pushes to `main`.
+- A full pairwise matrix when manually dispatched.
+- Containerized firmware builds for representative LPC1769, STM32, RP2040, and AVR targets.
+
+CI validates source and generated artifacts. It does not publish a release and it does not exercise real printers or flash physical controllers.
+
+## Compatibility and limits
+
+- Runtime target: Debian-family Linux hosts with Python 3.11 or newer.
+- Automated generation coverage: implemented Cartesian and CoreXY workflows and all board contracts required by the matrix.
+- Automated probe coverage: none, BLTouch, CR Touch, inductive, and custom; unsupported dockable combinations are classified as safe rejections.
+- KACE Studio performs the Windows-side provisioning flow; KACE itself runs on the Linux printer host.
+- Upstream Klipper, board definitions, and third-party web interfaces can change independently. The pinned matrix detects parser incompatibilities but cannot prove electrical or mechanical safety.
+
+## Roadmap
+
+Before 1.0, the project should prioritize reproducible releases, contract synchronization across both repositories, documented hardware qualification, end-to-end installation evidence, and closure of known safety and compatibility risks. After 1.0, work should focus on measured board coverage, migration stability, and contributor-facing diagnostics. Broader automation or additional hardware families belong in a later roadmap only after they have tests and maintainers.
+
+See [CHANGELOG.md](CHANGELOG.md) for recorded changes. Roadmap items are intentions, not shipped features.
+
+## Contributing
+
+Read the [contributor guide](docs/en/CONTRIBUTING.md), [security policy](SECURITY.md), and [code of conduct](CODE_OF_CONDUCT.md) before opening a change. Keep changes scoped, add the narrowest relevant regression coverage, and do not update snapshots without reviewing the generated difference.
+
+Issues and pull requests are managed in the [KACE repository](https://github.com/3D-uy/KACE).
+
+## License
+
+KACE is licensed under the [GNU General Public License v3.0](LICENSE).
