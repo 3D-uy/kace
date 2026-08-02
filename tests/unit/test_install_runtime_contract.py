@@ -37,6 +37,13 @@ class TestInstallRuntimeContract(unittest.TestCase):
         self.assertIn('fetch origin "$INSTALL_REF" --depth=1', self.script)
         self.assertNotIn('--branch "$INSTALL_REF"', self.script)
 
+    def test_unattended_install_can_finish_without_launching_wizard(self):
+        guard_index = self.script.index('${KACE_NO_LAUNCH:-0}')
+        tty_index = self.script.index('exec < /dev/tty')
+        self.assertLess(guard_index, tty_index)
+        unattended_block = self.script[guard_index:tty_index]
+        self.assertIn("exit 0", unattended_block)
+
 
 if __name__ == "__main__":
     unittest.main()

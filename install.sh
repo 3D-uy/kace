@@ -199,6 +199,11 @@ echo -e "  ${G}═════════════════════�
 echo -e "  ${B}${G}  ✅ KACE installed successfully!${R}"
 echo -e "  ${G}══════════════════════════════════════════${R}"
 echo ""
+if [ "${KACE_NO_LAUNCH:-0}" = "1" ]; then
+    echo -e "  ${C}KACE launch skipped for unattended provisioning.${R}"
+    exit 0
+fi
+
 echo -e "  ${C}Launching KACE...${R}"
 sleep 1
 # Reconnect stdin to the terminal so interactive prompts (questionary) work
