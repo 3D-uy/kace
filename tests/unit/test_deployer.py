@@ -241,7 +241,11 @@ class TestDeployer(unittest.TestCase):
     @patch('core.moonraker.upload_printer_cfg')
     @patch('core.moonraker.restart_firmware')
     @patch('builtins.print')
-    def test_deploy_moonraker_success(self, mock_print, mock_restart, mock_upload, mock_check, mock_select, mock_text):
+    @patch('core.deployer.os.path.isfile', return_value=True)
+    def test_deploy_moonraker_success(
+        self, mock_isfile, mock_print, mock_restart, mock_upload, mock_check,
+        mock_select, mock_text,
+    ):
         """Test successful moonraker deploy & restart firmware."""
         # Mock connection prompts
         mock_text.side_effect = [
@@ -378,6 +382,7 @@ class TestDeployMoonrakerWorkflow(unittest.TestCase):
             patch('core.moonraker.download_printer_cfg', return_value=(False, b"")),
             patch('core.moonraker.check_klipper_ready', return_value=(False, "unreachable")),
             patch('core.moonraker.verify_remote_file_exists', return_value=False),
+            patch('core.deployer.os.path.isfile', return_value=True),
             patch('time.sleep'),
         ]
         for p in self.patches:

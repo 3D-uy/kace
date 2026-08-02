@@ -409,9 +409,11 @@ class TestBackupRollbackIntegration(unittest.TestCase):
     @patch("core.moonraker.upload_printer_cfg")
     @patch("core.snapshot.restart_firmware")
     @patch("builtins.print")
+    @patch("core.deployer.os.path.isfile", return_value=True)
     def test_moonraker_unconditional_rollback_on_upload_failure(
-        self, mock_print, mock_snap_restart, mock_upload, mock_snap_upload,
-        mock_download, mock_list_files, mock_exists, mock_text, mock_sleep, mock_check_mr
+        self, mock_isfile, mock_print, mock_snap_restart, mock_upload,
+        mock_snap_upload, mock_download, mock_list_files, mock_exists,
+        mock_text, mock_sleep, mock_check_mr
     ):
         """Verify Moonraker deployment triggers rollback on exception/upload failure."""
         from core.deployer import deploy_moonraker
