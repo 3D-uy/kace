@@ -30,6 +30,7 @@ _ap.add_argument("--version", "-v", action="store_true", help="Print version and
 _ap.add_argument("--auto", action="store_true", help="Non-interactive mode (CI/auto deploy)")
 _ap.add_argument("--dev-deploy", action="store_true", dest="dev_deploy", help="Enable dev-deploy mode")
 _ap.add_argument("--debug", action="store_true", help="Enable KACE_DEBUG verbose output")
+_ap.add_argument("--real-build", action="store_true", dest="real_build", help="Use the real system make binary")
 _known, _ = _ap.parse_known_args()
 
 if _known.version:
@@ -41,6 +42,8 @@ if _known.dev_deploy:
     os.environ["KACE_DEV_DEPLOY"] = "1"
 if _known.debug:
     os.environ["KACE_DEBUG"] = "1"
+if _known.real_build:
+    os.environ["KACE_REAL_BUILD"] = "1"
 # Resolve make command at the application boundary
 _make_command = "make"
 if os.environ.get("KACE_REAL_BUILD") == "1":
