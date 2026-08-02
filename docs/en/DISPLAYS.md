@@ -176,4 +176,4 @@ KACE's display database (`data/displays.yaml`) is designed for future expansion 
 - [Mainsail Documentation](https://docs.mainsail.xyz/)
 - [Fluidd Documentation](https://docs.fluidd.xyz/)
 - [KACE Testing Guide](TESTING.md)
-- [KACE Architecture](ARCHITECTURE.md)
+- [KACE architecture summary](../../README.md#architecture)

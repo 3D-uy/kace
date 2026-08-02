@@ -1,166 +1,110 @@
-# Release Engineering Guide
+# KACE release engineering guide
 
-This document explains how to cut a KACE release, maintain semantic versioning,
-and roll back safely if a release introduces regressions.
+KACE is currently pre-1.0. This guide describes the intended maintainer procedure; it does not imply that a stable release or binary distribution exists.
 
----
+## Version source
 
-## Semantic Versioning
+`VERSION` is the project version source. `kace.py` reads it at runtime. A release commit must update `VERSION` and `CHANGELOG.md` together; ordinary maintenance work must not change either value unnecessarily.
 
-KACE follows [Semantic Versioning 2.0.0](https://semver.org/):
+KACE uses semantic versioning:
 
-```
-vMAJOR.MINOR.PATCH
-```
+- Major: incompatible schema, workflow, installation, or generated-output contract.
+- Minor: backward-compatible capability or supported hardware family.
+- Patch: backward-compatible correction or documentation-only release.
 
-| Part | When to bump | Example |
-|------|-------------|---------|
-| `MAJOR` | Breaking change to YAML schema, wizard flow, or generated output format | `v0.x.x → v1.0.0` |
-| `MINOR` | New feature, new board family, new command-line flag | `v0.1.0 → v0.2.0` |
-| `PATCH` | Bug fix, documentation update, snapshot refresh | `v0.1.0 → v0.1.1` |
+## Pre-release gates
 
-### Current milestone targets
-
-| Version | Goal |
-|---------|------|
-| `v0.9.x` | Release candidates, full Klipper sweep validation, hardware DB expansion |
-| `v1.0.0` | Stable production release, frozen schema, Moonraker API integration |
-
----
-
-## Cutting a Release
-
-### Step 1 — Pass the full test suite
+Run the complete source validation:
 
 ```bash
-python3 tests/run_tests.py --verbose
-python3 tests/run_tests.py --yaml-check
-python3 tests/run_tests.py --full-klipper-sweep   # on main only
+python tests/run_tests.py --verbose
+python tests/run_tests.py --yaml-check
+python tests/run_tests.py --full-klipper-sweep --verbose
+python tests/matrix/run_matrix.py --profile full
 ```
 
-All jobs must pass with zero FAILUREs before tagging.
+Confirm the containerized MCU build job passes, review all matrix JSON/Markdown results, and verify there are no `KACE_ERROR`, `KLIPPER_ERROR`, or `INFRA_ERROR` results. Expected safe rejections are not passes and must match the intended unsupported combinations.
 
-### Step 2 — Bump the version
+Automated validation does not replace documented physical qualification on representative supported hardware.
 
-Edit the `VERSION` file (single line, no `v` prefix):
+## Cross-repository publishing order
 
-```
-1.0.0
-```
+KACE must be published before KACE Studio:
 
-`kace.py` reads this file at startup — no other change needed.
+1. Finalize and publish the KACE commit.
+2. Choose the immutable KACE commit that Studio will package.
+3. Calculate the SHA-256 of `scripts/bootstrap.sh` from that exact remote commit.
+4. Update KACE Studio's CI bootstrap reference and hash as a pair.
+5. Fetch the remote file and verify the pair independently.
+6. Run Studio tests and build the Windows executable.
+7. Verify the built executable contains the same bootstrap bytes selected by the contract.
 
-### Step 3 — Update CHANGELOG.md
+Inside `scripts/bootstrap.sh`, `KACE_INSTALL_URL`, `KACE_INSTALL_REF`, and `KACE_INSTALL_SHA256` form a second indivisible contract. The referenced KACE commit must already exist remotely, and the remote `install.sh` bytes must match before Studio pins the bootstrap.
 
-Move items from `[Unreleased]` into a new dated section:
+Never construct a release contract from a mutable `main` URL plus a checksum calculated at a different time.
 
-```markdown
-## [1.0.0] — YYYY-MM-DD
+## Release commit and tag
 
-### Added
-- …
+After every gate passes:
 
-### Fixed
-- …
-```
+1. Move the relevant `CHANGELOG.md` entries from Unreleased into the dated release section.
+2. Update `VERSION`.
+3. Commit only the release metadata.
+4. Create a signed or annotated tag from that exact commit.
+5. Push the commit first, then the tag.
+6. Confirm the remote tag resolves to the locally validated commit.
 
-Add the comparison link at the bottom:
+Do not rewrite or move a published release tag.
 
-```markdown
-[1.0.0]: https://github.com/3D-uy/kace/compare/v0.9.0...v1.0.0
-```
+## Installer checksum
 
-### Step 4 — Commit and tag
+Generate the installer checksum from the tagged bytes:
 
 ```bash
-git add VERSION CHANGELOG.md
-git commit -m "chore: release v1.0.0"
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin main --tags
+git show <release-tag>:install.sh | sha256sum
 ```
 
-### Step 5 — Create GitHub Release
+Publish that value through the release metadata and verify it again from the raw GitHub URL for the immutable tag or commit. The checksum must not be obtained solely from the same mutable location as the file being verified.
 
-On GitHub → Releases → Draft a new release:
-- Tag: `v1.0.0`
-- Title: `KACE v1.0.0`
-- Body: paste the CHANGELOG section for this version
-- Generate the installer checksum and attach `install.sh.sha256` to the release:
+## GitHub release
 
-  ```bash
-  sha256sum install.sh > install.sh.sha256
-  ```
+The release page should contain:
 
-- Include the checksum value in the release body as well. Users must be able to obtain it separately from the tagged `install.sh` download used by the verified-install instructions.
+- The immutable tag and commit.
+- The matching `CHANGELOG.md` section.
+- The SHA-256 of the tagged `install.sh`.
+- Supported environments and known limitations.
+- Hardware-validation scope.
+- Upgrade and rollback notes.
 
----
+Do not claim CI artifacts are signed or reproducible unless both properties have been demonstrated.
 
-## Rollback Strategy
+## Rollback
 
-### Option A — Pin to a previous tag (recommended)
+Prefer a forward corrective release. If a published commit must be undone on `main`, use a normal revert commit so the history and contract remain auditable. Existing installations can be diagnosed against their immutable commit or tag.
 
-Users can install or revert to any tagged release:
+If KACE Studio has already pinned a bad KACE bootstrap, publish the corrected KACE commit first and then update Studio's reference/hash contract in a separate commit.
+
+## Snapshot policy
+
+Snapshots may change only when the generated-output contract changes intentionally:
 
 ```bash
-git fetch --tags
-git checkout v0.9.0
+python tests/run_tests.py --update-snapshots
+git diff -- tests/fixtures
+python tests/run_tests.py --verbose
 ```
 
-Or the installer can be pointed at a specific tag:
+Review and commit the generator change, regression test, and affected fixtures together.
 
-```bash
-git clone --depth 1 --branch v0.9.0 https://github.com/3D-uy/kace.git
-```
+## CI evidence
 
-### Option B — Revert a bad commit on main
+Record the URLs and conclusions for:
 
-If a regression is caught after merging:
+- KACE CI, quick matrix, full sweep, full manual matrix, and Docker firmware build.
+- KACE Studio test matrix and Windows build.
+- Remote installer and bootstrap SHA-256 verification.
+- Packaged bootstrap verification.
+- Any manual physical-hardware qualification.
 
-```bash
-git revert <bad-commit-sha>
-git push origin main
-```
-
-Then cut a PATCH release immediately.
-
-### Option C — Hotfix branch
-
-For urgent production fixes:
-
-```bash
-git checkout -b hotfix/v0.9.1 v0.9.0
-# apply fix
-git commit -m "fix: ..."
-git tag -a v0.9.1 -m "Hotfix v0.9.1"
-git push origin hotfix/v0.9.1 --tags
-```
-
-Then merge back to `main`.
-
----
-
-## Snapshot Management on Release
-
-Before every release:
-
-1. Run the full test suite — all snapshots must match.
-2. If a **deliberate** change to output format is made, update snapshots intentionally:
-   ```bash
-   python3 tests/run_tests.py --update-snapshots
-   ```
-3. Review the diff of every changed fixture file before committing.
-4. Never silently update snapshots as part of a non-output change.
-
----
-
-## CI Gate
-
-The GitHub Actions CI pipeline blocks merges to `main` if any of the following fail:
-
-- Python syntax check (lint)
-- Unit tests
-- YAML integrity check
-- Regression snapshot tests
-
-The `--full-klipper-sweep` runs only on pushes to `main` (not on PRs) to keep
-contributor iteration fast. See `.github/workflows/ci.yml` for the full pipeline.
+A release is blocked if local and remote commits, hashes, generated reports, or packaged bootstrap bytes differ.

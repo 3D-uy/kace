@@ -1,191 +1,125 @@
-# KACE Testing Guide
+# KACE testing guide
 
-This document explains how to run the KACE test suite, what each mode does,
-how the snapshot system works, and how the CI pipeline is structured.
+KACE uses complementary test layers. A passing unit suite is necessary, but generated Klipper configuration also has to match project snapshots and load through the parser from the pinned Klipper revision.
 
----
-
-## Quick Start
+## Local setup
 
 ```bash
-# Run the full test suite (unit + regression)
-python3 tests/run_tests.py
-
-# Verbose — see each test name and PASS/FAIL
-python3 tests/run_tests.py --verbose
-
-# Validate data/boards.yaml schema and precedence
-python3 tests/run_tests.py --yaml-check
-
-# Update golden snapshots after an intentional output change
-python3 tests/run_tests.py --update-snapshots
-
-# Run the full Klipper 192+ config sweep (requires network + git)
-python3 tests/run_tests.py --full-klipper-sweep
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install --require-hashes -r requirements.txt
 ```
 
----
+Docker is additionally required for the configuration matrix and containerized firmware builds.
 
-## Test Categories
-
-### Unit Tests — `tests/unit/`
-
-Fast, isolated tests with no external dependencies. Each test mocks everything
-that would require network access, interactive prompts, or hardware.
-
-| File | What it tests |
-|------|--------------|
-| `test_derivation.py` | MCU → Kconfig derivation logic, pattern matching, fallback |
-| `test_yaml_db.py` | YAML load, pattern order validation, broken-YAML recovery |
-| `test_scraper.py` | BLTouch pin injection from filename matching |
-| `test_deployer.py` | Lazy paramiko installation, offline/network-failure handling |
-
-### Regression Tests — `tests/regression/`
-
-Snapshot-based tests that render a complete `printer.cfg` from a mock Klipper
-config and compare it byte-for-byte against a golden fixture file.
-
-| File | Boards covered |
-|------|---------------|
-| `test_config_generation.py` | SKR v1.4 (LPC1769) |
-| `test_snapshot_expansion.py` | Creality v4.2.2, Creality v4.2.7, Octopus v1.1, SKR Pico (RP2040), SKR v1.3 (LPC1768), SKR Mini E3 sensorless |
-
----
-
-## Snapshot System
-
-Snapshots are golden output files stored in `tests/fixtures/*.txt`. Each file
-contains the expected `printer.cfg` output for a specific board + configuration.
-
-### How comparison works
-
-`KaceTestCase.assertSnapshot()` in `tests/kace_test_case.py`:
-
-1. Generates a `printer.cfg` from mock data into a temp file.
-2. Reads the temp file content.
-3. Strips trailing whitespace from every line.
-4. Compares stripped content against the stored golden file.
-5. Fails with a clear diff if any character differs.
-
-The whitespace-stripping makes comparisons stable across platforms (Windows CRLF
-vs Linux LF) without hiding real differences.
-
-### Updating snapshots intentionally
-
-Run with `--update-snapshots` when you make a **deliberate** change to output format:
+## Core commands
 
 ```bash
-python3 tests/run_tests.py --update-snapshots
+# Unit and regression discovery
+python tests/run_tests.py --verbose
+
+# boards.yaml schema and pattern precedence only
+python tests/run_tests.py --yaml-check
+
+# Reduced generated-config matrix against pinned Klipper
+python tests/matrix/run_matrix.py --profile quick
+
+# Full pairwise matrix for manual or pre-release validation
+python tests/matrix/run_matrix.py --profile full
+
+# Broad sweep of upstream Klipper generic/printer configs
+python tests/run_tests.py --full-klipper-sweep --verbose
 ```
 
-This overwrites the golden files. Always:
-1. Review the git diff of every changed fixture file.
-2. Verify the changes are what you intended.
-3. Commit the updated snapshots together with the code change.
+Use the narrowest command that covers a change, then run the complete relevant gate before submitting it.
 
-> **Never** update snapshots silently as part of an unrelated change. A snapshot
-> change is a contract change.
+## Test layers
 
-### Adding a new snapshot
+### Unit tests — `tests/unit/`
 
-1. Add a new test method to `tests/regression/test_snapshot_expansion.py`
-   following the existing pattern.
-2. Run `python3 tests/run_tests.py --update-snapshots` to generate the fixture.
-3. Run `python3 tests/run_tests.py --verbose` to confirm the new test passes.
-4. Commit both the test and the fixture file.
+Unit tests cover the wizard model, validation, board data, generation helpers, firmware derivation, deployment, Moonraker, SSH, translations, CLI contracts, bootstrap/install contracts, and matrix construction. Hardware, prompts, network calls, subprocesses, and external files are mocked where applicable.
 
----
+### Regression tests — `tests/regression/`
 
-## YAML Integrity Check
+Regression tests exercise complete generation paths, CLI integration, runtime behavior, firmware build orchestration, and byte-level snapshots in `tests/fixtures/`.
+
+The default runner discovers every `test_*.py` file under `tests/`. Environment-dependent real firmware builds skip when their required toolchain is unavailable; CI separately runs representative builds in the development container.
+
+### YAML integrity
 
 ```bash
-python3 tests/run_tests.py --yaml-check
+python tests/run_tests.py --yaml-check
 ```
 
-This standalone check validates `data/boards.yaml` without running any test:
+This gate parses `data/boards.yaml`, checks required top-level and entry fields, and detects a generic firmware pattern that would shadow a more specific pattern later in the file.
 
-- Top-level keys (`boards`, `mcu_firmware`) must be present.
-- Every `boards[]` entry must have `mcu`, `search_terms`, and `bltouch`.
-- Every `mcu_firmware[]` entry must have `pattern` and `arch`.
-- No generic pattern may shadow a more specific pattern that appears later
-  (precedence validation).
+### Generated-config matrix — `tests/matrix/`
 
-Exit code 0 = valid, exit code 1 = errors found with details printed.
+The matrix generates each accepted case through KACE, stores it with a deterministic ID, and loads it inside Docker with Klipper commit `d865997403cad36d105026f73a4b76dcacec4c76`.
 
----
+Results are classified as:
 
-## Full Klipper Sweep
+| Result | Meaning |
+| --- | --- |
+| `PASS` | KACE generated the case and pinned Klipper accepted it |
+| `EXPECTED_REJECT` | KACE safely rejected a deliberately unsupported combination |
+| `KACE_ERROR` | Generation failed unexpectedly |
+| `KLIPPER_ERROR` | Generation succeeded but Klipper rejected the result |
+| `INFRA_ERROR` | Docker or the validation environment failed |
+
+An expected rejection is not counted as a pass. Reports and generated configurations are written under `tests/matrix/artifacts/` as Markdown and JSON; this directory is ignored by Git.
+
+`--skip-docker` is only a matrix self-test and reports generated cases as infrastructure errors. It must not be presented as Klipper validation.
+
+### Full Klipper sweep — `tests/sweep/`
+
+The sweep clones the current upstream Klipper `config/` tree, parses its `generic-*.cfg` and `printer-*.cfg` files, and classifies known unsupported inputs separately from unhandled failures. It requires Git and network access and is intentionally different from the matrix: the sweep tests breadth against the live upstream tree, while the matrix tests representative KACE output against a fixed Klipper commit.
+
+The sweep report is generated output and is not committed.
+
+## Snapshot policy
+
+Snapshot fixtures are public output contracts. When an intentional generator change alters output:
 
 ```bash
-python3 tests/run_tests.py --full-klipper-sweep
+python tests/run_tests.py --update-snapshots
+git diff -- tests/fixtures
+python tests/run_tests.py --verbose
 ```
 
-The sweep:
-1. Clones the Klipper repository with `--depth 1 --sparse` (config/ only).
-2. Iterates every `generic-*.cfg` and `printer-*.cfg`.
-3. Runs `parse_config()` + `extract_profile_defaults()` on each.
-4. Classifies the result:
+Review every changed fixture. Never update snapshots to hide an unexplained failure or as part of an unrelated change.
 
-| Code | Meaning |
-|------|---------|
-| `PASS` | Full parse + extraction succeeded |
-| `SAFE_ABORT` | TODO placeholder pins found — known graceful limitation |
-| `UNSUPPORTED` | Experimental/unsupported sections present |
-| `FAILURE` | Unhandled Python exception — requires investigation |
+## Docker validation
 
-5. Prints a final statistics table.
-6. Exits with code 1 if any `FAILURE` results were recorded.
+Build the development image with:
 
-The sweep requires `git` on `PATH` and network access. It runs automatically
-on every push to `main` via GitHub Actions, but is skipped on PRs to keep
-contributor iteration fast.
-
----
-
-## CI Pipeline Overview
-
-The GitHub Actions workflow in `.github/workflows/ci.yml` runs on every push to
-`main` and every pull request.
-
-```
-push / PR
-    │
-    ├── lint              — python -m py_compile (syntax check all .py files)
-    │
-    ├── unit-tests        — runs full test suite (21 tests)
-    │
-    ├── yaml-integrity    — boards.yaml schema + precedence check
-    │
-    ├── regression-tests  — snapshot comparison (blocks merge on diff)
-    │       └── needs: [unit-tests, yaml-integrity]
-    │
-    └── full-klipper-sweep  (push to main ONLY)
-            └── needs: regression-tests
+```bash
+docker build -f docker/ci/Dockerfile -t kace-dev .
 ```
 
-All jobs use `concurrency` cancellation — if you push multiple commits quickly
-to the same PR, older CI runs cancel automatically.
+Run the representative MCU build suite with the same layout as CI:
 
-### Blocking rules
-
-Merges to `main` are blocked if any of the following jobs fail:
-- `lint`
-- `unit-tests`
-- `yaml-integrity`
-- `regression-tests`
-
-The `full-klipper-sweep` is informational on main (does not block PRs).
-
----
-
-## Zero-Dependency Design
-
-The test runner uses only Python standard library modules:
-
-```
-unittest, sys, os, time, argparse, subprocess, tempfile, re
+```bash
+docker run --rm -v "$PWD:/workspace" kace-dev \
+  python3 -m unittest tests/regression/test_mcu_builds.py -v
 ```
 
-This means the tests can run on a Raspberry Pi Zero 2W with no pip installs
-beyond the project's own `requirements.txt`. The full suite completes in
-under 0.5 seconds on typical hardware.
+Mock firmware created by the interactive development container is not flashable. Only a successful real-toolchain build can produce a candidate firmware artifact, and even that artifact must be verified for the exact controller before use.
+
+## CI mapping
+
+`.github/workflows/ci.yml` currently provides these gates:
+
+| Job | Trigger | Validation |
+| --- | --- | --- |
+| `lint` | Push and pull request | Compile every Python file |
+| `unit-tests` | Push and pull request | Full default test discovery |
+| `yaml-integrity` | Push and pull request | Board schema and precedence |
+| `regression-tests` | Push and pull request | Snapshot regression gate |
+| `config-matrix-quick` | Push and pull request | Reduced pinned-Klipper matrix |
+| `full-klipper-sweep` | Push to `main` | Broad upstream config sweep |
+| `config-matrix-full` | Manual dispatch | Full pairwise pinned-Klipper matrix |
+| `docker-firmware-build` | Push and pull request | Representative real MCU builds in Docker |
+
+CI never updates snapshots and no test job flashes physical hardware.

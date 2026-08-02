@@ -74,8 +74,6 @@ KACE_REAL_BUILD=1 python3 kace.py
 # Option B — CLI flag
 python3 kace.py --real-build
 
-# Option C — Docker entrypoint menu
-# Select option 13: "Run KACE in REAL Build Mode"
 ```
 
 **What changes:**
@@ -148,7 +146,7 @@ equivalent of running `KACE_REAL_BUILD=1 python3 kace.py`.
 
 | Feature                        | Mock Build           | Real Build                  | Regression Test              |
 |--------------------------------|----------------------|-----------------------------|------------------------------|
-| **Trigger**                    | Default in container | `KACE_REAL_BUILD=1` / `--real-build` / menu option 13 | `python3 tests/run_tests.py` |
+| **Trigger**                    | Default in container | `KACE_REAL_BUILD=1` / `--real-build` | `python3 tests/run_tests.py` |
 | **Toolchain**                  | Bash script          | `arm-none-eabi-gcc`, `avr-gcc` | Same as real build          |
 | **Compile time**               | < 1 second           | 30 s – 3 min                | 30 s – 3 min per MCU         |
 | **Output size**                | 12 bytes             | 30 KB – 500 KB              | 30 KB – 500 KB               |

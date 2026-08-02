@@ -165,4 +165,4 @@ O KACE nunca removerá nem desabilitará suas seções de configuração de disp
 - [Documentação do Mainsail](https://docs.mainsail.xyz/)
 - [Documentação do Fluidd](https://docs.fluidd.xyz/)
 - [Guia de Testes do KACE](../en/TESTING.md) *(em inglês)*
-- [Arquitetura do KACE](../en/ARCHITECTURE.md) *(em inglês)*
+- [Resumo da arquitetura do KACE](../../README.md#architecture)

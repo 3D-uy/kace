@@ -15,9 +15,9 @@
 
 ## 📦 Overview
 
-This guide walks you through installing **Mainsail OS** on your Raspberry Pi using Raspberry Pi Imager.
+This guide describes the manual Raspberry Pi Imager path for installing **Mainsail OS** before running KACE on the printer host.
 
-👉 This is the **first step** before using KACE.
+For the integrated Windows workflow—imaging, first-boot configuration, discovery, SSH, and the pinned KACE bootstrap—use [KACE Studio](https://github.com/3D-uy/KACE-studio).
 
 ---
 
@@ -29,7 +29,7 @@ Make sure you have:
 - A microSD card (recommended: 16GB or more)  
 - A stable internet connection  
 
-💡 *All configuration will be done during the flashing process — no extra setup needed later.*
+💡 *Imaging prepares the operating system and network access. KACE still has to generate and deploy the printer-specific Klipper configuration, and the printer must be commissioned safely.*
 
 ---
 
@@ -240,4 +240,3 @@ klipper.local
 
 💡 **Tip:**
 If `klipper.local` doesn’t work, find the IP address from your router.
-

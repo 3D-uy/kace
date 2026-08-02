@@ -164,5 +164,5 @@ KACE nunca eliminará ni deshabilitará sus secciones de configuración de panta
 - [Configuración de Pantalla de Klipper](https://www.klipper3d.org/Config_Reference.html#display) — referencia oficial
 - [Documentación de Mainsail](https://docs.mainsail.xyz/)
 - [Documentación de Fluidd](https://docs.fluidd.xyz/)
-- [Guía de Pruebas de KACE](TESTING.md) *(en inglés)*
-- [Arquitectura de KACE](ARCHITECTURE.md) *(en inglés)*
+- [Guía de pruebas de KACE](TESTING.md)
+- [Resumen de la arquitectura de KACE](../../README.md#architecture)
