@@ -1011,7 +1011,7 @@ fi
 # ── 11. KACE Agent ────────────────────────────────────────────────────────────
 log_stage "KACE" "Installing KACE Agent"
 INSTALL_OK=0
-KACE_INSTALL_REF="15dd14b0b7b512cb83d8f24b022fb5d7ff0d233b"
+KACE_INSTALL_REF="44c2c17dcbafec2dbb91aa2e14fb8ea74f796d8c"
 KACE_INSTALL_SHA256="87da2d46d990482e3f72d2cee9a6a9f3aa2cc97afe49ef3b1638be0f3ecec77a"
 KACE_INSTALL_URL="https://raw.githubusercontent.com/3D-uy/KACE/${KACE_INSTALL_REF}/install.sh"
 readonly KACE_INSTALL_REF KACE_INSTALL_SHA256 KACE_INSTALL_URL
