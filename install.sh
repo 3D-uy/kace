@@ -18,7 +18,8 @@
 #
 #  Do not fetch the expected checksum from the same mutable branch as the
 #  installer. Obtain it from a matching release or another trusted channel.
-#  This check covers this installer script; it currently installs KACE from main.
+#  The Studio bootstrap also supplies KACE_SOURCE_REF so the installer and the
+#  repository content are resolved from the same immutable revision.
 # ============================================================
 
 set -e
@@ -34,7 +35,15 @@ E="\033[91m"   # Red (error)
 REPO_URL="https://github.com/3D-uy/kace.git"
 INSTALL_DIR="$HOME/kace"
 KACE_BIN="/usr/local/bin/kace"
-INSTALL_TAG="main"
+INSTALL_REF="${KACE_SOURCE_REF:-main}"
+
+# Prevent an environment-provided ref from being interpreted as a Git option or
+# revision expression. Release tags, branches, and full commit hashes remain valid.
+if [[ "$INSTALL_REF" == -* ]] || [[ ! "$INSTALL_REF" =~ ^[A-Za-z0-9._/-]+$ ]] \
+        || [[ "$INSTALL_REF" == *..* ]]; then
+    echo "Error: invalid KACE source reference: $INSTALL_REF" >&2
+    exit 1
+fi
 
 # ── Banner ───────────────────────────────────────────────────
 clear
@@ -65,14 +74,19 @@ fi
 echo -e "${C}[1/5]${R} Checking system dependencies..."
 if command -v apt-get &>/dev/null; then
     sudo apt-get update -qq
-    sudo apt-get install -y git python3-pip -qq
+    sudo apt-get install -y git python3-pip python3-venv -qq
     echo -e "${G}  ✔ Dependencies verified (apt)${R}"
 elif command -v apt &>/dev/null; then
     sudo apt update -qq
-    sudo apt install -y git python3-pip -qq
+    sudo apt install -y git python3-pip python3-venv -qq
     echo -e "${G}  ✔ Dependencies verified (apt)${R}"
 else
-    echo -e "${Y}  ⚠ apt not found. Please manually ensure git and python3-pip are installed.${R}"
+    echo -e "${Y}  ⚠ apt not found. Please manually ensure git, python3-pip, and python3-venv are installed.${R}"
+fi
+
+if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
+    echo -e "${E}  KACE requires Python 3.11 or newer.${R}" >&2
+    exit 1
 fi
 
 # ── Step 2: Clone or update KACE repository ──────────────────
@@ -89,7 +103,8 @@ _SPARSE_PATTERNS="/kace.py
 /core/
 /firmware/
 /data/
-/templates/"
+/templates/
+/scripts/cc_wrapper.py"
 
 # Non-runtime dirs/files that can be removed after a full clone fallback
 _CLEANUP_DIRS="docs tests docker .github scripts MagicMock"
@@ -106,24 +121,32 @@ _git_supports_sparse() {
 
 echo -e "${C}[2/5]${R} Syncing KACE repository..."
 if [ -d "$INSTALL_DIR/.git" ]; then
-    echo -e "  Existing installation found — updating to ${INSTALL_TAG}..."
-    git -C "$INSTALL_DIR" fetch origin "$INSTALL_TAG" --depth=1
+    echo -e "  Existing installation found — updating to ${INSTALL_REF}..."
+    git -C "$INSTALL_DIR" fetch origin "$INSTALL_REF" --depth=1
+    if [ "$(git -C "$INSTALL_DIR" config --bool core.sparseCheckout 2>/dev/null || true)" = "true" ]; then
+        echo "$_SPARSE_PATTERNS" | git -C "$INSTALL_DIR" sparse-checkout set --no-cone --stdin
+    fi
     git -C "$INSTALL_DIR" -c advice.detachedHead=false checkout -f FETCH_HEAD
-    echo -e "${G}  ✔ Repository updated to ${INSTALL_TAG}${R}"
+    echo -e "${G}  ✔ Repository updated to ${INSTALL_REF}${R}"
 else
-    echo -e "  Cloning KACE (${INSTALL_TAG}) into ${Y}${INSTALL_DIR}${R}..."
+    echo -e "  Cloning KACE (${INSTALL_REF}) into ${Y}${INSTALL_DIR}${R}..."
     if _git_supports_sparse; then
-        git clone --depth 1 --branch "$INSTALL_TAG" --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR" --quiet
-        # Non-cone mode: only the listed paths are checked out
+        mkdir -p "$INSTALL_DIR"
+        git -C "$INSTALL_DIR" init --quiet
+        git -C "$INSTALL_DIR" remote add origin "$REPO_URL"
         git -C "$INSTALL_DIR" sparse-checkout init --no-cone
         echo "$_SPARSE_PATTERNS" | git -C "$INSTALL_DIR" sparse-checkout set --no-cone --stdin
+        git -C "$INSTALL_DIR" fetch origin "$INSTALL_REF" --depth=1 --filter=blob:none --quiet
+        git -C "$INSTALL_DIR" -c advice.detachedHead=false checkout -f FETCH_HEAD --quiet
         echo -e "${G}  ✔ Repository cloned (minimal — runtime files only)${R}"
     else
         # Fallback: full clone, then delete non-runtime files
-        git clone --depth 1 --branch "$INSTALL_TAG" "$REPO_URL" "$INSTALL_DIR" --quiet
+        git clone --depth 1 --no-checkout "$REPO_URL" "$INSTALL_DIR" --quiet
+        git -C "$INSTALL_DIR" fetch origin "$INSTALL_REF" --depth=1 --quiet
+        git -C "$INSTALL_DIR" -c advice.detachedHead=false checkout -f FETCH_HEAD --quiet
         for d in $_CLEANUP_DIRS; do rm -rf "$INSTALL_DIR/$d" 2>/dev/null; done
         for f in $_CLEANUP_FILES; do rm -f "$INSTALL_DIR/$f" 2>/dev/null; done
-        echo -e "${G}  ✔ Repository cloned (tag ${INSTALL_TAG} — non-runtime files removed)${R}"
+        echo -e "${G}  ✔ Repository cloned (${INSTALL_REF} — non-runtime files removed)${R}"
     fi
 fi
 
