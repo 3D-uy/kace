@@ -82,8 +82,8 @@ class StructuredProbeConfiguration(_BaseProbeConfiguration):
     def __init__(self, kind: str, display_name: str, offsets: ProbeOffsets) -> None:
         section_names = {
             PROBE_KIND_BLTOUCH: "bltouch",
-            PROBE_KIND_CR_TOUCH: "cr-touch",
-            PROBE_KIND_INDUCTIVE: "inductive",
+            PROBE_KIND_CR_TOUCH: "bltouch",
+            PROBE_KIND_INDUCTIVE: "probe",
         }
         if kind not in section_names:
             raise ValueError(f"Unsupported structured probe kind: {kind}")
@@ -103,6 +103,16 @@ class CustomRawProbeConfiguration(_BaseProbeConfiguration):
     """Strategy wrapper around a validated ``CustomProbeConfig`` raw block."""
 
     def __init__(self, custom_config: CustomProbeConfig) -> None:
+        if custom_config.primary_section == "dockable_probe":
+            raise GenerationError(
+                "Dockable Probe requires a Klipper extension that is not part of stock Klipper; "
+                "KACE cannot generate it safely without an explicit extension contract."
+            )
+        if custom_config.z_offset is None:
+            raise GenerationError(
+                "Custom Probe requires an explicit z_offset because stock Klipper cannot load "
+                "a [probe] section without it. Use 0 as the pre-calibration value if needed."
+            )
         if custom_config.requires_offset_prompt:
             raise GenerationError("Custom Probe requires explicit X and Y offsets for safe geometry generation.")
         super().__init__(

@@ -26,8 +26,8 @@ class TestProbeConfigurationStrategies(unittest.TestCase):
     def test_all_predefined_legacy_labels_resolve_to_stable_kinds(self):
         cases = (
             ("BLTouch", PROBE_KIND_BLTOUCH, "bltouch"),
-            ("CR-Touch", PROBE_KIND_CR_TOUCH, "cr-touch"),
-            ("Inductive", PROBE_KIND_INDUCTIVE, "inductive"),
+            ("CR-Touch", PROBE_KIND_CR_TOUCH, "bltouch"),
+            ("Inductive", PROBE_KIND_INDUCTIVE, "probe"),
         )
         for label, kind, section in cases:
             with self.subTest(label=label):
@@ -71,7 +71,7 @@ class TestProbeConfigurationStrategies(unittest.TestCase):
         self.assertIn("samples: 2", probe.render_block())
 
     def test_custom_compatibility_context_rejects_offset_drift(self):
-        custom = parse_custom_probe_config("[probe]\npin: ^PA1\nx_offset: -7\ny_offset: 3\n")
+        custom = parse_custom_probe_config("[probe]\npin: ^PA1\nx_offset: -7\ny_offset: 3\nz_offset: 0\n")
         probe = resolve_probe_configuration({"probe_kind": PROBE_KIND_CUSTOM, "custom_probe": custom})
         with self.assertRaises(GenerationError):
             apply_probe_compatibility_context(
@@ -79,7 +79,7 @@ class TestProbeConfigurationStrategies(unittest.TestCase):
             )
 
     def test_custom_compatibility_context_derives_legacy_offsets_once(self):
-        custom = parse_custom_probe_config("[probe]\npin: ^PA1\nx_offset: -7\ny_offset: 3\n")
+        custom = parse_custom_probe_config("[probe]\npin: ^PA1\nx_offset: -7\ny_offset: 3\nz_offset: 0\n")
         probe = resolve_probe_configuration({"probe_kind": PROBE_KIND_CUSTOM, "custom_probe": custom})
         context = {}
         apply_probe_compatibility_context(context, probe)

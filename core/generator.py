@@ -329,6 +329,13 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     """Generate printer.cfg from parsed config and user data using Jinja2."""
     # Avoid in-place mutation of user_data by using a localized context dict
     user_ctx = dict(user_data)
+    kinematics = str(user_ctx.get("kinematics") or "").strip().lower()
+    if kinematics not in {"cartesian", "corexy"}:
+        raise GenerationError(
+            f"KACE cannot safely generate '{kinematics or 'unspecified'}' kinematics yet; "
+            "supported kinematics are cartesian and corexy."
+        )
+    user_ctx["kinematics"] = kinematics
     user_ctx["include_macros"] = include_macros
     probe_configuration = resolve_probe_configuration(user_ctx)
     apply_probe_compatibility_context(user_ctx, probe_configuration)

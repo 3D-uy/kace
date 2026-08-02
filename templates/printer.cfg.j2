@@ -48,7 +48,7 @@ dir_pin: {{ pins['stepper_x'].get('dir_pin', 'TODO') }} # Direction pin. Add or 
 enable_pin: {{ pins['stepper_x'].get('enable_pin', 'TODO') }} # Enable pin for the stepper driver
 {%- endif %}
 microsteps: 16 # Number of microsteps per full step
-rotation_distance: {{ user.rotation_distance_x | default(40) }} # Distance in mm the axis travels per full rotation of the motor
+rotation_distance: {{ user.rotation_distance_x | default(40, true) }} # Distance in mm the axis travels per full rotation of the motor
 {%- if user.gear_ratio_x %}
 gear_ratio: {{ user.gear_ratio_x }} # Gear ratio of the axis
 {%- endif %}
@@ -65,7 +65,7 @@ dir_pin: {{ pins['stepper_y'].get('dir_pin', 'TODO') }} # Direction pin. Add or 
 enable_pin: {{ pins['stepper_y'].get('enable_pin', 'TODO') }} # Enable pin for the stepper driver
 {%- endif %}
 microsteps: 16 # Number of microsteps per full step
-rotation_distance: {{ user.rotation_distance_y | default(40) }} # Distance in mm the axis travels per full rotation of the motor
+rotation_distance: {{ user.rotation_distance_y | default(40, true) }} # Distance in mm the axis travels per full rotation of the motor
 {%- if user.gear_ratio_y %}
 gear_ratio: {{ user.gear_ratio_y }} # Gear ratio of the axis
 {%- endif %}
@@ -82,7 +82,7 @@ dir_pin: {{ pins['stepper_z'].get('dir_pin', 'TODO') }} # Direction pin. Add or 
 enable_pin: {{ pins['stepper_z'].get('enable_pin', 'TODO') }} # Enable pin for the stepper driver
 {%- endif %}
 microsteps: 16 # Number of microsteps per full step
-rotation_distance: {{ user.rotation_distance_z | default(8) }} # Distance in mm the axis travels per full rotation of the motor
+rotation_distance: {{ user.rotation_distance_z | default(8, true) }} # Distance in mm the axis travels per full rotation of the motor
 {%- if user.gear_ratio_z %}
 gear_ratio: {{ user.gear_ratio_z }} # Gear ratio of the axis
 {%- endif %}
@@ -155,7 +155,7 @@ heater_pin: {{ pins['extruder'].get('heater_pin', 'TODO') }} # Pin connected to 
 sensor_pin: {{ pins['extruder'].get('sensor_pin', 'TODO') }} # Pin connected to the hotend thermistor
 {%- endif %}
 microsteps: 16 # Number of microsteps per full step
-rotation_distance: {{ user.rotation_distance_e | default(33.5) }} # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
+rotation_distance: {{ user.rotation_distance_e | default(33.5, true) }} # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
 {%- if user.gear_ratio_e %}
 gear_ratio: {{ user.gear_ratio_e }} # Gear ratio of the extruder
 {%- endif %}
@@ -180,13 +180,16 @@ __KACE_VERBATIM_CUSTOM_PROBE_BEGIN__
 __KACE_VERBATIM_CUSTOM_PROBE_END__
 {%- elif user.probe_configuration.renders_structured_section %}
 [{{ user.probe_configuration.structured_section_name }}]
-{%- if user.probe_configuration.kind == 'bltouch' %}
+{%- if user.probe_configuration.kind in ('bltouch', 'cr_touch') %}
 pin_up_touch_mode_reports_triggered: False # Prevents startup probe verification loop on BLTouch V3/V3.1 and clones
 probe_with_touch_mode: True # Use touch mode for more reliable probing
 {%- endif %}
+{%- if user.probe_configuration.kind == 'inductive' %}
+{%- set probe_sec = pins.get('probe', pins.get('bltouch', {})) %}
+pin: {{ probe_sec.get('pin', probe_sec.get('sensor_pin', '^TODO')) }} # Pin connected to the probe sensor
+{%- else %}
 {%- set probe_sec = pins.get('bltouch', pins.get('probe', {})) %}
 sensor_pin: {{ probe_sec.get('sensor_pin', '^TODO') }} # Pin connected to the probe sensor
-{%- if user.probe_configuration.kind == 'bltouch' or 'control_pin' in probe_sec %}
 control_pin: {{ probe_sec.get('control_pin', 'TODO') }} # Pin connected to the probe control
 {%- endif %}
 x_offset: {{ user.probe_x_offset | default(0) }} # distance from nozzle to probe in X (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)

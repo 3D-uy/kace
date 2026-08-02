@@ -199,6 +199,11 @@ class TestGenerateConfigStructure(unittest.TestCase):
         self.assertIsInstance(self.output, str)
         self.assertGreater(len(self.output), 100)
 
+    def test_none_rotation_distances_use_numeric_defaults(self):
+        self.assertNotIn("rotation_distance: None", self.output)
+        self.assertIn("rotation_distance: 40", self.output)
+        self.assertIn("rotation_distance: 33.5", self.output)
+
     def test_printer_section_present(self):
         self.assertIn("[printer]", self.output)
 
@@ -290,6 +295,9 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
             _user(probe="Inductive", probe_x_offset="0", probe_y_offset="25"),
         )
         self.assertIn("[bed_mesh]", output)
+        self.assertIn("[probe]", output)
+        self.assertIn("pin: ^PC0", output)
+        self.assertNotIn("[inductive]", output)
 
     def test_bltouch_includes_safe_z_home(self):
         """BLTouch must emit a [safe_z_home] section."""
@@ -317,7 +325,8 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
             parsed,
             _user(probe="CR-Touch", probe_x_offset="-10", probe_y_offset="4"),
         )
-        self.assertIn("[cr-touch]", output)
+        self.assertIn("[bltouch]", output)
+        self.assertNotIn("[cr-touch]", output)
         self.assertIn("x_offset: -10", output)
         self.assertIn("[bed_mesh]", output)
 
@@ -361,6 +370,7 @@ samples: 4
 pin: ^PA1
 x_offset: -12
 y_offset: 6
+z_offset: 0
 unknown_option: keep  # preserve spacing
 
 [gcode_macro ATTACH_PROBE]
@@ -394,7 +404,7 @@ gcode:
                 ),
             )
 
-    def test_custom_dockable_probe_preserves_macros_and_geometry(self):
+    def test_custom_dockable_probe_is_rejected_without_extension_contract(self):
         custom = parse_custom_probe_config("""[dockable_probe]
 pin: ^PA1
 x_offset: 20
@@ -408,14 +418,12 @@ gcode:
 gcode:
   G1 X220 Y20 F6000
 """)
-        output = _generate(_parsed(), _user(probe="Custom Probe", custom_probe=custom))
+        with self.assertRaisesRegex(GenerationError, "not part of stock Klipper"):
+            _generate(_parsed(), _user(probe="Custom Probe", custom_probe=custom))
 
-        self.assertIn("[dockable_probe]", output)
-        self.assertIn("[gcode_macro ATTACH_PROBE]", output)
-        self.assertIn("[gcode_macro DETACH_PROBE]", output)
-        self.assertEqual(output.count("x_offset: 20"), 1)
-        self.assertIn("probe:z_virtual_endstop", output)
-        self.assertIn("mesh_min:", output)
+    def test_delta_is_rejected_until_a_delta_template_exists(self):
+        with self.assertRaisesRegex(GenerationError, "cannot safely generate 'delta'"):
+            _generate(_parsed(), _user(kinematics="delta"))
 
     def test_custom_probe_missing_offsets_is_rejected_before_generation(self):
         custom = parse_custom_probe_config("[probe]\npin: ^PA1\nx_offset: 0\n")

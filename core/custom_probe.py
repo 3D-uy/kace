@@ -102,8 +102,7 @@ class GuidedCustomProbeSettings:
             f"x_offset: {self.x_offset:g}",
             f"y_offset: {self.y_offset:g}",
         ]
-        if self.z_offset is not None:
-            lines.append(f"z_offset: {self.z_offset:g}")
+        lines.append(f"z_offset: {(self.z_offset if self.z_offset is not None else 0):g}")
         lines.extend([
             f"samples: {self.samples}",
             f"samples_tolerance: {self.samples_tolerance:g}",
