@@ -86,6 +86,7 @@ docs/en/ARCHITECTURE.md
 tests/results/
 tests/results_profiles/
 tests/sweep/out_cfg/
+tests/matrix/artifacts/
 
 # Dev scratch directory — not part of the public project
 scratch/
