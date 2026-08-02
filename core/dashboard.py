@@ -13,8 +13,8 @@
 
 import os
 import subprocess
-import sys
 
+from core.exceptions import WizardExit
 from core.translations import t, set_lang, set_mode
 from core.banner import print_kace_banner
 
@@ -248,7 +248,7 @@ def _select_language() -> None:
     try:
         choice = input(f"  {_Y}Select [1-3]:{_R} ").strip()
     except (KeyboardInterrupt, EOFError):
-        sys.exit(0)
+        raise WizardExit()
 
     lang = LANGUAGES.get(choice, "English")
     set_lang(lang)
@@ -267,7 +267,7 @@ def _select_mode() -> None:
     try:
         choice = input(f"  {_Y}{t('menu.select_range', count=2)}{_R} ").strip()
     except (KeyboardInterrupt, EOFError):
-        sys.exit(0)
+        raise WizardExit()
 
     mode = MODES.get(choice, "Beginner")
     set_mode(mode)

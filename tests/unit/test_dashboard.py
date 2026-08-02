@@ -1,10 +1,27 @@
 import io
 import unittest
 from unittest.mock import patch, MagicMock
-from core.dashboard import detect_system_state, get_suggestions, run_dashboard
+from core.dashboard import (
+    _select_language,
+    _select_mode,
+    detect_system_state,
+    get_suggestions,
+    run_dashboard,
+)
+from core.exceptions import WizardExit
 from core.translations import get_lang, set_lang
 
 class TestDashboard(unittest.TestCase):
+
+    @patch("builtins.input", side_effect=KeyboardInterrupt)
+    def test_language_selection_cancellation_raises_wizard_exit(self, mock_input):
+        with self.assertRaises(WizardExit):
+            _select_language()
+
+    @patch("builtins.input", side_effect=EOFError)
+    def test_mode_selection_cancellation_raises_wizard_exit(self, mock_input):
+        with self.assertRaises(WizardExit):
+            _select_mode()
 
     def setUp(self):
         self.original_language = get_lang()

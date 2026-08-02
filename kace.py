@@ -81,8 +81,12 @@ def main():
     if not _bypassed:
         # Deferred import to optimize startup performance on slow Raspberry Pi hardware
         from core.dashboard import detect_system_state, run_dashboard
-        _state = detect_system_state()
-        _action = run_dashboard(_state)
+        try:
+            _state = detect_system_state()
+            _action = run_dashboard(_state)
+        except WizardExit:
+            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+            return
         if _action == "quit":
             sys.exit(0)
     
