@@ -1009,23 +1009,28 @@ fi
 # ── 11. KACE Agent ────────────────────────────────────────────────────────────
 log_stage "KACE" "Installing KACE Agent"
 INSTALL_OK=0
-EXPECTED_HASH="281ae79ac40a324adc5ab8d276567289b56f8683bfed69fc15146d33212e2619"
+KACE_INSTALL_REF="107510a0363df7c5286ea77f9146b1f218f750bb"
+KACE_INSTALL_SHA256="b6ffee17221c52ae9b2df3bdefe4749e742d125acf2308ce6a6c44b80d672643"
+KACE_INSTALL_URL="https://raw.githubusercontent.com/3D-uy/KACE/${KACE_INSTALL_REF}/install.sh"
+readonly KACE_INSTALL_REF KACE_INSTALL_SHA256 KACE_INSTALL_URL
 
 if [ "$(id -un)" != "$PRINTER_USER" ]; then
     # Running as a different user (e.g. root), switch to printer user context
-    if sudo -u "$PRINTER_USER" -i env EXPECTED_HASH="$EXPECTED_HASH" sh -c '
+    if sudo -u "$PRINTER_USER" -i env \
+        KACE_INSTALL_URL="$KACE_INSTALL_URL" \
+        KACE_INSTALL_SHA256="$KACE_INSTALL_SHA256" sh -c '
         tmp_script="/tmp/kace-install.sh"
         rm -f "$tmp_script"
-        if curl -sSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh -o "$tmp_script"; then
+        if curl --fail --silent --show-error --location "$KACE_INSTALL_URL" -o "$tmp_script"; then
             actual_hash=$(sha256sum "$tmp_script" | cut -d" " -f1)
-            if [ "$actual_hash" = "$EXPECTED_HASH" ]; then
+            if [ "$actual_hash" = "$KACE_INSTALL_SHA256" ]; then
                 bash "$tmp_script"
                 status=$?
                 rm -f "$tmp_script"
                 exit $status
             else
                 echo "Error: KACE agent script integrity check failed." >&2
-                echo "Expected: $EXPECTED_HASH" >&2
+                echo "Expected: $KACE_INSTALL_SHA256" >&2
                 echo "Got:      $actual_hash" >&2
                 rm -f "$tmp_script"
                 exit 1
@@ -1040,9 +1045,9 @@ else
     # Already running as printer user, run directly without sudo
     tmp_script="/tmp/kace-install.sh"
     rm -f "$tmp_script"
-    if curl -sSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh -o "$tmp_script"; then
+    if curl --fail --silent --show-error --location "$KACE_INSTALL_URL" -o "$tmp_script"; then
         actual_hash=$(sha256sum "$tmp_script" | cut -d" " -f1)
-        if [ "$actual_hash" = "$EXPECTED_HASH" ]; then
+        if [ "$actual_hash" = "$KACE_INSTALL_SHA256" ]; then
             if bash "$tmp_script"; then
                 log_ok "KACE agent installed."
                 INSTALL_OK=1
@@ -1050,7 +1055,7 @@ else
             rm -f "$tmp_script"
         else
             echo "Error: KACE agent script integrity check failed." >&2
-            echo "Expected: $EXPECTED_HASH" >&2
+            echo "Expected: $KACE_INSTALL_SHA256" >&2
             echo "Got:      $actual_hash" >&2
             rm -f "$tmp_script"
         fi
@@ -1058,8 +1063,10 @@ else
 fi
 
 if [ "$INSTALL_OK" -ne 1 ]; then
-    log_warn "KACE agent installation failed. Retry manually with:"
-    log_warn "  curl -sSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh -o /tmp/kace-install.sh && bash /tmp/kace-install.sh"
+    echo "=== KACE_BOOTSTRAP_ERROR: KACE_INSTALL ==="
+    log_err "KACE agent installation failed; the node is not fully provisioned."
+    log_err "Pinned installer: $KACE_INSTALL_URL"
+    exit 1
 fi
 
 # ── 12. Disable cloud-init ────────────────────────────────────────────────────
