@@ -57,6 +57,13 @@ class TestBootstrapInstallContract(unittest.TestCase):
         self.assertIn("=== KACE_BOOTSTRAP_ERROR: KACE_INSTALL ===", failure_block)
         self.assertIn("exit 1", failure_block)
 
+    def test_installed_repository_uses_same_pinned_revision(self):
+        self.assertIn('KACE_SOURCE_REF="$KACE_INSTALL_REF"', self.script)
+        self.assertIn("KACE_NO_LAUNCH=1", self.script)
+
+    def test_bootstrap_does_not_disable_os_security_updates(self):
+        self.assertNotIn("systemctl disable --now apt-daily", self.script)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -896,11 +896,6 @@ patch_systemd_services() {
 
 patch_systemd_services
 
-# Disable background APT daily updates on boot to reduce CPU and SD card I/O
-# contention by ~35 seconds on low-resource SBCs (Pi 3 / Pi 4).
-$SUDO systemctl disable --now apt-daily.service apt-daily-upgrade.service apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
-log_ok "APT daily background upgrade services and timers disabled."
-
 # ── 10. Start Services ────────────────────────────────────────────────────────
 log_stage "SERVICES" "Starting Klipper & Moonraker Services"
 # Single daemon-reload for all preceding drop-in and unit file changes
@@ -1009,8 +1004,8 @@ fi
 # ── 11. KACE Agent ────────────────────────────────────────────────────────────
 log_stage "KACE" "Installing KACE Agent"
 INSTALL_OK=0
-KACE_INSTALL_REF="107510a0363df7c5286ea77f9146b1f218f750bb"
-KACE_INSTALL_SHA256="b6ffee17221c52ae9b2df3bdefe4749e742d125acf2308ce6a6c44b80d672643"
+KACE_INSTALL_REF="15dd14b0b7b512cb83d8f24b022fb5d7ff0d233b"
+KACE_INSTALL_SHA256="87da2d46d990482e3f72d2cee9a6a9f3aa2cc97afe49ef3b1638be0f3ecec77a"
 KACE_INSTALL_URL="https://raw.githubusercontent.com/3D-uy/KACE/${KACE_INSTALL_REF}/install.sh"
 readonly KACE_INSTALL_REF KACE_INSTALL_SHA256 KACE_INSTALL_URL
 
@@ -1018,7 +1013,9 @@ if [ "$(id -un)" != "$PRINTER_USER" ]; then
     # Running as a different user (e.g. root), switch to printer user context
     if sudo -u "$PRINTER_USER" -i env \
         KACE_INSTALL_URL="$KACE_INSTALL_URL" \
-        KACE_INSTALL_SHA256="$KACE_INSTALL_SHA256" sh -c '
+        KACE_INSTALL_SHA256="$KACE_INSTALL_SHA256" \
+        KACE_SOURCE_REF="$KACE_INSTALL_REF" \
+        KACE_NO_LAUNCH=1 sh -c '
         tmp_script="/tmp/kace-install.sh"
         rm -f "$tmp_script"
         if curl --fail --silent --show-error --location "$KACE_INSTALL_URL" -o "$tmp_script"; then
@@ -1048,7 +1045,7 @@ else
     if curl --fail --silent --show-error --location "$KACE_INSTALL_URL" -o "$tmp_script"; then
         actual_hash=$(sha256sum "$tmp_script" | cut -d" " -f1)
         if [ "$actual_hash" = "$KACE_INSTALL_SHA256" ]; then
-            if bash "$tmp_script"; then
+            if KACE_SOURCE_REF="$KACE_INSTALL_REF" KACE_NO_LAUNCH=1 bash "$tmp_script"; then
                 log_ok "KACE agent installed."
                 INSTALL_OK=1
             fi
