@@ -427,7 +427,6 @@ trusted_clients:
     127.0.0.1
     10.0.0.0/8
     127.0.0.0/8
-    162.254.206.0/24
     172.16.0.0/12
     192.168.0.0/16
     FE80::/10
@@ -901,8 +900,16 @@ log_stage "SERVICES" "Starting Klipper & Moonraker Services"
 # Single daemon-reload for all preceding drop-in and unit file changes
 # (Klipper override, Moonraker boot-order, systemd path patches).
 $SUDO systemctl daemon-reload
-$SUDO systemctl restart klipper   || true
-$SUDO systemctl restart moonraker || true
+$SUDO systemctl restart klipper
+$SUDO systemctl restart moonraker
+if ! systemctl is-active --quiet klipper 2>/dev/null; then
+    log_err "Klipper did not remain active after restart."
+    exit 1
+fi
+if ! systemctl is-active --quiet moonraker 2>/dev/null; then
+    log_err "Moonraker did not remain active after restart."
+    exit 1
+fi
 if [ "$PREBAKED" = "false" ] || [ "$DASHBOARD" = "both" ]; then
     $SUDO systemctl restart nginx || true
 fi

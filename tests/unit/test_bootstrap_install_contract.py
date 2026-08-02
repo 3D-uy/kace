@@ -64,6 +64,18 @@ class TestBootstrapInstallContract(unittest.TestCase):
     def test_bootstrap_does_not_disable_os_security_updates(self):
         self.assertNotIn("systemctl disable --now apt-daily", self.script)
 
+    def test_bootstrap_does_not_trust_public_networks(self):
+        authorization = self.script.split("[authorization]", 1)[1].split(
+            "cors_domains:", 1
+        )[0]
+        self.assertNotIn("162.254.206.0/24", authorization)
+
+    def test_core_service_startup_failures_are_terminal(self):
+        self.assertNotIn("restart klipper   || true", self.script)
+        self.assertNotIn("restart moonraker || true", self.script)
+        self.assertIn("systemctl is-active --quiet klipper", self.script)
+        self.assertIn("systemctl is-active --quiet moonraker", self.script)
+
 
 if __name__ == "__main__":
     unittest.main()
