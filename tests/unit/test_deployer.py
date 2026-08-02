@@ -176,6 +176,32 @@ class TestDeployer(unittest.TestCase):
         mock_sftp.put.assert_any_call(os.path.expanduser('~/kace/printer.cfg'), '/home/pi/printer_data/config/printer.cfg')
         mock_sftp.put.assert_any_call(os.path.expanduser('~/kace/macros.cfg'), '/home/pi/printer_data/config/macros.cfg')
 
+    @patch('core.deployer._require_paramiko')
+    @patch('core.deployer.os.path.isfile', return_value=True)
+    @patch('core.deployer.os.path.exists', return_value=False)
+    @patch('core.menu.numbered_select', return_value='skip')
+    @patch('core.moonraker.check_moonraker', return_value=(True, 'OK'))
+    @patch('builtins.print')
+    def test_deploy_config_uses_configured_moonraker_port(
+        self, mock_print, mock_check, mock_select, mock_exists, mock_isfile,
+        mock_paramiko_func,
+    ):
+        """The SSH deployment restart probe must use the saved Moonraker port."""
+        mock_paramiko = MagicMock()
+        mock_paramiko.AuthenticationException = type('AuthenticationException', (Exception,), {})
+        mock_paramiko_func.return_value = mock_paramiko
+        mock_paramiko.SSHClient.return_value.open_sftp.return_value = MagicMock()
+
+        from core.deployer import deploy_config
+        deploy_config({
+            'host': '127.0.0.1',
+            'user': 'pi',
+            'dest_path': '~/printer_data/config/printer.cfg',
+            'moonraker_port': 8123,
+        })
+
+        mock_check.assert_called_once_with('127.0.0.1', 8123)
+
     @patch('shutil.which', return_value="/usr/bin/avrdude")
     @patch('subprocess.run')
     @patch('questionary.text')
@@ -982,4 +1008,3 @@ class TestDeployMoonrakerSSHFallbackMenuPrompts(unittest.TestCase):
 if __name__ == '__main__':
     import unittest.mock
     unittest.main()
-

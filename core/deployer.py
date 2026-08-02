@@ -215,7 +215,7 @@ def deploy_config(user_data):
     deployed_successfully = False
     mr_ok = False
     host = user_data.get('host', '')
-    port = 7125
+    port = user_data.get("moonraker_port", 7125)
     dest_file = ""
     dest_macros = ""
     macros_uploaded = False

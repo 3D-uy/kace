@@ -64,6 +64,12 @@ class TestBaseUrl(unittest.TestCase):
     def test_strips_trailing_slash(self):
         self.assertEqual(_base_url("192.168.1.1/", 7125), "http://192.168.1.1:7125")
 
+    def test_preserves_explicit_port(self):
+        self.assertEqual(
+            _base_url("https://mypi.local:8443", 7125),
+            "https://mypi.local:8443",
+        )
+
 
 # ── check_moonraker ───────────────────────────────────────────────
 

@@ -31,6 +31,8 @@ def _base_url(host: str, port: int) -> str:
     host = host.strip().rstrip("/")
     if not host.startswith(("http://", "https://")):
         host = f"http://{host}"
+    if urllib.parse.urlsplit(host).port is not None:
+        return host
     return f"{host}:{port}"
 
 
@@ -345,4 +347,3 @@ def list_config_files(host: str, port: int, api_key: str = None) -> list:
         return []
     files = body.get("result", [])
     return [f["path"] for f in files if isinstance(f, dict) and "path" in f]
-
