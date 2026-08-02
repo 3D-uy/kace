@@ -31,6 +31,7 @@ This test suite validates:
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -286,7 +287,12 @@ class TestProfileInjectionInGeneratedConfig(unittest.TestCase):
         parsed = copy.deepcopy(_BARE_BOARD_PARSED)
         parsed.update(extra_sections)
         user_data = dict(_USER_DATA)
-        result = self._generate(parsed, user_data)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._generate(
+                parsed,
+                user_data,
+                output_path=os.path.join(tmpdir, "printer.cfg"),
+            )
         return result.get("content", "")
 
     def test_injected_adxl345_not_rendered_as_active_section(self):

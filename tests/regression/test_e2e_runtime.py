@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 import sys
+import tempfile
 
 from core.wizard import run_wizard
 from core.scraper import parse_config, extract_profile_defaults
@@ -150,7 +151,12 @@ class TestE2ERuntimeFlow(unittest.TestCase):
         self.assertGreaterEqual(mesh_min_x, 0.0)
 
         # 6. Run Jinja2 Generator pipeline
-        res = generate_config(parsed, user_data)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            res = generate_config(
+                parsed,
+                user_data,
+                output_path=os.path.join(tmpdir, "printer.cfg"),
+            )
         generated_cfg = res["content"]
         self.assertIn("[printer]", generated_cfg)
         self.assertIn("[bed_mesh]", generated_cfg)
@@ -163,7 +169,6 @@ class TestE2ERuntimeFlow(unittest.TestCase):
 
         # 8. Run Moonraker deployment simulation
         # Create a temp file representing the generated config
-        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_file = os.path.join(tmpdir, "printer.cfg")
             with open(cfg_file, "w") as f:

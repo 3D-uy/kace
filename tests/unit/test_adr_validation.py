@@ -1,4 +1,6 @@
 # tests/unit/test_adr_validation.py
+import os
+import tempfile
 import unittest
 from core.generator import generate_config
 from core.exceptions import GenerationError
@@ -80,7 +82,12 @@ class TestAdrValidation(unittest.TestCase):
             "printable_y_max": "250",
             "printable_z_max": "250"
         })
-        output = generate_config(parsed_data=_PARSED_COMPLETE, user_data=user_data)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = generate_config(
+                parsed_data=_PARSED_COMPLETE,
+                user_data=user_data,
+                output_path=os.path.join(tmpdir, "printer.cfg"),
+            )
         self.assertTrue(len(output) > 0)
 
     def test_printable_width_exceeds_travel(self):
