@@ -107,6 +107,16 @@ def build_cases(profile: str) -> list[CaseSpec]:
         expected = "reject" if factors["probe"] == "dockable" else "valid"
         cases.append(CaseSpec(board=board, mcu=mcu, expected=expected, **factors))
 
+    # Coverage is not credited merely because a board appeared in a rejected
+    # row. Guarantee at least one loadable baseline for every board/MCU pair.
+    valid_boards = {(case.mcu, case.board) for case in cases if case.expected == "valid"}
+    for mcu, board in boards:
+        if (mcu, board) not in valid_boards:
+            cases.append(CaseSpec(
+                board, mcu, "cartesian", "standard", "origin_min",
+                "none", "none", "minimal",
+            ))
+
     reject_mcu, reject_board = boards[0]
     cases.extend([
         CaseSpec(reject_board, reject_mcu, "cartesian", "invalid_numeric",

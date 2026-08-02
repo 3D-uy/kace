@@ -39,6 +39,15 @@ class TestCoverage(unittest.TestCase):
         actual = {(case.mcu, case.board) for case in matrix.build_cases("full")}
         self.assertTrue(expected <= actual)
 
+    def test_every_board_has_a_non_rejection_generation_case(self):
+        expected = set(matrix.supported_boards())
+        actual = {
+            (case.mcu, case.board)
+            for case in matrix.build_cases("full")
+            if case.expected == "valid"
+        }
+        self.assertTrue(expected <= actual)
+
     def test_full_profile_covers_declared_factors(self):
         cases = matrix.build_cases("full")
         for factor, values in matrix.FACTOR_VALUES.items():
