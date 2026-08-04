@@ -11,6 +11,7 @@ from core.firmware_wizard import run_firmware_wizard
 from core.exceptions import DerivationAmbiguityError
 from core.moonraker_deployer import DeployResult, DeployState
 from core.translations import t
+from firmware.deployment import DeploymentMethodId
 
 class TestFirmwareWizard(unittest.TestCase):
 
@@ -125,19 +126,17 @@ class TestFirmwareWizard(unittest.TestCase):
         config_dict = mock_build.call_args[1]["config_dict"]
         self.assertEqual(config_dict.get("CONFIG_FLASH_START"), "0x2000")
 
-    @patch('core.firmware_flash.verify_sd_card_flash')
-    @patch('core.firmware_wizard.deploy_usb', return_value=True)
-    @patch('builtins.input', return_value='')
     @patch('core.firmware_wizard.yes_no', return_value=True)
     @patch('core.firmware_wizard.numbered_select')
     @patch('core.firmware_wizard.build_firmware_orchestrator')
-    def test_sd_card_option_copies_then_verifies_firmware(
-        self, mock_build, mock_select, _mock_confirm, _mock_input, mock_copy, mock_verify
+    @patch('core.firmware_wizard.FirmwareDeploymentService')
+    def test_manual_option_prepares_deployment_until_config_exists(
+        self, mock_service_cls, mock_build, mock_select, _mock_confirm
     ):
-        """The SD-card option starts verification only after a successful copy."""
+        """The wizard plans/stages firmware but defers physical execution."""
         mock_select.side_effect = [
             t("builder.compile_now"),
-            "sd_verify",
+            "MANUAL",
         ]
         mock_build.return_value = {
             "status": "success",
@@ -147,15 +146,19 @@ class TestFirmwareWizard(unittest.TestCase):
             "klipper_version": "kace-new123",
             "mcu_name": "mcu",
         }
-        mock_verify.return_value = DeployResult(DeployState.DONE)
-
-        with patch('sys.stdout', new_callable=io.StringIO):
-            run_firmware_wizard({"mcu_type": "stm32f103", "mcu_hint": "usb"})
-
-        mock_copy.assert_called_once()
-        mock_verify.assert_called_once_with(
-            expected_version="kace-new123", mcu_name="mcu", host="localhost", port=7125
+        service = mock_service_cls.return_value
+        service.available_methods.return_value = (DeploymentMethodId.MANUAL,)
+        service.plan.return_value = MagicMock(
+            final_filename="firmware.bin", instructions=(), automation_blockers=(),
+            automation_supported=False,
         )
+        service.prepare.return_value = MagicMock(staged_path="/fake/kace/deploy/id/firmware.bin")
+        user_data = {"mcu_type": "stm32f103", "mcu_hint": "usb", "board": "board.cfg"}
+        with patch('sys.stdout', new_callable=io.StringIO):
+            result = run_firmware_wizard(user_data)
+
+        self.assertEqual(result, {"status": "deployment_prepared", "method": "MANUAL"})
+        self.assertTrue(user_data["pending_firmware_deployment"])
 
 if __name__ == '__main__':
     unittest.main()

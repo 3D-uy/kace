@@ -5,7 +5,8 @@
 <h1 align="center">KACE</h1>
 
 <p align="center">
-  Klipper Automated Configuration Ecosystem
+  <strong>Klipper Automated Configuration Ecosystem</strong><br>
+  The interactive companion for turning printer choices into reviewable Klipper artifacts.
 </p>
 
 <p align="center">
@@ -17,62 +18,119 @@
 </p>
 
 <p align="center">
-  English · <a href="docs/es/README.md">Español</a> · <a href="docs/pt/README.md">Português</a>
+  <strong>English</strong> · <a href="docs/es/README.md">Español</a> · <a href="docs/pt/README.md">Português</a>
 </p>
 
-## Overview
+> [!WARNING]
+> KACE is in active pre-1.0 development. The `main` branch can change without backward-compatibility guarantees until a stable release process exists.
+
+## Contents
+
+- [What is KACE?](#what-is-kace)
+- [Quick start](#quick-start)
+- [How the ecosystem flows](#how-the-ecosystem-flows)
+- [Why KACE?](#why-kace)
+- [Features](#features)
+- [Current status](#current-status)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [End-to-end workflow](#end-to-end-workflow)
+- [Architecture](#architecture)
+- [Technologies](#technologies)
+- [Testing and validation](#testing-and-validation)
+- [Docker](#docker)
+- [CICD](#cicd)
+- [Compatibility and limits](#compatibility-and-limits)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## What is KACE?
 
 KACE is the Raspberry Pi-side interactive CLI in the KACE ecosystem. It guides a user through printer hardware choices, derives a Klipper configuration, can build the matching MCU firmware, and deploys the generated artifacts through supported local or remote paths.
 
-KACE does not replace Klipper and it does not eliminate printer commissioning. Wiring, pin assignments, motion limits, heaters, sensors, homing, and the first controlled movement must still be verified by the person responsible for the machine.
+> [!WARNING]
+> KACE does not replace Klipper and does not eliminate printer commissioning. The person responsible for the machine must still verify wiring, pin assignments, motion limits, heaters, sensors, homing, and the first controlled movement.
 
-## How KACE and KACE Studio work together
+## Quick start
 
-The two projects are independent repositories with a deliberately narrow integration boundary:
+| Starting point | Recommended path |
+| --- | --- |
+| New Raspberry Pi printer host | Use [KACE Studio](https://github.com/3D-uy/KACE-studio) to image, configure first boot, discover the Pi, connect over SSH, and start the pinned bootstrap flow. |
+| Existing Debian-family Linux host | Run the installation command below, then launch `kace`. |
+| Source checkout or contributor setup | Clone the repository, install the locked dependencies, and run `python kace.py`. |
 
-1. [KACE Studio](https://github.com/3D-uy/KACE-studio) writes a Raspberry Pi image and injects network, first-boot, and KACE bootstrap files.
-2. After the Pi boots, Studio discovers it, connects over SSH, and starts the injected `bootstrap.sh`.
-3. The bootstrap provisions Klipper, Moonraker, the selected web interface, optional Crowsnest support, and KACE.
-4. KACE then generates and deploys the printer-specific configuration and firmware artifacts.
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+```
 
-Studio pins the KACE bootstrap by immutable Git commit and SHA-256 in CI. The bootstrap, in turn, pins the KACE installer URL, revision, and SHA-256 as one contract. Machine-readable stage and error markers in `scripts/bootstrap.sh` are consumed by the Studio UI and must remain synchronized.
+> [!WARNING]
+> This convenience command streams remote content from the mutable `main` branch directly to Bash. For an auditable installation, download `install.sh` from an immutable commit or tag, verify its SHA-256 through a separately trusted value, inspect it, and then execute it.
+
+## How the ecosystem flows
+
+```text
+KACE Studio (Windows)
+        │ image, first-boot settings, discovery and SSH
+        ▼
+Raspberry Pi printer host
+        │ pinned bootstrap.sh provisions the host
+        ▼
+KACE (interactive Linux CLI)
+        │ configuration and optional firmware artifacts
+        ▼
+Klipper + printer commissioning
+```
+
+| Stage | Responsibility |
+| --- | --- |
+| 🪟 [KACE Studio](https://github.com/3D-uy/KACE-studio) | Writes a Raspberry Pi image, injects network, first-boot, and KACE bootstrap files; after boot it discovers the Pi, connects through SSH, and starts the injected `bootstrap.sh`. |
+| 🍓 Bootstrap | Provisions Klipper, Moonraker, the selected web interface, optional Crowsnest support, and KACE. Studio pins the bootstrap by immutable Git commit and SHA-256 in CI. The bootstrap pins the KACE installer URL, revision, and SHA-256 as one contract. |
+| 🧩 KACE | Guides printer choices, generates printer-specific configuration and firmware artifacts, and offers supported deployment paths. |
+| 🔧 Klipper and the operator | Run Klipper and complete the official electrical, mechanical, thermal, homing, and motion verification sequence. |
+
+Machine-readable stage and error markers in `scripts/bootstrap.sh` are consumed by the Studio UI and must remain synchronized.
+
+## Why KACE?
+
+| Manual path | KACE-assisted path |
+| --- | --- |
+| Collect board, motion, endstop, heater, sensor, probe, display, and software details across separate steps. | Gather those choices in one guided CLI flow. |
+| Assemble configuration and firmware artifacts manually. | Resolve maintained board and MCU profiles, then generate configuration, macros, and optional firmware artifacts. |
+| Choose transfer and recovery steps ad hoc. | Use supported local/removable-media, SSH/SFTP, Moonraker, or safety-gated firmware deployment paths with backup, validation, and rollback support where implemented. |
+| Validate the physical printer after each change. | Validate the physical printer after each change; KACE makes artifacts and workflow more repeatable, but does not replace commissioning. |
+
+## Features
+
+| Area | What KACE provides |
+| --- | --- |
+| 🧭 Guided setup | Interactive CLI in English, Spanish, and Portuguese. |
+| 🧠 Profiles | Board and MCU profile resolution from maintained YAML data. |
+| 🖨️ Motion and probing | Configuration generation for implemented Cartesian and CoreXY flows; no probe, BLTouch, CR Touch, inductive, and custom probe flows. |
+| 🖥️ Displays | Compatibility checks and generated display configuration where supported. |
+| 📄 Generated artifacts | Klipper configuration and macro generation from project templates, stored under `~/kace/` on the printer host. |
+| ⚙️ Firmware | Optional Klipper MCU firmware derivation and build; deployment-agnostic firmware artifacts plus MANUAL and safety-gated USB strategies. |
+| 📦 Deployment | Local/removable-media, SSH/SFTP, and Moonraker configuration deployment paths; backup, validation, and rollback support around deployment. |
+
+Unsupported or contradictory selections are expected to fail safely rather than produce a configuration that is known to be invalid.
 
 ## Current status
 
 KACE is in active pre-1.0 development. Its configuration generators, snapshot tests, board coverage checks, pinned-Klipper matrices, and containerized firmware builds run in CI. Those automated checks do not substitute for physical validation on every supported controller, probe, display, or printer.
 
-The authoritative project version is stored in `VERSION`. The `main` branch may change without backward-compatibility guarantees until a stable release process is established.
+The authoritative project version is stored in `VERSION`.
 
-## Features
-
-- Guided CLI in English, Spanish, and Portuguese.
-- Board and MCU profile resolution from maintained YAML data.
-- Configuration generation for the implemented Cartesian and CoreXY flows.
-- Probe flows for no probe, BLTouch, CR Touch, inductive, and custom probes.
-- Display compatibility checks and generated display configuration where supported.
-- Klipper configuration and macro generation from project templates.
-- Optional Klipper MCU firmware derivation and build.
-- Local, USB, SSH/SFTP, and Moonraker-oriented deployment paths.
-- Backup, validation, and rollback support around deployment.
-- Stable generated-artifact location under `~/kace/` on the printer host.
-
-Unsupported or contradictory selections are expected to fail safely rather than produce a configuration that is known to be invalid.
+> [!NOTE]
+> Automated tests do not physically test every controller, printer, probe, display, wiring arrangement, or commissioning sequence.
 
 ## Requirements
 
-### End users
-
-- A Debian-family Linux printer host, normally a Raspberry Pi.
-- Python 3.11 or newer.
-- Git and standard system packages installed by `install.sh`.
-- Network access for installation and for operations that fetch upstream Klipper data.
-- Appropriate access to the chosen deployment target.
-
-### Contributors
-
-- Python 3.11.
-- Git.
-- Docker for the pinned-Klipper validation matrix and containerized firmware builds.
+| Audience | Requirements |
+| --- | --- |
+| End users | A Debian-family Linux printer host, normally a Raspberry Pi; Python 3.11 or newer; Git and standard system packages installed by `install.sh`; network access for installation and operations that fetch upstream Klipper data; appropriate access to the chosen deployment target. |
+| Contributors | Python 3.11, Git, and Docker for the pinned-Klipper validation matrix and containerized firmware builds. |
 
 ## Installation
 
@@ -104,6 +162,13 @@ python kace.py
 
 Run `python kace.py --help` for the available CLI options.
 
+<details>
+<summary>Installation safety reminder</summary>
+
+`main` is mutable. Pinning the installer and source revision, checking a separately trusted SHA-256, and inspecting the script are the auditable path when that level of control is required.
+
+</details>
+
 ## End-to-end workflow
 
 1. Provision or prepare the Linux printer host.
@@ -115,19 +180,26 @@ Run `python kace.py --help` for the available CLI options.
 7. Flash the MCU only according to the controller manufacturer's documented procedure.
 8. Start Klipper and complete its official verification sequence before energizing heaters or commanding unrestricted motion.
 
+For an integrated firmware path, KACE displays transactional installation progress directly in an interactive terminal and keeps `Ctrl+C` available for a safe cancellation. Redirected output, pipes, CI, and terminals without dynamic capabilities receive plain ASCII progress lines instead. The same canonical workflow events are emitted as `KACE_WORKFLOW_EVENT` JSON lines for KACE Studio; neither terminal view controls or reconstructs the installation state machine.
+
+> [!TIP]
+> Review generated artifacts before deployment, and treat the first power-on, homing, heater, sensor, and movement checks as operator-controlled safety steps.
+
 ## Architecture
 
 | Area | Responsibility |
 | --- | --- |
-| `kace.py` | CLI entry point, argument parsing, and top-level orchestration |
-| `core/wizard/` | Interactive workflow and normalized user selections |
-| `core/scraper.py`, `core/hardware_detector.py` | Upstream configuration retrieval and hardware discovery |
-| `core/generator.py`, `core/templates.py` | Klipper configuration and macro generation |
-| `firmware/` | Board-specific firmware derivation, validation, and build |
-| `core/deployer.py`, `core/moonraker.py` | Deployment, remote transfer, backup, and rollback paths |
-| `data/`, `templates/`, `config/` | Board contracts, translations, generated-content templates, and configuration data |
-| `scripts/bootstrap.sh` | Integration contract used by KACE Studio to provision a printer host |
-| `tests/` | Unit, regression, snapshot, schema, sweep, and pinned-Klipper matrix validation |
+| `kace.py` | CLI entry point, argument parsing, and top-level orchestration. |
+| `core/wizard/` | Interactive workflow and normalized user selections. |
+| `core/scraper.py`, `core/hardware_detector.py` | Upstream configuration retrieval and hardware discovery. |
+| `core/generator.py`, `core/templates.py` | Klipper configuration and macro generation. |
+| `firmware/` | Firmware derivation/build plus typed artifacts and MANUAL/USB deployment strategies. |
+| `data/firmware_deployments.yaml` | Final filenames, instructions, and allow-listed USB safety profiles. |
+| `core/deployer.py`, `core/moonraker.py`, `core/moonraker_deployer.py` | Deployment, transactional installation, remote transfer, backup, and rollback paths. |
+| `core/terminal_progress.py` | Native TTY and line-oriented views of canonical installation events. |
+| `data/`, `templates/`, `config/` | Board contracts, translations, generated-content templates, and configuration data. |
+| `scripts/bootstrap.sh` | Integration contract used by KACE Studio to provision a printer host. |
+| `tests/` | Unit, regression, snapshot, schema, sweep, and pinned-Klipper matrix validation. |
 
 Generated printer artifacts remain separate from the source tree at `~/kace/`.
 

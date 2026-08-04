@@ -1,0 +1,56 @@
+{
+  "profiles": [
+    {
+      "id": "manual-bin",
+      "method": "MANUAL",
+      "formats": ["BIN"],
+      "final_filename": "firmware.bin",
+      "instructions": [
+        "deployment.manual.copy",
+        "deployment.manual.eject",
+        "deployment.manual.power_cycle"
+      ]
+    },
+    {
+      "id": "manual-uf2",
+      "method": "MANUAL",
+      "formats": ["UF2"],
+      "final_filename": "firmware.uf2",
+      "instructions": [
+        "deployment.manual.copy",
+        "deployment.manual.eject",
+        "deployment.manual.power_cycle"
+      ]
+    },
+    {
+      "id": "manual-ihex",
+      "method": "MANUAL",
+      "formats": ["IHEX"],
+      "final_filename": "firmware.hex",
+      "instructions": [
+        "deployment.manual.copy",
+        "deployment.manual.power_cycle"
+      ]
+    },
+    {
+      "id": "usb-ramps-atmega2560",
+      "method": "USB",
+      "board_patterns": ["generic-ramps.cfg"],
+      "mcu_patterns": ["atmega2560"],
+      "exact_match_required": true,
+      "formats": ["IHEX"],
+      "final_filename": "firmware.hex",
+      "instructions": [
+        "deployment.usb.connect",
+        "deployment.usb.keep_power"
+      ],
+      "auto_flash": true,
+      "backend": "avrdude",
+      "backend_options": {
+        "part": "atmega2560",
+        "programmer": "wiring",
+        "baud": 115200
+      }
+    }
+  ]
+}

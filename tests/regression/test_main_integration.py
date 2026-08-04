@@ -586,6 +586,47 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
         local_mock.assert_not_called()
 
 
+class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
+    """The structured terminal result must control the process exit code."""
+
+    def _run(self, terminal_state):
+        from core.moonraker_deployer import DeployResult
+        # kace.py owns ``-v`` as --version; unittest also uses it for verbose
+        # output, so import with a neutral argv in isolated module runs.
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
+        user_data["pending_firmware_deployment"] = True
+        user_data["klipper_version"] = "kace-test"
+        result = DeployResult(terminal_state, "test result")
+
+        with patch('kace.print_kace_banner'), \
+             patch('kace.run_wizard', return_value=user_data), \
+             patch('kace.check_display_compatibility', return_value=[]), \
+             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.has_todo_pins', return_value=[]), \
+             patch('kace.print_summary'), \
+             patch('kace.time.sleep'), \
+             patch('builtins.print'), \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select') as deploy_menu, \
+             patch('kace.deploy_firmware_installation', return_value=result) as install:
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        install.assert_called_once_with(user_data)
+        deploy_menu.assert_not_called()
+        return ctx.exception.code
+
+    def test_done_exits_zero(self):
+        from core.moonraker_deployer import DeployState
+        self.assertEqual(self._run(DeployState.DONE), 0)
+
+    def test_non_done_exits_nonzero(self):
+        from core.moonraker_deployer import DeployState
+        self.assertEqual(self._run(DeployState.FAILED_FLASH), 1)
+
+
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────
 
 @_skip_no_jinja2

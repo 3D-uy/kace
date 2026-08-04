@@ -61,7 +61,14 @@ from core.wizard import run_wizard, make_pin_validator_with_collision_check, res
 from core.exceptions import WizardExit, GenerationError
 from core.style import custom_style
 from core.generator import generate_config, has_todo_pins
-from core.deployer import deploy_config, deploy_usb, deploy_local, deploy_avrdude, deploy_moonraker
+from core.deployer import (
+    deploy_config,
+    deploy_usb,
+    deploy_local,
+    deploy_moonraker,
+    deploy_firmware_installation,
+    execute_firmware_deployment,
+)
 from core.banner import print_kace_banner
 from core.translations import t
 from core.display_checker import check_display_compatibility
@@ -236,6 +243,26 @@ def main():
 
     # Print Configuration Summary before deployment
     print_summary(user_data, parsed_data)
+
+    # Firmware build and deployment are separate. Once config exists, execute
+    # the prepared strategy. When physical identity and a build fingerprint are
+    # available, compose it with the verified configuration transaction.
+    if user_data.get("pending_firmware_deployment"):
+        from core.moonraker_deployer import DeployState
+        if user_data.get("klipper_version") and user_data.get("mcu_path"):
+            result = deploy_firmware_installation(user_data)
+            if result.state is DeployState.DONE:
+                print("\n\033[92m[OK] Installation completed and validated.\033[0m")
+                sys.exit(0)
+            print(f"\n\033[91m[!] Installation did not complete: {result.state.name}: {result.detail}\033[0m")
+            sys.exit(1)
+
+        # A firmware artifact remains useful without a connected MCU or a
+        # fingerprint. Execute its delivery method, then let the user choose a
+        # separate configuration destination; do not claim verification.
+        deployment_result = execute_firmware_deployment(user_data)
+        if deployment_result is not None and not deployment_result.ok:
+            print(f"\n\033[91m[!] Firmware deployment did not complete: {deployment_result.detail}\033[0m")
 
     # ==========================================
     # PHASE 4: CONFIGURATION DEPLOYMENT

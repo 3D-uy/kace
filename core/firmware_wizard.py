@@ -6,7 +6,12 @@ from core.terminal import BOLD, INFO, RESET, WARNING
 from core.exceptions import DerivationAmbiguityError
 from firmware.derivation import derive_config
 from firmware.builder import build_firmware_orchestrator, BuildContext
-from core.deployer import deploy_usb, deploy_local, deploy_avrdude
+from firmware.artifacts import BuildArtifact
+from firmware.deployment import (
+    DeploymentMethodId,
+    DeploymentTarget,
+    FirmwareDeploymentService,
+)
 
 def run_firmware_wizard(user_data: dict):
     """Interactively configure, compile and deploy Klipper firmware for the target MCU."""
@@ -179,6 +184,20 @@ def run_firmware_wizard(user_data: dict):
         print(f"\033[92mSUCCESS:\033[0m {t('kace.firmware_success', path=result.get('path'))}")
         user_data['mcu_type'] = result.get('mcu')
         user_data['firmware_path'] = result.get('path')
+        artifact = result.get('artifact')
+        if artifact is None:
+            # Compatibility for custom/test builders that still return the
+            # historical dictionary without the typed artifact.
+            artifact = BuildArtifact.create(
+                path=result.get('path') or "",
+                native_filename=result.get('firmware') or "klipper.bin",
+                size_bytes=result.get('size_bytes', 0),
+                mcu=result.get('mcu') or current_mcu or "",
+                firmware_fingerprint=result.get('klipper_version') or "",
+                mock_build=bool(result.get('size_warning', False)),
+                size_warning=bool(result.get('size_warning', False)),
+            )
+        user_data['firmware_artifact'] = artifact
         if result.get('klipper_version'):
             user_data['klipper_version'] = result.get('klipper_version')
             user_data['mcu_name'] = result.get('mcu_name', 'mcu')
@@ -195,62 +214,56 @@ def run_firmware_wizard(user_data: dict):
                 f"\n  \033[93m      KACE_REAL_BUILD=1 python3 kace.py   or   python3 kace.py --real-build\033[0m"
             )
 
+        service = FirmwareDeploymentService(output_dir="~/kace")
+        target = DeploymentTarget(
+            board=user_data.get('board') or "",
+            mcu=result.get('mcu') or current_mcu or "",
+            device_path=user_data.get('mcu_path') or "",
+            mcu_name=user_data.get('mcu_name', 'mcu'),
+        )
+        available = service.available_methods(target, artifact)
         deploy_options = [
-            {"name": f"✅  {t('kace.deploy_none')}",   "value": "none"},
-            {"name": f"📁  {t('kace.deploy_local')}",  "value": "local"},
-            {"name": f"💾  {t('kace.deploy_usb')}",    "value": "usb"},
-            {"name": t('kace.deploy_sd_verify'), "value": "sd_verify"},
+            {"name": f"✅  {t('kace.deploy_none')}", "value": "none"},
         ]
-        if result.get('firmware') == 'klipper.elf.hex':
-            deploy_options.insert(1, {"name": f"⚡  {t('kace.deploy_avrdude')}", "value": "avrdude"})
+        if DeploymentMethodId.MANUAL in available:
+            deploy_options.append({
+                "name": f"💾  {t('deployment.method_manual')}",
+                "value": DeploymentMethodId.MANUAL.value,
+            })
+        if DeploymentMethodId.USB in available:
+            deploy_options.append({
+                "name": f"⚡  {t('deployment.method_usb')}",
+                "value": DeploymentMethodId.USB.value,
+            })
 
         deploy_fw = numbered_select(
             f"\n{t('kace.deploy_firmware_prompt')}",
             choices=deploy_options
         )
 
-        if deploy_fw == "usb":
-            deploy_usb(user_data, artifact_type="firmware")
-        elif deploy_fw == "sd_verify":
-            copied = deploy_usb(user_data, artifact_type="firmware")
-            if not copied:
-                return
-
-            expected_version = user_data.get("klipper_version", "")
-            if not expected_version:
-                print(f"\033[93m{t('kace.sd_verify_unavailable')}\033[0m")
-                return
-
-            print(f"\n\033[93m{t('kace.sd_flash_instructions')}\033[0m")
+        if deploy_fw in (DeploymentMethodId.MANUAL.value, DeploymentMethodId.USB.value):
             try:
-                input(t("kace.sd_flash_ready_prompt"))
-            except (KeyboardInterrupt, EOFError):
-                print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-                return
+                plan = service.plan(artifact, target, DeploymentMethodId(deploy_fw))
+                prepared = service.prepare(plan)
+            except Exception as exc:
+                print(f"\n\033[91mERROR:\033[0m {t('deployment.prepare_failed', error=exc)}")
+                return {"status": "deployment_prepare_failed", "error": str(exc)}
 
-            from core.firmware_flash import verify_sd_card_flash
-            from core.moonraker_deployer import DeployState
+            user_data['firmware_deployment_service'] = service
+            user_data['firmware_deployment_plan'] = plan
+            user_data['prepared_firmware_deployment'] = prepared
+            user_data['pending_firmware_deployment'] = True
+            user_data['firmware_path'] = prepared.staged_path
 
-            result = verify_sd_card_flash(
-                expected_version=expected_version,
-                mcu_name=user_data.get("mcu_name", "mcu"),
-                host=user_data.get("moonraker_host", "localhost"),
-                port=user_data.get("moonraker_port", 7125),
-            )
-            if result.state is DeployState.DONE:
-                print(f"\033[92m{t('kace.sd_verify_success')}\033[0m")
-            elif result.state is DeployState.FAILED_FLASH:
-                print(f"\033[91m{t('kace.sd_verify_wrong_version', detail=result.detail)}\033[0m")
-            elif result.state is DeployState.TIMEOUT:
-                print(f"\033[91m{t('kace.sd_verify_timeout', detail=result.detail)}\033[0m")
-            elif result.state is DeployState.CONFIG_ERROR:
-                print(f"\033[91m{t('kace.sd_verify_config_error', detail=result.detail)}\033[0m")
-            else:
-                print(f"\033[91m{t('kace.sd_verify_failed', detail=result.detail)}\033[0m")
-        elif deploy_fw == "local":
-            deploy_local(user_data, artifact_type="firmware")
-        elif deploy_fw == "avrdude":
-            deploy_avrdude(user_data, result.get("path"), result.get("mcu"))
+            print(f"\n\033[92m[OK]\033[0m {t('deployment.artifact_ready', path=prepared.staged_path)}")
+            print(f"\033[96m[*]\033[0m {t('deployment.final_filename', filename=plan.final_filename)}")
+            for index, instruction in enumerate(plan.instructions, 1):
+                print(f"  {index}. {instruction.text}")
+            if plan.automation_blockers and plan.automation_supported:
+                print(f"\033[93m[!] {t('deployment.automation_blocked')}\033[0m")
+                for blocker in plan.automation_blockers:
+                    print(f"    - {blocker}")
+            return {"status": "deployment_prepared", "method": deploy_fw}
 
     else:
         print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=result.get('message'))}")

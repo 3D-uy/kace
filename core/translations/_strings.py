@@ -668,9 +668,64 @@ UI_STRINGS: dict = {
         "Português": "Falha na compilação do firmware: {message}",
     },
     "kace.deploy_firmware_prompt": {
-        "English":   "Select Deployment Method for Firmware (klipper.bin/.uf2/.hex):",
-        "Español":   "Seleccione el Método de Despliegue del Firmware (klipper.bin/.uf2/.hex):",
-        "Português": "Selecione o Método de Deploy do Firmware (klipper.bin/.uf2/.hex):",
+        "English":   "Select the firmware deployment method:",
+        "Español":   "Seleccione el método de despliegue del firmware:",
+        "Português": "Selecione o método de deploy do firmware:",
+    },
+    "deployment.method_manual": {
+        "English":   "MANUAL (prepare the board-specific file and instructions)",
+        "Español":   "MANUAL (preparar el archivo e instrucciones para la placa)",
+        "Português": "MANUAL (preparar o arquivo e as instruções da placa)",
+    },
+    "deployment.method_usb": {
+        "English":   "USB (automatic only when every safety check passes)",
+        "Español":   "USB (automático sólo si se cumplen todas las comprobaciones)",
+        "Português": "USB (automático somente se todas as verificações forem aprovadas)",
+    },
+    "deployment.artifact_ready": {
+        "English":   "Deployment artifact prepared at {path}",
+        "Español":   "Artefacto de despliegue preparado en {path}",
+        "Português": "Artefato de deploy preparado em {path}",
+    },
+    "deployment.final_filename": {
+        "English":   "Required final filename: {filename}",
+        "Español":   "Nombre final requerido: {filename}",
+        "Português": "Nome final obrigatório: {filename}",
+    },
+    "deployment.prepare_failed": {
+        "English":   "Could not prepare firmware deployment: {error}",
+        "Español":   "No se pudo preparar el despliegue de firmware: {error}",
+        "Português": "Não foi possível preparar o deploy do firmware: {error}",
+    },
+    "deployment.automation_blocked": {
+        "English":   "Automatic flashing is unavailable for this run:",
+        "Español":   "El flasheo automático no está disponible en esta ejecución:",
+        "Português": "A gravação automática não está disponível nesta execução:",
+    },
+    "deployment.manual.copy": {
+        "English":   "Copy {filename} to the root of the controller's removable media.",
+        "Español":   "Copie {filename} en la raíz del medio extraíble de la controladora.",
+        "Português": "Copie {filename} para a raiz da mídia removível da controladora.",
+    },
+    "deployment.manual.eject": {
+        "English":   "Safely eject the media before removing it.",
+        "Español":   "Expulse el medio de forma segura antes de retirarlo.",
+        "Português": "Ejete a mídia com segurança antes de removê-la.",
+    },
+    "deployment.manual.power_cycle": {
+        "English":   "Install the media in the controller and power-cycle only the printer.",
+        "Español":   "Instale el medio en la controladora y reinicie únicamente la impresora.",
+        "Português": "Instale a mídia na controladora e reinicie somente a impressora.",
+    },
+    "deployment.usb.connect": {
+        "English":   "Keep the controller connected through the identified USB device: {device}.",
+        "Español":   "Mantenga la controladora conectada mediante el dispositivo USB identificado: {device}.",
+        "Português": "Mantenha a controladora conectada pelo dispositivo USB identificado: {device}.",
+    },
+    "deployment.usb.keep_power": {
+        "English":   "Do not disconnect power or USB while the flash command is running.",
+        "Español":   "No desconecte la alimentación ni el USB durante el flasheo.",
+        "Português": "Não desconecte a alimentação nem o USB durante a gravação.",
     },
     "kace.deploy_cfg_prompt": {
         "English":   "Select Deployment Method for Configuration (printer.cfg):",
@@ -697,60 +752,10 @@ UI_STRINGS: dict = {
         "Español":   "USB / Tarjeta SD",
         "Português": "USB / Cartão SD",
     },
-    "kace.deploy_sd_verify": {
-        "English":   "SD Card (copy + automatic flash verification)",
-        "Español":   "Tarjeta SD (copiar + verificar flasheo automáticamente)",
-        "Português": "Cartão SD (copiar + verificar gravação automaticamente)",
-    },
-    "kace.sd_flash_instructions": {
-        "English":   "Safely eject the SD card, insert it into the printer controller, then turn only the printer off and on. Keep the Raspberry Pi powered on; KACE will detect the temporary MCU disconnect and verify the new firmware.",
-        "Español":   "Expulse la tarjeta SD de forma segura, insértela en la controladora de la impresora y apague y encienda solamente la impresora. Mantenga encendida la Raspberry Pi; KACE detectará la desconexión temporal del MCU y verificará el firmware nuevo.",
-        "Português": "Ejete o cartão SD com segurança, insira-o na controladora da impressora e desligue e ligue somente a impressora. Mantenha o Raspberry Pi ligado; o KACE detectará a desconexão temporária do MCU e verificará o novo firmware.",
-    },
-    "kace.sd_flash_ready_prompt": {
-        "English":   "Press Enter after the printer is powered off and on to begin automatic verification...",
-        "Español":   "Presione Enter después de apagar y encender la impresora para iniciar la verificación automática...",
-        "Português": "Pressione Enter depois de desligar e ligar a impressora para iniciar a verificação automática...",
-    },
-    "kace.sd_verify_success": {
-        "English":   "Firmware verified. The controller reconnected with the newly compiled version.",
-        "Español":   "Firmware verificado. La controladora se reconectó con la versión recién compilada.",
-        "Português": "Firmware verificado. A controladora reconectou com a versão recém-compilada.",
-    },
-    "kace.sd_verify_unavailable": {
-        "English":   "The firmware was copied, but automatic verification is unavailable because this build has no version fingerprint. Power-cycle the printer and continue with configuration deployment.",
-        "Español":   "El firmware fue copiado, pero la verificación automática no está disponible porque esta compilación no tiene una huella de versión. Apague y encienda la impresora y continúe con el despliegue de configuración.",
-        "Português": "O firmware foi copiado, mas a verificação automática não está disponível porque esta compilação não tem uma impressão digital de versão. Desligue e ligue a impressora e continue com o deploy da configuração.",
-    },
-    "kace.sd_verify_timeout": {
-        "English":   "Automatic verification timed out: {detail}. Confirm the SD card was inserted in the controller, power-cycle only the printer, and check that Moonraker/Klipper is running on this Raspberry Pi before retrying.",
-        "Español":   "La verificación automática agotó el tiempo: {detail}. Confirme que la tarjeta SD fue insertada en la controladora, apague y encienda solamente la impresora y compruebe que Moonraker/Klipper esté ejecutándose en esta Raspberry Pi antes de reintentar.",
-        "Português": "A verificação automática expirou: {detail}. Confirme que o cartão SD foi inserido na controladora, desligue e ligue somente a impressora e verifique se Moonraker/Klipper está em execução neste Raspberry Pi antes de tentar novamente.",
-    },
-    "kace.sd_verify_wrong_version": {
-        "English":   "The controller reconnected, but it is not running the firmware just copied: {detail}. Check the board's required SD-card filename/format and retry the flash.",
-        "Español":   "La controladora se reconectó, pero no está ejecutando el firmware recién copiado: {detail}. Compruebe el nombre/formato de archivo requerido por la tarjeta SD de la placa y reintente el flasheo.",
-        "Português": "A controladora reconectou, mas não está executando o firmware recém-copiado: {detail}. Verifique o nome/formato de arquivo exigido pelo cartão SD da placa e tente a gravação novamente.",
-    },
-    "kace.sd_verify_config_error": {
-        "English":   "Klipper reported a configuration error while the controller returned: {detail}. Review the existing printer configuration, correct it, and retry verification.",
-        "Español":   "Klipper informó un error de configuración mientras la controladora regresaba: {detail}. Revise la configuración existente de la impresora, corríjala y reintente la verificación.",
-        "Português": "O Klipper informou um erro de configuração enquanto a controladora retornava: {detail}. Revise a configuração existente da impressora, corrija-a e tente a verificação novamente.",
-    },
-    "kace.sd_verify_failed": {
-        "English":   "Automatic firmware verification did not complete: {detail}. Check the printer connection and retry the SD-card flash.",
-        "Español":   "La verificación automática del firmware no se completó: {detail}. Compruebe la conexión de la impresora y reintente el flasheo por tarjeta SD.",
-        "Português": "A verificação automática do firmware não foi concluída: {detail}. Verifique a conexão da impressora e tente novamente a gravação pelo cartão SD.",
-    },
     "kace.deploy_ssh": {
         "English":   "SSH (Push to host)",
         "Español":   "SSH (Enviar al host)",
         "Português": "SSH (Enviar ao host)",
-    },
-    "kace.deploy_avrdude": {
-        "English":   "Flash via USB (avrdude)",
-        "Español":   "Flashear por USB (avrdude)",
-        "Português": "Gravar via USB (avrdude)",
     },
     "kace.deploy_moonraker": {
         "English":   "Moonraker API (push + restart)",

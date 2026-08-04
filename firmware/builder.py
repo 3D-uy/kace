@@ -13,7 +13,9 @@ from .build_mode import (
     print_mock_warning,
     print_size_warning,
     FIRMWARE_MINIMUM_SIZE_BYTES,
+    is_mock_build,
 )
+from .artifacts import BuildArtifact
 from core.translations import t
 
 
@@ -285,11 +287,21 @@ def build_firmware_orchestrator(
                     if size_warning:
                         print_size_warning(dest, artifact_size)
 
+                    artifact = BuildArtifact.create(
+                        path=dest,
+                        native_filename=binary,
+                        size_bytes=artifact_size,
+                        mcu=derived_mcu or "",
+                        firmware_fingerprint=_klipper_version_override or "",
+                        mock_build=is_mock_build(build_context.make_command),
+                        size_warning=size_warning,
+                    )
                     return {
                         "status": "success",
                         "mcu": derived_mcu,
                         "firmware": binary,
                         "path": dest,
+                        "artifact": artifact,
                         "size_warning": size_warning,
                         "size_bytes": artifact_size,
                         "klipper_version": _klipper_version_override or "",

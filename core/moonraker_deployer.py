@@ -1,79 +1,103 @@
-# core/moonraker_deployer.py
-#
-# State-machine-driven firmware deployment engine for KACE.
-#
-# Client interface expected by Deployer (implemented by _MoonrakerClient
-# in core/deployer.py):
-#
-#   client.get_klippy_state() -> str
-#       Returns one of: "ready", "startup", "shutdown", "error", "disconnected"
-#   client.get_mcu_versions() -> dict[str, str]
-#       e.g. {"mcu": "kace-a1b2c3d", "mcu toolboard": "kace-e4f5a6b"}
-#   client.upload_and_apply_config(printer_cfg_path, macros_cfg_path=None) -> None
-#   client.firmware_restart() -> None
+"""Transactional KACE deployment state machine.
+
+The physical MCU monitor is deliberately separate from Moonraker.  Losing the
+HTTP API is not evidence that a board was unplugged, and a Klipper shutdown is
+not a USB remove event.  The state machine consumes both sources in order and
+does not publish configuration until the expected firmware is running.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import sys
+import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+from typing import Callable, Optional
 
-# Network error types treated as "still down" in polling safe wrappers.
-#
-# Why not bare `except:` or `except Exception:`?
-#   - `except Exception:` would also swallow AttributeError, NameError, etc.,
-#     hiding programming bugs in the client adapter as spurious "disconnected"
-#     states that just loop until timeout. A typo in the adapter should crash
-#     loudly, not look like a reboot window.
-#   - `KeyboardInterrupt` and `SystemExit` inherit from BaseException, NOT
-#     Exception. So `except Exception:` already lets them propagate correctly
-#     to the `except KeyboardInterrupt:` handler in `_wait_for_reconnect`.
-#     _NETWORK_ERRORS is a strict subset of Exception, so that invariant holds.
-#
-# The tuple is built at import time so the cost is paid once, not per-call.
+from core.mcu_monitor import McuIdentityMismatch, McuMonitorCancelled, McuMonitorError
+from core.terminal_progress import TerminalProgressRenderer, WorkflowEventEmitter
+
 _NETWORK_ERRORS: tuple = (OSError, ConnectionError, TimeoutError)
 try:
-    # requests.exceptions are IOError / OSError subclasses in recent versions,
-    # but importing explicitly makes the intent clear and covers edge cases.
     from requests.exceptions import RequestException as _RequestException
-    _NETWORK_ERRORS = _NETWORK_ERRORS + (_RequestException,)
+    _NETWORK_ERRORS += (_RequestException,)
 except ImportError:
-    pass  # requests not installed; OSError family already covers most cases
+    pass
 
 
 class DeployState(Enum):
-    INIT                = auto()
-    BACKUP              = auto()  # capturing pre-deployment snapshot
+    INIT = auto()
+    BACKUP = auto()
+    COPYING_FIRMWARE = auto()
+    FIRMWARE_COPIED = auto()
+    MONITOR_ARMED = auto()
     AWAITING_DISCONNECT = auto()
-    AWAITING_RECONNECT  = auto()
-    VERIFYING_FIRMWARE  = auto()
-    APPLYING_CONFIG     = auto()
-    VERIFYING_UPLOAD    = auto()  # verifying byte-for-byte upload integrity
-    FIRMWARE_RESTART    = auto()
-    VERIFYING_CONFIG    = auto()  # verifying post-restart config/Klipper health
-    DONE                = auto()
-    # Terminal failure states
-    FAILED_FLASH        = auto()  # reconnected but version mismatch on >=1 MCU
-    TIMEOUT             = auto()  # never reached "ready" within budget
-    CONFIG_ERROR        = auto()  # Klipper shutdown/error after reboot
-    ABORTED             = auto()  # user cancelled
-    FAILED_UPLOAD       = auto()  # upload integrity validation failed
+    MCU_ABSENT = auto()
+    AWAITING_RECONNECT = auto()
+    MCU_PRESENT = auto()
+    WAITING_MOONRAKER = auto()
+    MOONRAKER_ONLINE = auto()
+    WAITING_KLIPPER_READY = auto()
+    KLIPPER_READY = auto()
+    WAITING_MCU_REGISTRATION = auto()
+    MCU_REGISTERED = auto()
+    VERIFYING_FIRMWARE = auto()
+    FIRMWARE_VERIFIED = auto()
+    APPLYING_CONFIG = auto()
+    VERIFYING_UPLOAD = auto()
+    FIRMWARE_RESTART = auto()
+    VERIFYING_CONFIG = auto()
+    ROLLING_BACK = auto()
+    VERIFYING_ROLLBACK = auto()
+    DONE = auto()
+    FAILED_FLASH = auto()
+    TIMEOUT = auto()  # retained for explicitly bounded callers/tests
+    CONFIG_ERROR = auto()
+    ABORTED = auto()
+    FAILED_UPLOAD = auto()
+    FAILED_MONITOR = auto()
+    FAILED_PRECONDITION = auto()
 
 
-@dataclass
+@dataclass(frozen=True)
 class McuTarget:
-    """One MCU KACE compiled firmware for in this run."""
-    name: str             # Moonraker object name, e.g. "mcu", "mcu toolboard"
-    expected_version: str # e.g. "kace-a1b2c3d" (sha256[:8] of .config)
+    name: str
+    expected_version: str
+
+
+@dataclass(frozen=True)
+class ConfigArtifact:
+    local_path: str
+    remote_name: str
+
+    @property
+    def sha256(self) -> str:
+        digest = hashlib.sha256()
+        with open(self.local_path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
 
 @dataclass
 class DeploymentManifest:
-    """Build manifest produced by builder.py for one firmware compile run."""
-    targets: list           # list[McuTarget]
+    targets: list
     printer_cfg_path: str
-    macros_cfg_path: object = None  # str | None
+    macros_cfg_path: object = None
+    auxiliary_files: list = field(default_factory=list)
+
+    def artifacts(self) -> list[ConfigArtifact]:
+        result = [ConfigArtifact(self.printer_cfg_path, "printer.cfg")]
+        if self.macros_cfg_path and os.path.isfile(self.macros_cfg_path):
+            result.append(ConfigArtifact(str(self.macros_cfg_path), "macros.cfg"))
+        for item in self.auxiliary_files:
+            result.append(item if isinstance(item, ConfigArtifact) else ConfigArtifact(*item))
+        return result
 
 
 @dataclass
@@ -81,263 +105,329 @@ class DeployResult:
     state: DeployState
     detail: str = ""
     mcu_versions: dict = field(default_factory=dict)
-    snapshot: Optional[object] = None  # DeploymentSnapshot | None (typed as object to avoid circular import)
+    snapshot: Optional[object] = None
+    workflow_id: str = ""
+    rollback_succeeded: Optional[bool] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.state is DeployState.DONE
+
+
+class JsonEventSink:
+    """Stable line protocol consumed by terminals and KACE Studio."""
+
+    PREFIX = "=== KACE_WORKFLOW_EVENT: "
+
+    def __init__(self, stream=None):
+        self.stream = stream if stream is not None else sys.stdout
+
+    def __call__(self, event: dict) -> None:
+        print(
+            f"{self.PREFIX}{json.dumps(event, sort_keys=True)} ===",
+            file=self.stream,
+            flush=True,
+        )
 
 
 class Deployer:
-    """
-    Drives one firmware deployment through to completion.
+    """Execute one firmware/config transaction from physical reboot to DONE."""
 
-    Usage:
-        deployer = Deployer(client, manifest)
-        result   = deployer.run()
+    WAIT_TIMEOUT_S = None  # user waits are indefinite by default
+    POLL_INTERVAL_S = 1.0
+    POLL_BACKOFF_MAX_S = 5.0
 
-    NOTE: run() is synchronous and blocks for up to DISCONNECT_TIMEOUT_S +
-    RECONNECT_TIMEOUT_S (~105s worst case). KACE is a CLI tool, so blocking
-    the calling thread is the expected behaviour. If this is ever integrated
-    into an async context, wrap the call in a thread or task.
-    """
-
-    DISCONNECT_COOLDOWN_S = 2.0    # ignore reads right after prompting reboot
-    DISCONNECT_TIMEOUT_S  = 15.0   # how long to wait for Klipper to actually drop on power-cycle
-    FIRMWARE_RESTART_DISCONNECT_TIMEOUT_S = 5.0 # fast disconnect timeout after FIRMWARE_RESTART
-    RECONNECT_TIMEOUT_S   = 90.0   # generous -- CAN toolboards can lag mainboard
-    POLL_INTERVAL_S       = 1.0
-    POLL_BACKOFF_MAX_S    = 5.0
-
-    class _ReconnectOutcome(Enum):
-        """Internal outcome of _wait_for_reconnect. Kept nested so it doesn't
-        pollute the module namespace -- callers see it only via run()'s branching."""
-        READY        = auto()  # Klipper ready AND all manifest MCUs visible
-        CONFIG_ERROR = auto()  # Klipper entered shutdown/error state
-        TIMEOUT      = auto()  # Deadline elapsed before all conditions met
-        ABORTED      = auto()  # KeyboardInterrupt during polling wait
-
-    def __init__(self, client, manifest: DeploymentManifest, verify_firmware: bool = True,
-                 snapshot: Optional[object] = None):
-        self.client          = client
-        self.manifest        = manifest
+    def __init__(
+        self,
+        client,
+        manifest: DeploymentManifest,
+        verify_firmware: bool = True,
+        snapshot: Optional[object] = None,
+        *,
+        mcu_monitor=None,
+        power_cycle_prompt: Optional[Callable[[], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
+        event_sink: Optional[Callable[[dict], None]] = None,
+        snapshot_loader: Optional[Callable[[], object]] = None,
+        firmware_copy: Optional[Callable[[], bool]] = None,
+        firmware_deploy: Optional[Callable[[], object]] = None,
+        monitor_before_firmware: bool = False,
+        firmware_already_copied: bool = False,
+    ):
+        self.client = client
+        self.manifest = manifest
         self.verify_firmware = verify_firmware
-        self.snapshot        = snapshot  # pre-captured DeploymentSnapshot | None
-        self.state           = DeployState.INIT
-        self._manifest_names = {t.name for t in manifest.targets}
+        self.snapshot = snapshot
+        self.mcu_monitor = mcu_monitor
+        self.power_cycle_prompt = power_cycle_prompt
+        self.cancel_event = cancel_event or threading.Event()
+        self.snapshot_loader = snapshot_loader
+        self.firmware_copy = firmware_copy
+        self.firmware_deploy = firmware_deploy
+        self.monitor_before_firmware = monitor_before_firmware
+        self.firmware_already_copied = firmware_already_copied
+        self.state = DeployState.INIT
+        self.workflow_id = str(uuid.uuid4())
+        self._sequence = 0
+        self._manifest_names = {target.name for target in manifest.targets}
+        self._owns_event_sink = event_sink is None
+        if event_sink is None:
+            renderer = TerminalProgressRenderer(sys.stdout)
+            try:
+                renderer.start()
+            except Exception:
+                # A terminal capability or output failure must not block KACE.
+                pass
+            self.event_sink = WorkflowEventEmitter(JsonEventSink(sys.stdout), renderer)
+        else:
+            self.event_sink = event_sink
 
-    # ── Safe client wrappers ───────────────────────────────────────────────
-    # The reboot window is exactly when the Pi's network stack is flapping
-    # and Moonraker's HTTP endpoint is intermittently unreachable. Any
-    # ConnectionError, TimeoutError, or similar should be treated as
-    # "still down, keep polling" rather than propagating up as a crash.
+    def _transition(self, state: DeployState, detail: str = "", **data) -> None:
+        self.state = state
+        self._sequence += 1
+        event = {
+            "schema": 1,
+            "workflow_id": self.workflow_id,
+            "sequence": self._sequence,
+            "state": state.name,
+            "detail": detail,
+        }
+        if data:
+            event["data"] = data
+        self.event_sink(event)
+
+    def _result(self, state: DeployState, detail: str, versions=None, rollback=None) -> DeployResult:
+        self._transition(state, detail)
+        return DeployResult(
+            state, detail, versions or {}, self.snapshot, self.workflow_id, rollback
+        )
+
+    def _cancelled(self) -> bool:
+        return self.cancel_event.is_set()
+
+    def _deadline(self):
+        return None if self.WAIT_TIMEOUT_S is None else time.monotonic() + self.WAIT_TIMEOUT_S
+
+    @staticmethod
+    def _expired(deadline) -> bool:
+        return deadline is not None and time.monotonic() >= deadline
+
+    def _pause(self, interval: float) -> None:
+        if self.cancel_event.wait(interval):
+            raise McuMonitorCancelled("cancelled")
 
     def _safe_klippy_state(self) -> str:
-        """Return Klippy state string; treat network errors as 'disconnected'.
-
-        Catches only _NETWORK_ERRORS (OSError / ConnectionError / TimeoutError
-        and optionally requests.RequestException). KeyboardInterrupt and
-        SystemExit are BaseException subclasses and are NOT caught here, so
-        they propagate correctly to _wait_for_reconnect's cancellation handler.
-        """
         try:
             return self.client.get_klippy_state()
         except _NETWORK_ERRORS:
             return "disconnected"
 
     def _safe_mcu_versions(self) -> dict:
-        """Return MCU versions dict; treat network errors as empty dict.
-
-        Same exception-narrowing rationale as _safe_klippy_state: only network
-        errors are swallowed; programming errors in the adapter still propagate.
-        """
         try:
             return self.client.get_mcu_versions()
         except _NETWORK_ERRORS:
             return {}
 
-    def run(self) -> DeployResult:
-        # ── Phase 1: Wait for disconnect (best-effort) ──────────────────
-        self.state = DeployState.AWAITING_DISCONNECT
-        disconnect_confirmed = self._wait_for_disconnect()
-        if not disconnect_confirmed:
-            # Printer never went offline. This could mean no power-cycle
-            # occurred, a very fast reboot, or a network blip masked the drop.
-            # Proceed anyway — the version check in Phase 3 will catch stale
-            # firmware, but surface a note so the eventual error is less
-            # confusing than "running old firmware" with no context.
-            print("\033[93m[!] Printer did not go offline — " 
-                  "power-cycle may not have triggered. Proceeding with version check.\033[0m")
-
-        # ── Phase 2: Wait for reconnect + all manifest MCUs present ─────
-        # _wait_for_reconnect returns (outcome, versions_dict) so run() can
-        # reuse the last-fetched versions without a second round-trip or race.
-        self.state = DeployState.AWAITING_RECONNECT
-        outcome, versions = self._wait_for_reconnect()
-        if outcome is self._ReconnectOutcome.ABORTED:
-            return DeployResult(DeployState.ABORTED, "Cancelled by user during reconnect wait")
-        if outcome is self._ReconnectOutcome.TIMEOUT:
-            return DeployResult(DeployState.TIMEOUT, "Printer did not come back online in time")
-        if outcome is self._ReconnectOutcome.CONFIG_ERROR:
-            return DeployResult(DeployState.CONFIG_ERROR, "Klipper reported shutdown/error on reboot")
-
-        # ── Phase 3: Verify firmware versions ────────────────────────────
-        # versions was fetched by _wait_for_reconnect at the moment all MCUs
-        # became visible — no second call needed.
-        self.state = DeployState.VERIFYING_FIRMWARE
-        if self.verify_firmware:
-            wrong_version, not_visible = self._check_versions(versions)
-            if wrong_version or not_visible:
-                parts = []
-                if wrong_version:
-                    parts.append("running old firmware: " + ", ".join(wrong_version))
-                if not_visible:
-                    parts.append("missing from Moonraker: " + ", ".join(not_visible))
-                return DeployResult(DeployState.FAILED_FLASH, "; ".join(parts), mcu_versions=versions)
-        else:
-            # --dev-deploy: skip fingerprint check but still surface what versions
-            # are actually running so the user can see the mismatch in the log.
-            print(
-                "\033[93m[DEV] --dev-deploy active — firmware fingerprint check skipped.\033[0m\n"
-                "\033[93m      Do NOT use this flag in production.\033[0m"
-            )
-            if versions:
-                for name, ver in versions.items():
-                    print(f"\033[93m      {name}: {ver} (running)\033[0m")
-
-        # ── Phase 4: Apply config ─────────────────────────────────────────
-        self.state = DeployState.APPLYING_CONFIG
-        self.client.upload_and_apply_config(
-            self.manifest.printer_cfg_path,
-            self.manifest.macros_cfg_path,
-        )
-
-        # ── Phase 4.5: Verify configuration upload ─────────────────────────
-        self.state = DeployState.VERIFYING_UPLOAD
-
-        # Verify printer.cfg exists on the target after upload.
-        # Klipper performs authoritative configuration validation on restart,
-        # so we only need to confirm the file was accepted and stored.
-        try:
-            if not self.client.verify_file_exists("printer.cfg"):
-                return DeployResult(DeployState.FAILED_UPLOAD, "Verification failed: printer.cfg not found on target after upload")
-        except Exception as e:
-            return DeployResult(DeployState.FAILED_UPLOAD, f"Could not verify printer.cfg on target: {e}")
-
-        # Verify macros.cfg if it was uploaded
-        if self.manifest.macros_cfg_path:
+    def _wait_moonraker(self) -> bool:
+        deadline = self._deadline()
+        interval = self.POLL_INTERVAL_S
+        while not self._expired(deadline):
+            if self._cancelled():
+                raise McuMonitorCancelled("cancelled")
             try:
-                if not self.client.verify_file_exists("macros.cfg"):
-                    return DeployResult(DeployState.FAILED_UPLOAD, "Verification failed: macros.cfg not found on target after upload")
-            except Exception as e:
-                return DeployResult(DeployState.FAILED_UPLOAD, f"Could not verify macros.cfg on target: {e}")
-
-        # ── Phase 5: Trigger firmware restart ─────────────────────────────
-        self.state = DeployState.FIRMWARE_RESTART
-        self.client.firmware_restart()
-
-        # ── Phase 6: Post-restart Verification ─────────────────────────────
-        # Wait for Klipper to reload and confirm it enters the "ready" state
-        # using the new configuration.
-        self.state = DeployState.VERIFYING_CONFIG
-        
-        # Wait for the restart-triggered disconnect to happen (using faster timeout)
-        self._wait_for_disconnect(timeout=self.FIRMWARE_RESTART_DISCONNECT_TIMEOUT_S)
-        
-        # Wait for Klipper to come back up and reach ready
-        outcome, versions = self._wait_for_reconnect()
-        
-        if outcome is self._ReconnectOutcome.ABORTED:
-            return DeployResult(DeployState.ABORTED, "Cancelled by user during post-restart verification")
-        if outcome is self._ReconnectOutcome.TIMEOUT:
-            return DeployResult(DeployState.TIMEOUT, "Printer did not come back online after configuration update")
-        if outcome is self._ReconnectOutcome.CONFIG_ERROR:
-            return DeployResult(DeployState.CONFIG_ERROR, "Klipper reported shutdown/error with the new configuration")
-
-        self.state = DeployState.DONE
-        return DeployResult(
-            DeployState.DONE,
-            "Deployment verified and applied",
-            mcu_versions=versions,
-            snapshot=self.snapshot,
-        )
-
-    # ── Internals ─────────────────────────────────────────────────────────
-
-    def _wait_for_disconnect(self, timeout: float = None) -> bool:
-        """Poll until Klippy leaves 'ready'. Returns True if disconnect was
-        confirmed, False if the timeout elapsed without observing a drop.
-
-        Network exceptions during the reboot window are handled by
-        _safe_klippy_state() and treated as 'still disconnecting'.
-        """
-        if timeout is None:
-            timeout = self.DISCONNECT_TIMEOUT_S
-        time.sleep(self.DISCONNECT_COOLDOWN_S)
-        deadline = time.monotonic() + timeout
-        interval = self.POLL_INTERVAL_S
-        while time.monotonic() < deadline:
-            if self._safe_klippy_state() != "ready":
-                return True  # confirmed disconnect
-            time.sleep(interval)
+                if self.client.is_moonraker_online():
+                    return True
+            except _NETWORK_ERRORS:
+                pass
+            self._pause(interval)
             interval = min(interval * 1.5, self.POLL_BACKOFF_MAX_S)
-        return False  # timed out without observing disconnect
+        return False
 
-    def _wait_for_reconnect(self, allow_transient_config_error: bool = False) -> tuple:
-        """Poll until Klippy is 'ready' AND every manifest MCU is visible.
-
-        Returns (outcome, versions_dict). versions_dict is the last-fetched
-        get_mcu_versions() snapshot at the moment all MCUs became visible,
-        so run() can reuse it in _check_versions() without a second round-trip
-        or a race between two sequential Moonraker queries.
-
-        Network exceptions during the reboot window are handled by the safe
-        wrappers — they are treated as 'not yet ready' and polling continues.
-
-        KeyboardInterrupt is caught and returned as ABORTED so the caller can
-        surface a clean cancellation message rather than a stack trace.  A
-        physical SD-card flash may transiently report ``shutdown`` while the
-        MCU is unpowered; callers can opt to keep polling through that state.
-        """
-        deadline = time.monotonic() + self.RECONNECT_TIMEOUT_S
+    def _wait_klipper_ready(self, *, fail_on_config_error: bool) -> tuple[bool, str]:
+        deadline = self._deadline()
         interval = self.POLL_INTERVAL_S
-        last_state = ""
-        try:
-            while time.monotonic() < deadline:
-                s = self._safe_klippy_state()
-                last_state = s
-                if s in ("shutdown", "error"):
-                    if not allow_transient_config_error:
-                        return self._ReconnectOutcome.CONFIG_ERROR, {}
-                if s == "ready":
-                    live = self._safe_mcu_versions()
-                    if self._manifest_names.issubset(live.keys()):
-                        return self._ReconnectOutcome.READY, live
-                    # Ready but not all MCUs visible yet (e.g. CAN toolboard
-                    # still handshaking) -- keep polling rather than bail out.
-                time.sleep(interval)
-                interval = min(interval * 1.5, self.POLL_BACKOFF_MAX_S)
-        except KeyboardInterrupt:
-            return self._ReconnectOutcome.ABORTED, {}
-        if allow_transient_config_error and last_state in ("shutdown", "error"):
-            return self._ReconnectOutcome.CONFIG_ERROR, {}
-        return self._ReconnectOutcome.TIMEOUT, {}
+        last = "disconnected"
+        while not self._expired(deadline):
+            if self._cancelled():
+                raise McuMonitorCancelled("cancelled")
+            last = self._safe_klippy_state()
+            if last == "ready":
+                return True, last
+            if fail_on_config_error and last in ("shutdown", "error"):
+                return False, last
+            self._pause(interval)
+            interval = min(interval * 1.5, self.POLL_BACKOFF_MAX_S)
+        return False, last
+
+    def _wait_mcu_registered(self) -> Optional[dict]:
+        deadline = self._deadline()
+        interval = self.POLL_INTERVAL_S
+        while not self._expired(deadline):
+            if self._cancelled():
+                raise McuMonitorCancelled("cancelled")
+            versions = self._safe_mcu_versions()
+            if self._manifest_names.issubset(versions):
+                return versions
+            self._pause(interval)
+            interval = min(interval * 1.5, self.POLL_BACKOFF_MAX_S)
+        return None
 
     def _check_versions(self, actual: dict) -> tuple:
-        """Returns (wrong_version, not_visible) lists of MCU names.
-
-        wrong_version: MCU visible but version doesn't match compiled binary.
-        not_visible:   MCU key absent.
-                       
-                       NOTE: This is a defensive branch. Since `_wait_for_reconnect`
-                       guarantees that all manifest MCU names are keys in `actual`
-                       before returning READY, and `run()` reuses that identical
-                       versions snapshot, `not_visible` is normally unreachable
-                       under the current state machine flow. It is retained to
-                       prevent regressions if the flow/manifest verification
-                       logic changes in the future.
-        """
-        wrong_version, not_visible = [], []
+        wrong, missing = [], []
         for target in self.manifest.targets:
             reported = actual.get(target.name)
             if reported is None:
-                not_visible.append(target.name)
+                missing.append(target.name)
             elif reported != target.expected_version:
-                wrong_version.append(target.name)
-        return wrong_version, not_visible
+                wrong.append(target.name)
+        return wrong, missing
+
+    def _verify_uploads(self) -> tuple[bool, str]:
+        for artifact in self.manifest.artifacts():
+            ok, remote = self.client.download_config(artifact.remote_name)
+            if not ok or not isinstance(remote, bytes):
+                return False, f"could not download {artifact.remote_name} after upload"
+            remote_hash = hashlib.sha256(remote).hexdigest()
+            if remote_hash != artifact.sha256:
+                return False, f"checksum mismatch for {artifact.remote_name}"
+        return True, ""
+
+    def _rollback(self) -> tuple[bool, str]:
+        if self.snapshot is None:
+            return False, "no pre-deployment snapshot is available"
+        self._transition(DeployState.ROLLING_BACK, "restoring previous configuration")
+        try:
+            failed = self.client.restore_snapshot(self.snapshot)
+        except Exception as exc:
+            return False, f"rollback failed: {exc}"
+        if failed:
+            return False, "rollback upload failed: " + ", ".join(failed)
+        self._transition(DeployState.VERIFYING_ROLLBACK, "waiting for Klipper Ready after rollback")
+        if not self._wait_moonraker():
+            return False, "Moonraker did not recover after rollback"
+        ready, state = self._wait_klipper_ready(fail_on_config_error=True)
+        if not ready:
+            return False, f"Klipper did not become Ready after rollback (state={state})"
+        return True, "rollback restored Klipper Ready"
+
+    def run(self) -> DeployResult:
+        versions = {}
+        monitor_armed = False
+        try:
+            if self.snapshot_loader is not None:
+                self._transition(DeployState.BACKUP, "capturing pre-deployment configuration")
+                self.snapshot = self.snapshot_loader()
+
+            if self.monitor_before_firmware and self.mcu_monitor is not None:
+                self.mcu_monitor.arm()
+                monitor_armed = True
+                self._transition(DeployState.MONITOR_ARMED, "physical MCU monitor armed")
+
+            firmware_action = self.firmware_deploy or self.firmware_copy
+            if firmware_action is not None:
+                self._transition(DeployState.COPYING_FIRMWARE, "executing firmware deployment method")
+                outcome = firmware_action()
+                outcome_ok = outcome if isinstance(outcome, bool) else bool(getattr(outcome, "ok", False))
+                outcome_detail = getattr(outcome, "detail", "")
+                if not outcome_ok:
+                    return self._result(
+                        DeployState.FAILED_UPLOAD,
+                        outcome_detail or "firmware deployment method did not complete",
+                    )
+                self._transition(
+                    DeployState.FIRMWARE_COPIED,
+                    outcome_detail or "firmware deployment method completed",
+                )
+            elif self.firmware_already_copied:
+                self._transition(DeployState.FIRMWARE_COPIED, "firmware.bin copied to SD")
+
+            if self.mcu_monitor is not None:
+                if not monitor_armed:
+                    self.mcu_monitor.arm()
+                    monitor_armed = True
+                    self._transition(DeployState.MONITOR_ARMED, "physical MCU monitor armed")
+                if self.power_cycle_prompt:
+                    self.power_cycle_prompt()
+                self._transition(DeployState.AWAITING_DISCONNECT, "waiting for physical MCU removal")
+                self.mcu_monitor.wait_for_absent(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
+                self._transition(DeployState.MCU_ABSENT, "physical MCU absent")
+                self._transition(DeployState.AWAITING_RECONNECT, "waiting for the same physical MCU")
+                identity = self.mcu_monitor.wait_for_present(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
+                self._transition(DeployState.MCU_PRESENT, "same physical MCU present", device=identity.device_node)
+
+            self._transition(DeployState.WAITING_MOONRAKER, "waiting for Moonraker")
+            if not self._wait_moonraker():
+                return self._result(DeployState.TIMEOUT, "Moonraker wait expired")
+            self._transition(DeployState.MOONRAKER_ONLINE, "Moonraker reachable")
+
+            self._transition(DeployState.WAITING_KLIPPER_READY, "waiting for Klipper Ready")
+            ready, state = self._wait_klipper_ready(fail_on_config_error=False)
+            if not ready:
+                return self._result(DeployState.TIMEOUT, f"Klipper Ready wait expired (state={state})")
+            self._transition(DeployState.KLIPPER_READY, "Klipper Ready")
+
+            self._transition(DeployState.WAITING_MCU_REGISTRATION, "waiting for MCU registration")
+            versions = self._wait_mcu_registered()
+            if versions is None:
+                return self._result(DeployState.TIMEOUT, "MCU registration wait expired")
+            self._transition(DeployState.MCU_REGISTERED, "all expected MCUs registered", versions=versions)
+
+            self._transition(DeployState.VERIFYING_FIRMWARE, "verifying firmware fingerprint")
+            if self.verify_firmware:
+                wrong, missing = self._check_versions(versions)
+                if wrong or missing:
+                    detail = []
+                    if wrong:
+                        detail.append("wrong firmware: " + ", ".join(wrong))
+                    if missing:
+                        detail.append("missing MCU: " + ", ".join(missing))
+                    return self._result(DeployState.FAILED_FLASH, "; ".join(detail), versions)
+            self._transition(DeployState.FIRMWARE_VERIFIED, "firmware fingerprint verified")
+
+            self._transition(DeployState.APPLYING_CONFIG, "uploading configuration")
+            for artifact in self.manifest.artifacts():
+                self.client.upload_config(artifact.local_path, artifact.remote_name)
+
+            self._transition(DeployState.VERIFYING_UPLOAD, "verifying uploaded checksums")
+            upload_ok, detail = self._verify_uploads()
+            if not upload_ok:
+                rollback_ok, rollback_detail = self._rollback()
+                return self._result(DeployState.FAILED_UPLOAD, f"{detail}; {rollback_detail}", versions, rollback_ok)
+
+            self._transition(DeployState.FIRMWARE_RESTART, "restarting Klipper")
+            self.client.firmware_restart()
+            self._transition(DeployState.VERIFYING_CONFIG, "waiting for second Klipper Ready")
+            if not self._wait_moonraker():
+                rollback_ok, rollback_detail = self._rollback()
+                return self._result(DeployState.CONFIG_ERROR, f"Moonraker did not recover; {rollback_detail}", versions, rollback_ok)
+            ready, state = self._wait_klipper_ready(fail_on_config_error=True)
+            if not ready:
+                rollback_ok, rollback_detail = self._rollback()
+                return self._result(DeployState.CONFIG_ERROR, f"new configuration state={state}; {rollback_detail}", versions, rollback_ok)
+
+            return self._result(DeployState.DONE, "deployment validated", versions)
+        except (KeyboardInterrupt, McuMonitorCancelled):
+            return self._result(DeployState.ABORTED, "cancelled by user", versions)
+        except McuIdentityMismatch as exc:
+            return self._result(DeployState.FAILED_MONITOR, str(exc), versions)
+        except McuMonitorError as exc:
+            return self._result(DeployState.FAILED_MONITOR, str(exc), versions)
+        except TimeoutError as exc:
+            return self._result(DeployState.TIMEOUT, str(exc), versions)
+        except Exception as exc:
+            if self.state.value >= DeployState.APPLYING_CONFIG.value and self.state not in (
+                DeployState.ROLLING_BACK, DeployState.VERIFYING_ROLLBACK
+            ):
+                try:
+                    rollback_ok, rollback_detail = self._rollback()
+                except Exception as rollback_exc:
+                    rollback_ok, rollback_detail = False, f"rollback failed: {rollback_exc}"
+                return self._result(DeployState.CONFIG_ERROR, f"{exc}; {rollback_detail}", versions, rollback_ok)
+            return self._result(DeployState.FAILED_PRECONDITION, str(exc), versions)
+        finally:
+            try:
+                if self.mcu_monitor is not None:
+                    self.mcu_monitor.close()
+            finally:
+                if self._owns_event_sink:
+                    self.event_sink.close()

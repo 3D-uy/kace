@@ -2,7 +2,6 @@ import os
 import platform
 import posixpath
 import shutil
-import subprocess
 import sys
 
 
@@ -573,59 +572,6 @@ def deploy_local(user_data, artifact_type="all"):
     except Exception as e:
         print(f"\033[91mSave failed: {e}\033[0m")
 
-def deploy_avrdude(user_data, artifact_path, mcu_type):
-    """Deploys firmware via USB using avrdude (for AVR MCUs)."""
-    from core.menu import simple_input, yes_no
-
-    if not shutil.which("avrdude"):
-        print("\n\033[91mERROR:\033[0m 'avrdude' is not installed or not in PATH.")
-        print("\033[93mPlease install it (e.g., 'sudo apt install avrdude') and try again.\033[0m")
-        return
-
-    # Try to derive the avrdude mcu part from mcu_type (e.g. atmega1284p -> atmega1284p)
-    # Most times user_data['mcu_type'] is already correct, but just in case
-    mcu_part = mcu_type.lower() if mcu_type else "atmega2560"
-    
-    default_port = user_data.get('mcu_path')
-    if not default_port or default_port == "TODO" or "TODO" in default_port:
-        default_port = "/dev/ttyUSB0"
-
-    print("\n\033[96m>>> AVR Flashing via avrdude\033[0m")
-    port = simple_input(
-        "Enter the serial port for flashing:",
-        default=default_port
-    )
-
-    if not port:
-        print("\033[93mFlashing cancelled.\033[0m")
-        return
-
-    cmd = [
-        "avrdude", 
-        "-p", mcu_part, 
-        "-c", "arduino", 
-        "-P", port, 
-        "-b", "115200", 
-        "-U", f"flash:w:{artifact_path}:i"
-    ]
-    
-    cmd_str = " ".join(cmd)
-    print(f"\n\033[93mGenerated Command:\033[0m {cmd_str}")
-    
-    confirm = yes_no("Execute this command now?")
-    if confirm:
-        print("\n\033[96m>>> Running avrdude...\033[0m")
-        try:
-            subprocess.run(cmd, check=True)
-            print("\n\033[92mSUCCESS:\033[0m Firmware flashed successfully!")
-        except subprocess.CalledProcessError as e:
-            print(f"\n\033[91mERROR:\033[0m avrdude failed with return code {e.returncode}.")
-    else:
-        print("\n\033[93mCommand execution cancelled. You can run it manually.\033[0m")
-
-
-
-
 class _MoonrakerClient:
     """Thin adapter that wraps core.moonraker functions to match the interface
     expected by core.moonraker_deployer.Deployer."""
@@ -643,23 +589,157 @@ class _MoonrakerClient:
         from core.moonraker import get_mcu_versions
         return get_mcu_versions(self._host, self._port, api_key=self._api_key)
 
-    def upload_and_apply_config(self, printer_cfg_path: str, macros_cfg_path=None):
+    def is_moonraker_online(self) -> bool:
+        from core.moonraker import check_moonraker
+        ok, _ = check_moonraker(self._host, self._port, api_key=self._api_key)
+        return ok
+
+    def upload_config(self, local_path: str, remote_name: str):
         from core.moonraker import upload_printer_cfg
-        upload_printer_cfg(self._host, self._port, printer_cfg_path, api_key=self._api_key)
-        if macros_cfg_path and os.path.isfile(macros_cfg_path):
-            upload_printer_cfg(self._host, self._port, macros_cfg_path, api_key=self._api_key)
+        ok, detail = upload_printer_cfg(
+            self._host, self._port, local_path,
+            filename=remote_name, api_key=self._api_key,
+        )
+        if not ok:
+            raise RuntimeError(f"upload failed for {remote_name}: {detail}")
 
     def firmware_restart(self):
         from core.moonraker import restart_firmware
-        restart_firmware(self._host, self._port, api_key=self._api_key)
+        ok, detail = restart_firmware(self._host, self._port, api_key=self._api_key)
+        if not ok:
+            raise RuntimeError(f"FIRMWARE_RESTART failed: {detail}")
 
-    def download_printer_cfg(self, filename: str) -> tuple:
+    def download_config(self, filename: str) -> tuple:
         from core.moonraker import download_printer_cfg
         return download_printer_cfg(self._host, self._port, filename, api_key=self._api_key)
 
-    def verify_file_exists(self, filename: str) -> bool:
-        from core.moonraker import verify_remote_file_exists
-        return verify_remote_file_exists(self._host, self._port, filename, api_key=self._api_key)
+    def restore_snapshot(self, snapshot) -> list:
+        from core.snapshot import restore_snapshot
+        failed = restore_snapshot(
+            snapshot, self._host, self._port,
+            api_key=self._api_key, issue_restart=False,
+        )
+        if not failed:
+            self.firmware_restart()
+        return failed
+
+def _firmware_execution_context(user_data):
+    """Create the interactive runtime capabilities used by deployment methods."""
+    from core.menu import simple_input, yes_no
+    from firmware.deployment import DeploymentExecutionContext
+
+    def _media_path():
+        return simple_input(
+            "Enter the mounted removable-media directory for the prepared firmware "
+            "(for example /media/usb):"
+        )
+
+    return DeploymentExecutionContext(
+        confirm=lambda prompt: bool(yes_no(prompt, default=False)),
+        media_path_provider=_media_path,
+    )
+
+
+def execute_firmware_deployment(user_data):
+    """Execute the prepared firmware strategy without configuration deployment."""
+    service = user_data.get("firmware_deployment_service")
+    prepared = user_data.get("prepared_firmware_deployment")
+    if service is None or prepared is None:
+        return None
+    result = service.execute(prepared, _firmware_execution_context(user_data))
+    print(f"\n[*] {result.detail}")
+    return result
+
+
+def deploy_firmware_installation(user_data):
+    """Run firmware delivery and configuration as one verified transaction.
+
+    The selected strategy owns naming, instructions and optional automatic
+    flashing. The installation workflow owns physical identity, fingerprint
+    verification, configuration upload, restart and rollback.
+    """
+    from core.mcu_monitor import McuPresenceMonitor
+    from core.moonraker import DEFAULT_PORT, list_config_files
+    from core.moonraker_deployer import (
+        Deployer, DeploymentManifest, DeployResult, DeployState, McuTarget,
+    )
+    from core.snapshot import capture_snapshot
+
+    expected = user_data.get("klipper_version", "")
+    mcu_path = user_data.get("mcu_path", "")
+    prepared = user_data.get("prepared_firmware_deployment")
+    service = user_data.get("firmware_deployment_service")
+    if prepared is None or service is None:
+        return DeployResult(DeployState.FAILED_PRECONDITION, "prepared firmware deployment is unavailable")
+    if not expected:
+        return DeployResult(DeployState.FAILED_FLASH, "compiled firmware fingerprint is unavailable")
+    if not mcu_path:
+        return DeployResult(DeployState.FAILED_MONITOR, "MCU device path is unavailable")
+
+    host = user_data.get("moonraker_host", "localhost")
+    port = int(user_data.get("moonraker_port", DEFAULT_PORT))
+    api_key = user_data.get("moonraker_api_key") or None
+    mcu_name = user_data.get("mcu_name", "mcu")
+    client = _MoonrakerClient(host, port, api_key=api_key)
+
+    def _capture_backup():
+        try:
+            existing = list_config_files(host, port, api_key=api_key)
+        except Exception:
+            existing = []
+        # Always attempt the two files KACE may replace. list_config_files()
+        # returns [] both for an empty root and for a network failure; explicit
+        # downloads prevent a connectivity failure from masquerading as a valid
+        # empty backup.
+        candidates = list(dict.fromkeys([*existing, "printer.cfg", "macros.cfg"]))
+        return capture_snapshot(
+            host, port, candidates,
+            manifest_mcus=(mcu_name,),
+            api_key=api_key,
+            dev_deploy=os.environ.get("KACE_DEV_DEPLOY", "0") == "1",
+            board=user_data.get("board", ""),
+            kace_version=_KACE_VERSION,
+        )
+
+    printer_cfg = os.path.expanduser("~/kace/printer.cfg")
+    macros_cfg = os.path.expanduser("~/kace/macros.cfg")
+    manifest = DeploymentManifest(
+        targets=[McuTarget(mcu_name, expected)],
+        printer_cfg_path=printer_cfg,
+        macros_cfg_path=macros_cfg if os.path.isfile(macros_cfg) else None,
+    )
+
+    method = prepared.plan.method.value
+
+    def _run_firmware_method():
+        result = service.execute(prepared, _firmware_execution_context(user_data))
+        print(f"\n[*] {result.detail}")
+        if result.ok and result.status.value == "ACTION_REQUIRED" and method == "USB":
+            print("[!] Complete the board-specific manual USB flash now.")
+            try:
+                input("    Press ENTER only after the controller has been flashed... ")
+            except (KeyboardInterrupt, EOFError):
+                return False
+        return result
+
+    def _prompt_power_cycle():
+        print("\n\033[93m[!] Install the prepared media, then turn only the printer OFF and ON.\033[0m")
+        print("\033[93m    KACE is monitoring the physical MCU; press Ctrl+C to cancel safely.\033[0m")
+
+    monitor = McuPresenceMonitor(mcu_path)
+    return Deployer(
+        client,
+        manifest,
+        # The physical SD workflow never bypasses identity/fingerprint safety,
+        # including when the broader CLI was started with --dev-deploy.
+        verify_firmware=True,
+        snapshot_loader=_capture_backup,
+        mcu_monitor=monitor,
+        power_cycle_prompt=_prompt_power_cycle if method == "MANUAL" else None,
+        firmware_deploy=_run_firmware_method,
+        monitor_before_firmware=(method == "USB"),
+    ).run()
+
 
 def deploy_moonraker(user_data):
     """Deploy printer.cfg to a Klipper host via the Moonraker REST API.
@@ -780,9 +860,7 @@ def deploy_moonraker(user_data):
         print("\033[93m[!] Configuration backup skipped (no files found in config root).\033[0m")
 
     deployed_successfully = False
-    bypass_rollback = False
     restart_choice = "skip"
-    macros_uploaded = False
 
     # Pre-flight structural integrity check — same rationale as deploy_config:
     # prevent pushing a config that will make Klipper fatal-loop on the Pi.
@@ -808,99 +886,46 @@ def deploy_moonraker(user_data):
         if os.path.exists(macros_path):
             print(f"\033[96m[*]\033[0m Uploading macros.cfg...")
             ok_m, res_m = upload_printer_cfg(host, port, macros_path, api_key=api_key)
-            if ok_m:
-                macros_uploaded = True
-            else:
+            if not ok_m:
                 print(f"\033[91m[!] Failed to upload macros.cfg: {res_m}\033[0m")
 
         print(f"\033[92m[OK] {t('moonraker.upload_ok')}\033[0m")
 
-        # ── Step 5: Restart / firmware-verified deploy ───────────────────
-        klipper_version = user_data.get("klipper_version", "")
-        mcu_name        = user_data.get("mcu_name", "mcu")
+        # This is the config-only path. The firmware transaction is owned by
+        # deploy_firmware_installation(), so no second transition or upload
+        # can be introduced here merely because firmware was compiled earlier.
+        restart_choice = numbered_select(
+            t("moonraker.restart_prompt"),
+            choices=[
+                {"name": t("moonraker.restart_firmware"), "value": "firmware"},
+                {"name": t("moonraker.restart_service"),  "value": "service"},
+                {"name": t("moonraker.restart_skip"),     "value": "skip"},
+            ]
+        )
+        if restart_choice is None:
+            restart_choice = "skip"
 
-        if klipper_version:
-            # Firmware was compiled in this KACE run — use the state-machine
-            # path that verifies the new firmware is actually running before
-            # applying printer.cfg.
-            from core.moonraker_deployer import Deployer, DeploymentManifest, McuTarget, DeployState
-            from core.exceptions import WizardExit
-            print(f"\n\033[93m[!] Power-cycle your printer (turn it OFF and ON) to flash the new firmware.\033[0m")
-            try:
-                input("    Press ENTER once the printer has fully rebooted... ")
-            except (KeyboardInterrupt, EOFError):
-                print(f"\n\033[93mDeployment cancelled.\033[0m")
-                raise WizardExit
-
-            _manifest = DeploymentManifest(
-                targets=[McuTarget(name=mcu_name, expected_version=klipper_version)],
-                printer_cfg_path=cfg_path,
-                macros_cfg_path=os.path.expanduser("~/kace/macros.cfg") if macros_uploaded else None,
-            )
-            _client  = _MoonrakerClient(host, port, api_key=api_key)
-            # verify_firmware=False when kace.py propagated --dev-deploy via KACE_DEV_DEPLOY.
-            _verify  = os.environ.get("KACE_DEV_DEPLOY", "0") != "1"
-            _result  = Deployer(_client, _manifest, verify_firmware=_verify, snapshot=_snap).run()
-
-            if _result.state is DeployState.DONE:
-                deployed_successfully = True
-                print(f"\n\033[92m[OK] Firmware verified and printer.cfg applied!\033[0m")
-                print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
-            elif _result.state is DeployState.FAILED_FLASH:
-                print(f"\n\033[91m[!] Flash verification FAILED: {_result.detail}\033[0m")
-                print(f"\033[93m    printer.cfg was NOT applied — check the SD card and retry.\033[0m")
-            elif _result.state is DeployState.TIMEOUT:
-                print(f"\n\033[91m[!] Timeout: {_result.detail}\033[0m")
-                print(f"\033[93m    Check that the printer is powered on and Moonraker is reachable.\033[0m")
-            elif _result.state is DeployState.CONFIG_ERROR:
-                bypass_rollback = True
-                print(f"\n\033[91m[!] Klipper boot error: {_result.detail}\033[0m")
-                print(f"\033[93m    Bypassing automatic rollback to allow debugging the configuration error.\033[0m")
-            elif _result.state is DeployState.FAILED_UPLOAD:
-                print(f"\n\033[91m[!] Upload integrity verification FAILED: {_result.detail}\033[0m")
-                print(f"\033[93m    Initiating configuration rollback to restore service...\033[0m")
-            else:
-                print(f"\n\033[91m[!] Deployment ended in unexpected state: {_result.state.name} — {_result.detail}\033[0m")
+        if restart_choice == "firmware":
+            restart_ok, restart_msg = restart_firmware(host, port, api_key=api_key)
+        elif restart_choice == "service":
+            restart_ok, restart_msg = restart_klipper_service(host, port, api_key=api_key)
         else:
-            # No firmware compiled in this run — standard config-only deploy.
-            restart_choice = numbered_select(
-                t("moonraker.restart_prompt"),
-                choices=[
-                    {"name": t("moonraker.restart_firmware"), "value": "firmware"},
-                    {"name": t("moonraker.restart_service"),  "value": "service"},
-                    {"name": t("moonraker.restart_skip"),     "value": "skip"},
-                ]
-            )
-            if restart_choice is None:
-                restart_choice = "skip"
+            restart_ok, restart_msg = True, "skipped"
 
-            if restart_choice == "firmware":
-                restart_ok, restart_msg = restart_firmware(host, port, api_key=api_key)
-            elif restart_choice == "service":
-                restart_ok, restart_msg = restart_klipper_service(host, port, api_key=api_key)
-            else:
-                restart_ok, restart_msg = True, "skipped"
+        if not restart_ok:
+            raise RuntimeError(t('moonraker.restart_fail', error=restart_msg))
+        if restart_choice != "skip":
+            print(f"\033[92m[OK] {t('moonraker.restart_ok')}\033[0m")
 
-            if restart_ok:
-                if restart_choice != "skip":
-                    print(f"\033[92m[OK] {t('moonraker.restart_ok')}\033[0m")
-            else:
-                raise RuntimeError(t('moonraker.restart_fail', error=restart_msg))
-
-            deployed_successfully = True
-            print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
-            if restart_choice != "skip":
-                print(f"\033[96m[*]\033[0m Klipper restart issued successfully.")
-                print(f"\033[93m[!] TIP: If Klipper does not load immediately or reports a connection error,\033[0m")
-                print(f"\033[93m    we recommend power-cycling (turning OFF and ON) your Raspberry Pi and printer.\033[0m")
-            print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
+        deployed_successfully = True
+        print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
+        print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
 
     except Exception as e:
         print(f"\033[91mMoonraker deployment failed: {e}\033[0m")
     finally:
-        # Perform rollback if a snapshot was captured, deployment was not successful,
-        # and rollback is not bypassed.
-        if snapshot_captured and _snap is not None and not deployed_successfully and not bypass_rollback:
+        # Perform rollback if a snapshot was captured and deployment failed.
+        if snapshot_captured and _snap is not None and not deployed_successfully:
             print("\033[93m[!] Initiating automatic rollback of configurations...\033[0m")
             failed_files = restore_snapshot(_snap, host, port, api_key=api_key)
             if failed_files:

@@ -1,439 +1,268 @@
-"""
-tests/unit/test_moonraker_deployer.py
-Unit tests for the Deployer state machine in core/moonraker_deployer.py.
+"""Tests for the end-to-end KACE installation transaction."""
 
-Covers all terminal states (DONE, FAILED_FLASH, CONFIG_ERROR, TIMEOUT, ABORTED)
-plus the specific interaction between the safe-wrapper exception narrowing and
-the KeyboardInterrupt->ABORTED cancellation path:
-
-  Fix-1 (safe wrappers catch _NETWORK_ERRORS) vs
-  Fix-5 (KeyboardInterrupt caught in _wait_for_reconnect -> ABORTED)
-
-The key invariant: _NETWORK_ERRORS must be a strict subset of Exception so that
-KeyboardInterrupt (a BaseException, not Exception) propagates through the
-wrappers unimpeded and reaches the cancellation handler.
-"""
-
-import io
+import os
+import tempfile
+import threading
 import unittest
-from unittest.mock import patch
-from core.moonraker_deployer import Deployer, DeploymentManifest, McuTarget, DeployState
 
-
-# ── Shared fixtures ───────────────────────────────────────────────────────────
-
-MANIFEST = DeploymentManifest(
-    targets=[McuTarget("mcu", "kace-a1b2c3d")],
-    printer_cfg_path="/fake/printer.cfg",
+from core.mcu_monitor import McuIdentity, McuIdentityMismatch, McuMonitorCancelled
+from core.moonraker_deployer import (
+    ConfigArtifact, Deployer, DeploymentManifest, DeployState, McuTarget,
 )
-
-MANIFEST_TWO = DeploymentManifest(
-    targets=[
-        McuTarget("mcu",          "kace-a1b2c3d"),
-        McuTarget("mcu toolboard", "kace-a1b2c3d"),
-    ],
-    printer_cfg_path="/fake/printer.cfg",
-)
+from core.snapshot import DeploymentSnapshot
+from core.terminal_progress import WorkflowEventEmitter
 
 
-class MockClient:
-    """Configurable mock Moonraker client."""
+class Monitor:
+    def __init__(self, *, mismatch=False, cancel=False):
+        self.calls = []
+        self.mismatch = mismatch
+        self.cancel = cancel
 
-    def __init__(self, states, versions_seq, *, raise_on_state=None, raise_on_versions=None):
-        self._states   = list(states)
-        self._versions = list(versions_seq)
-        self._si = 0
-        self._vi = 0
-        self._raise_on_state    = raise_on_state    or {}
-        self._raise_on_versions = raise_on_versions or {}
-        self.applied   = False
-        self.restarted = False
-        self._verify_results = {}
+    def arm(self):
+        self.calls.append("arm")
 
-    def verify_file_exists(self, filename: str) -> bool:
-        return self._verify_results.get(filename, True)
+    def wait_for_absent(self, **kwargs):
+        self.calls.append(("absent", kwargs["timeout"]))
+        if self.cancel:
+            raise McuMonitorCancelled("cancelled")
+
+    def wait_for_present(self, **kwargs):
+        self.calls.append(("present", kwargs["timeout"]))
+        if self.mismatch:
+            raise McuIdentityMismatch("different MCU")
+        return McuIdentity("/dev/serial/by-id/mcu", "/dev/ttyACM1", serial="same")
+
+    def close(self):
+        self.calls.append("close")
+
+
+class Client:
+    def __init__(self, payloads, *, online=None, states=None, versions=None):
+        self.payloads = payloads
+        self.online = list(online or [True])
+        self.states = list(states or ["ready", "ready"])
+        self.versions = list(versions or [{"mcu": "kace-good"}])
+        self.calls = []
+        self.remote = {}
+        self.rollback = False
+
+    @staticmethod
+    def _next(values, default):
+        return values.pop(0) if values else default
+
+    def is_moonraker_online(self):
+        self.calls.append("moonraker")
+        return self._next(self.online, True)
 
     def get_klippy_state(self):
-        idx = self._si
-        self._si += 1
-        exc = self._raise_on_state.get(idx)
-        if exc is not None:
-            raise exc()
-        return self._states[idx] if idx < len(self._states) else "ready"
+        self.calls.append("klipper")
+        return self._next(self.states, "ready")
 
     def get_mcu_versions(self):
-        idx = self._vi
-        self._vi += 1
-        exc = self._raise_on_versions.get(idx)
-        if exc is not None:
-            raise exc()
-        return self._versions[idx] if idx < len(self._versions) else {"mcu": "kace-a1b2c3d"}
+        self.calls.append("versions")
+        return self._next(self.versions, {"mcu": "kace-good"})
 
-    def upload_and_apply_config(self, p, m=None):
-        self.applied = True
+    def upload_config(self, path, name):
+        self.calls.append(("upload", name))
+        with open(path, "rb") as source:
+            self.remote[name] = source.read()
+
+    def download_config(self, name):
+        self.calls.append(("download", name))
+        return (name in self.remote, self.remote.get(name, b""))
 
     def firmware_restart(self):
-        self.restarted = True
+        self.calls.append("restart")
+
+    def restore_snapshot(self, snapshot):
+        self.calls.append("rollback")
+        self.rollback = True
+        self.remote = dict(snapshot.config_files)
+        return []
 
 
-def _fast_deployer(client, manifest=MANIFEST, reconnect_timeout=5.0):
-    d = Deployer(client, manifest)
-    d.DISCONNECT_COOLDOWN_S = 0
-    d.DISCONNECT_TIMEOUT_S  = 0.1
-    d.RECONNECT_TIMEOUT_S   = reconnect_timeout
-    d.POLL_INTERVAL_S       = 0.01
-    d.POLL_BACKOFF_MAX_S    = 0.02
-    return d
-
-
-class TestMoonrakerDeployer(unittest.TestCase):
-    pass
-    # ── DONE ──────────────────────────────────────────────────────────────────────
-
-    def test_done_disconnect_observed(self):
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
+class InstallationWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.printer = os.path.join(self.tmp.name, "printer.cfg")
+        self.macros = os.path.join(self.tmp.name, "macros.cfg")
+        with open(self.printer, "wb") as stream:
+            stream.write(b"[printer]\n")
+        with open(self.macros, "wb") as stream:
+            stream.write(b"[gcode_macro TEST]\n")
+        self.manifest = DeploymentManifest(
+            [McuTarget("mcu", "kace-good")], self.printer, self.macros
         )
-        result = _fast_deployer(client).run()
+        self.snapshot = DeploymentSnapshot(
+            "id", "now", "board", "version", "", ("mcu",), False,
+            {"printer.cfg": b"[printer]\nold: true\n"},
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def make(self, client=None, monitor=None, events=None, prompt=None):
+        deployer = Deployer(
+            client or Client({}), self.manifest, snapshot=self.snapshot,
+            mcu_monitor=monitor or Monitor(),
+            power_cycle_prompt=prompt,
+            event_sink=(events if events is not None else []).append,
+            firmware_already_copied=True,
+        )
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
+        return deployer
+
+    def test_quick_disconnect_is_not_lost_and_monitor_is_armed_before_prompt(self):
+        monitor = Monitor()
+        observed = []
+        result = self.make(monitor=monitor, prompt=lambda: observed.append(list(monitor.calls))).run()
         self.assertEqual(result.state, DeployState.DONE)
-        self.assertTrue(client.applied)
-        self.assertTrue(client.restarted)
-        self.assertEqual(result.mcu_versions, {"mcu": "kace-a1b2c3d"})
+        self.assertEqual(observed, [["arm"]])
+        self.assertIn(("absent", None), monitor.calls)
 
-
-    def test_done_no_disconnect_observed(self):
-        """Fast reboot: disconnect window missed, correct firmware -> DONE with warning."""
-        client = MockClient(
-            states=["ready"] * 20,
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
+    def test_copy_is_inside_transaction_and_precedes_monitor(self):
+        order = []
+        monitor = Monitor()
+        original_arm = monitor.arm
+        monitor.arm = lambda: (order.append("arm"), original_arm())[1]
+        deployer = Deployer(
+            Client({}), self.manifest, snapshot=self.snapshot,
+            mcu_monitor=monitor,
+            firmware_copy=lambda: order.append("copy") or True,
+            event_sink=lambda _event: None,
         )
-        with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
-            result = _fast_deployer(client).run()
-            self.assertEqual(result.state, DeployState.DONE)
-            self.assertIn("power-cycle may not have triggered", mock_stdout.getvalue())
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
+        self.assertEqual(deployer.run().state, DeployState.DONE)
+        self.assertEqual(order, ["copy", "arm"])
 
-
-    # ── FAILED_FLASH ──────────────────────────────────────────────────────────────
-
-    def test_failed_flash_wrong_version(self):
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "old-version"}],
+    def test_usb_style_deployment_arms_monitor_before_flash(self):
+        order = []
+        monitor = Monitor()
+        original_arm = monitor.arm
+        monitor.arm = lambda: (order.append("arm"), original_arm())[1]
+        deployer = Deployer(
+            Client({}), self.manifest, snapshot=self.snapshot,
+            mcu_monitor=monitor,
+            firmware_deploy=lambda: order.append("flash") or True,
+            monitor_before_firmware=True,
+            event_sink=lambda _event: None,
         )
-        result = _fast_deployer(client).run()
-        self.assertEqual(result.state, DeployState.FAILED_FLASH)
-        self.assertIn("running old firmware", result.detail)
-        self.assertFalse(client.applied)
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
 
+        self.assertEqual(deployer.run().state, DeployState.DONE)
+        self.assertEqual(order, ["arm", "flash"])
 
-    def test_single_snapshot_prevents_missing_mcu_race(self):
-        """Verify that reusing the same snapshot prevents missing-MCU races in run()."""
-        # Even if the underlying get_mcu_versions is dynamic or could return an empty dict
-        # on a subsequent call, the Deployer's use of a single snapshot guarantees consistency
-        # and results in a successful DONE state.
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}, {}],  # Second returned dict would be empty if queried again
+    def test_copy_failure_is_structured_and_never_arms_monitor(self):
+        monitor = Monitor()
+        deployer = Deployer(
+            Client({}), self.manifest, mcu_monitor=monitor,
+            firmware_copy=lambda: False, event_sink=lambda _event: None,
         )
-        result = _fast_deployer(client).run()
-        self.assertEqual(result.state, DeployState.DONE)
+        result = deployer.run()
+        self.assertEqual(result.state, DeployState.FAILED_UPLOAD)
+        self.assertNotIn("arm", monitor.calls)
 
+    def test_wait_is_indefinite_by_default(self):
+        monitor = Monitor()
+        deployer = self.make(monitor=monitor)
+        self.assertIsNone(deployer.WAIT_TIMEOUT_S)
+        deployer.run()
+        self.assertIn(("present", None), monitor.calls)
 
-    def test_check_versions_defensive_not_visible_handling(self):
-        """Directly test that _check_versions correctly handles and reports missing targets."""
-        # This checks _check_versions in isolation to confirm the defensive not_visible
-        # branch functions correctly even though the higher-level Deployer flow prevents
-        # this branch from being reachable during a standard state machine run.
-        d = _fast_deployer(MockClient([], []))
-        wrong, missing = d._check_versions({"mcu": "kace-a1b2c3d"})
-        self.assertFalse(wrong)
-        self.assertFalse(missing)
-
-        # Test missing targets
-        wrong_missing, missing_only = d._check_versions({})
-        self.assertFalse(wrong_missing)
-        self.assertEqual(missing_only, ["mcu"])
-
-
-    # ── CONFIG_ERROR ──────────────────────────────────────────────────────────────
-
-    def test_config_error_shutdown(self):
-        client = MockClient(states=["disconnected", "shutdown"], versions_seq=[])
-        result = _fast_deployer(client).run()
-        self.assertEqual(result.state, DeployState.CONFIG_ERROR)
-        self.assertFalse(client.applied)
-
-
-    def test_config_error_error_state(self):
-        client = MockClient(states=["disconnected", "error"], versions_seq=[])
-        result = _fast_deployer(client).run()
-        self.assertEqual(result.state, DeployState.CONFIG_ERROR)
-
-
-    # ── TIMEOUT ───────────────────────────────────────────────────────────────────
-
-    def test_timeout_never_ready(self):
-        client = MockClient(states=["startup"] * 500, versions_seq=[{}] * 500)
-        result = _fast_deployer(client, reconnect_timeout=0.05).run()
-        self.assertEqual(result.state, DeployState.TIMEOUT)
-        self.assertFalse(client.applied)
-
-
-    # ── ABORTED vs NETWORK_ERROR interaction ──────────────────────────────────────
-
-    def test_aborted_keyboard_interrupt_during_reconnect(self):
-        """
-        THE critical interaction test: Fix-1 exception narrowing vs Fix-5 ABORTED.
-
-        KeyboardInterrupt must propagate THROUGH _safe_klippy_state() because
-        _NETWORK_ERRORS is a strict Exception subset, and KeyboardInterrupt inherits
-        from BaseException (not Exception) -- so it is not caught by the wrapper.
-
-        It then reaches _wait_for_reconnect's `except KeyboardInterrupt:` block
-        and returns (ABORTED, {}).
-
-        Regression signal: if this test returns TIMEOUT instead of ABORTED, it
-        means the safe wrapper was widened to catch BaseException or bare `except:`,
-        silently eating the Ctrl-C and letting the loop run to timeout instead.
-        """
-        client = MockClient(
-            states=["disconnected"],                 # disconnect phase completes
-            versions_seq=[],
-            raise_on_state={1: KeyboardInterrupt},   # first reconnect poll -> KBI
-        )
-        result = _fast_deployer(client, reconnect_timeout=5.0).run()
+    def test_cancellation_returns_aborted_without_upload(self):
+        monitor = Monitor(cancel=True)
+        client = Client({})
+        result = self.make(client, monitor).run()
         self.assertEqual(result.state, DeployState.ABORTED)
-        self.assertIn("Cancelled by user", result.detail)
-        self.assertFalse(client.applied)
+        self.assertFalse(any(isinstance(c, tuple) and c[0] == "upload" for c in client.calls))
 
+    def test_keyboard_interrupt_emits_terminal_aborted_event(self):
+        monitor = Monitor()
+        def interrupt_wait(**_kwargs):
+            raise KeyboardInterrupt
+        monitor.wait_for_absent = interrupt_wait
+        events = []
 
-    def test_network_oserror_does_not_abort(self):
-        """
-        Inverse: an OSError during the reconnect loop must be swallowed (Fix-1),
-        not treated as ABORTED (Fix-5). The loop should keep polling after the error.
-        """
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-            raise_on_state={1: OSError},   # first reconnect poll raises OSError -> retry
-        )
-        # After the OSError the next poll returns "ready" from the states list
-        result = _fast_deployer(client, reconnect_timeout=5.0).run()
+        result = self.make(monitor=monitor, events=events).run()
+
+        self.assertEqual(result.state, DeployState.ABORTED)
+        self.assertEqual(events[-1]["state"], "ABORTED")
+        self.assertEqual(events[-1]["detail"], "cancelled by user")
+
+    def test_renderer_failure_does_not_change_workflow_result(self):
+        events = []
+        deployer = self.make(events=events)
+
+        def broken_renderer(_event):
+            raise RuntimeError("terminal unavailable")
+
+        deployer.event_sink = WorkflowEventEmitter(events.append, broken_renderer)
+        result = deployer.run()
+
         self.assertEqual(result.state, DeployState.DONE)
+        self.assertEqual(events[-1]["state"], "DONE")
 
-
-    def test_attribute_error_propagates(self):
-        """
-        Programming bugs in the client adapter must NOT be silently masked.
-        An AttributeError is not a network error; it must propagate as a crash.
-        """
-        client = MockClient(
-            states=[],
-            versions_seq=[],
-            raise_on_state={0: AttributeError},   # raised on first state call
-        )
-        with self.assertRaises(AttributeError):
-            _fast_deployer(client).run()
-
-
-    # ── CAN toolboard lag ─────────────────────────────────────────────────────────
-
-    def test_can_toolboard_lag(self):
-        """Mainboard reconnects first; CAN toolboard appears on the second poll."""
-        class CanLagClient:
-            def __init__(self):
-                self._sc = 0
-                self._vc = 0
-                self.applied = self.restarted = False
-
-            def get_klippy_state(self):
-                self._sc += 1
-                return "disconnected" if self._sc == 1 else "ready"
-
-            def get_mcu_versions(self):
-                self._vc += 1
-                if self._vc == 1:
-                    return {"mcu": "kace-a1b2c3d"}                        # toolboard lagging
-                return {"mcu": "kace-a1b2c3d", "mcu toolboard": "kace-a1b2c3d"}
-
-            def upload_and_apply_config(self, p, m=None): self.applied   = True
-            def firmware_restart(self):                    self.restarted = True
-            def verify_file_exists(self, filename: str) -> bool: return True
-
-        client = CanLagClient()
-        result = _fast_deployer(client, MANIFEST_TWO).run()
+    def test_moonraker_outage_is_not_usb_disconnect(self):
+        monitor = Monitor()
+        client = Client({}, online=[False, False, True])
+        result = self.make(client, monitor).run()
         self.assertEqual(result.state, DeployState.DONE)
-        self.assertIn("mcu toolboard", result.mcu_versions)
+        self.assertEqual([c for c in monitor.calls if isinstance(c, tuple)][0][0], "absent")
+        self.assertEqual(client.calls.count("moonraker"), 4)  # includes post-restart check
 
+    def test_different_physical_mcu_is_rejected(self):
+        result = self.make(monitor=Monitor(mismatch=True)).run()
+        self.assertEqual(result.state, DeployState.FAILED_MONITOR)
 
-    # ── Single-snapshot guarantee (Fix 3) ────────────────────────────────────────
-
-    def test_single_mcu_versions_call_per_run(self):
-        """get_mcu_versions() must be called exactly once per connect phase.
-        With Phase 6 added, we have two connect phases (pre-flash verify and post-restart config verify),
-        so it should be called exactly twice."""
-        call_count = {"n": 0}
-
-        class CountingClient:
-            def get_klippy_state(self): return "ready"
-            def get_mcu_versions(self):
-                call_count["n"] += 1
-                return {"mcu": "kace-a1b2c3d"}
-            def upload_and_apply_config(self, p, m=None): pass
-            def firmware_restart(self): pass
-            def verify_file_exists(self, filename: str) -> bool: return True
-
-        result = _fast_deployer(CountingClient()).run()
+    def test_no_upload_before_fingerprint_and_each_file_once(self):
+        events = []
+        client = Client({})
+        result = self.make(client, events=events).run()
         self.assertEqual(result.state, DeployState.DONE)
-        self.assertEqual(call_count["n"], 2)
+        states = [event["state"] for event in events]
+        self.assertLess(states.index("FIRMWARE_VERIFIED"), states.index("APPLYING_CONFIG"))
+        self.assertEqual(client.calls.count(("upload", "printer.cfg")), 1)
+        self.assertEqual(client.calls.count(("upload", "macros.cfg")), 1)
+        self.assertEqual(client.calls.count("restart"), 1)
+        self.assertEqual(states[-1], "DONE")
+        self.assertEqual([e["sequence"] for e in events], list(range(1, len(events) + 1)))
 
-    # ── dev-deploy / verify_firmware=False ────────────────────────────────────────
+    def test_wrong_fingerprint_never_uploads(self):
+        client = Client({}, versions=[{"mcu": "some-other-build"}])
+        result = self.make(client).run()
+        self.assertEqual(result.state, DeployState.FAILED_FLASH)
+        self.assertFalse(any(isinstance(c, tuple) and c[0] == "upload" for c in client.calls))
 
-    def test_dev_deploy_skips_fingerprint_mismatch(self):
-        """When verify_firmware=False, fingerprint check is skipped, and it finishes DONE."""
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "old-or-mismatched-version"}],
-        )
-        d = _fast_deployer(client)
-        d.verify_firmware = False
-        
-        with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
-            result = d.run()
-            self.assertEqual(result.state, DeployState.DONE)
-            self.assertTrue(client.applied)
-            self.assertTrue(client.restarted)
-            self.assertIn("firmware fingerprint check skipped", mock_stdout.getvalue())
-
-    # ── DeploymentSnapshot attached to result ─────────────────────────────────
-
-    def test_snapshot_attached_to_done_result(self):
-        """A DeploymentSnapshot passed to Deployer must be surfaced on the DeployResult."""
-        from core.snapshot import DeploymentSnapshot
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-        )
-        snap = DeploymentSnapshot(
-            deployment_id="test-uuid",
-            timestamp="2026-01-01T00:00:00+00:00",
-            board="btt_octopus",
-            kace_version="1.0",
-            firmware_fingerprint="mcu=kace-a1b2c3d",
-            mcus=("mcu",),
-            dev_deploy=False,
-            config_files={"printer.cfg": b"[printer]\n"},
-        )
-        d = _fast_deployer(client)
-        d.snapshot = snap
-        result = d.run()
+    def test_restart_and_second_ready(self):
+        client = Client({}, states=["ready", "startup", "ready"])
+        result = self.make(client).run()
         self.assertEqual(result.state, DeployState.DONE)
-        self.assertIs(result.snapshot, snap)
-        self.assertEqual(result.snapshot.deployment_id, "test-uuid")
+        self.assertEqual(client.calls.count("restart"), 1)
+        self.assertGreaterEqual(client.calls.count("klipper"), 3)
 
-    # ── Phase 6 Targeted Verification Tests ───────────────────────────────────
-
-    def test_verify_config_success(self):
-        """Klipper restarts, disconnects, then comes back up and reaches ready -> DONE."""
-        client = MockClient(
-            states=["disconnected", "ready", "disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-        )
-        result = _fast_deployer(client).run()
-        self.assertEqual(result.state, DeployState.DONE)
-        self.assertTrue(client.applied)
-        self.assertTrue(client.restarted)
-
-    def test_verify_config_error_triggers_config_error_state(self):
-        """Klipper restarts, disconnects, then comes back but has a config error (shutdown/error) -> CONFIG_ERROR."""
-        client = MockClient(
-            states=["disconnected", "ready", "disconnected", "shutdown"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-        )
-        result = _fast_deployer(client).run()
+    def test_config_error_rolls_back_and_validates_ready(self):
+        client = Client({}, states=["ready", "error", "ready"])
+        result = self.make(client).run()
         self.assertEqual(result.state, DeployState.CONFIG_ERROR)
-        self.assertIn("Klipper reported shutdown/error with the new configuration", result.detail)
-        self.assertTrue(client.applied)
-        self.assertTrue(client.restarted)
+        self.assertTrue(result.rollback_succeeded)
+        self.assertTrue(client.rollback)
+        self.assertEqual(client.calls[-1], "klipper")
 
-    def test_verify_config_timeout_triggers_timeout_state(self):
-        """Klipper restarts, disconnects, but never comes back online within the timeout -> TIMEOUT."""
-        # Phase 1 disconnect sees "disconnected".
-        # Phase 2 reconnect sees "ready".
-        # Phase 6 disconnect sees "disconnected".
-        # Phase 6 reconnect sees "disconnected" indefinitely (times out).
-        client = MockClient(
-            states=["disconnected", "ready", "disconnected"] + ["disconnected"] * 10,
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-        )
-        result = _fast_deployer(client, reconnect_timeout=0.05).run()
-        self.assertEqual(result.state, DeployState.TIMEOUT)
-        self.assertIn("Printer did not come back online after configuration update", result.detail)
-        self.assertTrue(client.applied)
-        self.assertTrue(client.restarted)
-
-    # ── Upload Verification Phase Tests ──────────────────────────────────────────
-
-    def test_upload_verification_success(self):
-        """Both config files are found on target after upload -> DONE."""
-        client = MockClient(
-            states=["disconnected", "ready", "disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-        )
-        # Default _verify_results returns True for all filenames
-        result = _fast_deployer(client).run()
-        self.assertEqual(result.state, DeployState.DONE)
-        self.assertTrue(client.applied)
-        self.assertTrue(client.restarted)
-
-    def test_upload_verification_file_missing_fails(self):
-        """printer.cfg not found on target after upload -> FAILED_UPLOAD."""
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-        )
-        client._verify_results["printer.cfg"] = False
-        result = _fast_deployer(client).run()
+    def test_upload_checksum_mismatch_rolls_back(self):
+        client = Client({})
+        original_download = client.download_config
+        def corrupt(name):
+            ok, data = original_download(name)
+            return ok, data + b"corrupt"
+        client.download_config = corrupt
+        result = self.make(client).run()
         self.assertEqual(result.state, DeployState.FAILED_UPLOAD)
-        self.assertIn("printer.cfg not found on target after upload", result.detail)
-        self.assertTrue(client.applied)
-        self.assertFalse(client.restarted)  # should halt before restart
-
-    def test_upload_verification_exception_fails(self):
-        """Exception raised during file existence check -> FAILED_UPLOAD."""
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "kace-a1b2c3d"}],
-        )
-
-        def _raise(*args, **kwargs):
-            raise ConnectionError("connection reset by peer")
-
-        client.verify_file_exists = _raise
-        result = _fast_deployer(client).run()
-        self.assertEqual(result.state, DeployState.FAILED_UPLOAD)
-        self.assertIn("Could not verify printer.cfg on target", result.detail)
-        self.assertTrue(client.applied)
-        self.assertFalse(client.restarted)  # should halt before restart
-
-    def test_dev_deploy_skips_version_check(self):
-        """When verify_firmware=False, wrong MCU version is logged but deployment proceeds to DONE."""
-        client = MockClient(
-            states=["disconnected", "ready"],
-            versions_seq=[{"mcu": "old-unmatched-version"}],
-        )
-        d = Deployer(client, MANIFEST, verify_firmware=False)
-        d.DISCONNECT_COOLDOWN_S = 0
-        d.DISCONNECT_TIMEOUT_S  = 0.1
-        d.RECONNECT_TIMEOUT_S   = 5.0
-        d.POLL_INTERVAL_S       = 0.01
-        d.POLL_BACKOFF_MAX_S    = 0.02
-
-        result = d.run()
-        self.assertEqual(result.state, DeployState.DONE)
-        self.assertTrue(client.applied)
-        self.assertTrue(client.restarted)
+        self.assertTrue(result.rollback_succeeded)
 
 
-
+if __name__ == "__main__":
+    unittest.main()

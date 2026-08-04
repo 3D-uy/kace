@@ -199,6 +199,15 @@ def run_yaml_check(verbose=False):
                     f"shadows '{later_pat}' at index {j}"
                 )
 
+    # Deployment data is deliberately separate from compiler configuration,
+    # but both contracts are checked by this data-integrity command.
+    deployment_profiles = []
+    try:
+        from firmware.deployment.profiles import load_profiles
+        deployment_profiles = load_profiles()
+    except Exception as exc:
+        errors.append(f"firmware_deployments.yaml is invalid: {exc}")
+
     if errors:
         print(f"\033[91m[FAIL]\033[0m boards.yaml has {len(errors)} error(s):")
         for err in errors:
@@ -208,7 +217,10 @@ def run_yaml_check(verbose=False):
     n_boards   = len(db.get("boards", []))
     n_firmware = len(db.get("mcu_firmware", []))
     print(f"\033[92m[PASS]\033[0m boards.yaml is valid.")
-    print(f"       {n_boards} board entries, {n_firmware} firmware patterns.")
+    print(
+        f"       {n_boards} board entries, {n_firmware} firmware patterns, "
+        f"{len(deployment_profiles)} deployment profiles."
+    )
     print("=" * 50)
     return True
 

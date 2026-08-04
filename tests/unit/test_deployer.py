@@ -202,39 +202,6 @@ class TestDeployer(unittest.TestCase):
 
         mock_check.assert_called_once_with('127.0.0.1', 8123)
 
-    @patch('shutil.which', return_value="/usr/bin/avrdude")
-    @patch('subprocess.run')
-    @patch('questionary.text')
-    @patch('questionary.confirm')
-    @patch('builtins.print')
-    def test_deploy_avrdude_success(self, mock_print, mock_confirm, mock_q_text, mock_run, mock_which):
-        """Test avrdude flashing executes successfully."""
-        mock_text_inst = MagicMock()
-        mock_text_inst.ask.return_value = "/dev/ttyUSB0"
-        mock_q_text.return_value = mock_text_inst
-        
-        mock_confirm_inst = MagicMock()
-        mock_confirm_inst.ask.return_value = True
-        mock_confirm.return_value = mock_confirm_inst
-        
-        from core.deployer import deploy_avrdude
-        deploy_avrdude({'mcu_path': '/dev/ttyUSB0'}, 'klipper.bin', 'atmega2560')
-        
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        self.assertIn("avrdude", cmd)
-        self.assertIn("atmega2560", cmd)
-        self.assertIn("/dev/ttyUSB0", cmd)
-
-    @patch('shutil.which', return_value=None)
-    @patch('builtins.print')
-    def test_deploy_avrdude_missing_binary(self, mock_print, mock_which):
-        """If avrdude is missing, it prints error."""
-        from core.deployer import deploy_avrdude
-        deploy_avrdude({}, 'klipper.bin', 'atmega2560')
-        printed = [c[0][0] for c in mock_print.call_args_list]
-        self.assertTrue(any("avrdude' is not installed" in msg for msg in printed))
-
     @patch('questionary.text')
     @patch('questionary.select')
     @patch('core.moonraker.check_moonraker')
@@ -391,6 +358,48 @@ class TestDeployMoonrakerWorkflow(unittest.TestCase):
     def tearDown(self):
         for p in self.patches:
             p.stop()
+
+    @patch('core.menu.simple_input', side_effect=["192.168.1.50", "7125", ""])
+    @patch('core.deployer.os.path.exists', return_value=False)
+    @patch('core.moonraker.check_moonraker', return_value=(True, "v0.1.0"))
+    @patch('core.moonraker.list_config_files', return_value=[])
+    @patch('core.moonraker.upload_printer_cfg', return_value=(True, "printer.cfg"))
+    @patch('core.menu.numbered_select', return_value="skip")
+    @patch('builtins.input')
+    def test_compiled_firmware_does_not_trigger_second_transaction(
+        self, raw_input, _select, upload, _list_files, _check, _exists, _text
+    ):
+        """A config-only deploy never repeats the SD power-cycle or upload."""
+        from core.deployer import deploy_moonraker
+
+        deploy_moonraker({"klipper_version": "kace-new123", "mcu_name": "mcu"})
+
+        raw_input.assert_not_called()
+        self.assertEqual(upload.call_count, 1)
+
+    @patch('core.deployer.os.path.isfile', return_value=False)
+    @patch('core.snapshot.capture_snapshot', return_value=None)
+    @patch('core.moonraker.list_config_files', return_value=[])
+    @patch('core.mcu_monitor.McuPresenceMonitor')
+    @patch('core.moonraker_deployer.Deployer')
+    def test_firmware_transaction_never_bypasses_fingerprint_in_dev_mode(
+        self, deployer_cls, _monitor, _list_files, _snapshot, _isfile
+    ):
+        from core.deployer import deploy_firmware_installation
+        from core.moonraker_deployer import DeployResult, DeployState
+
+        deployer_cls.return_value.run.return_value = DeployResult(DeployState.DONE)
+        prepared = MagicMock()
+        prepared.plan.method.value = "MANUAL"
+        with patch.dict(os.environ, {"KACE_DEV_DEPLOY": "1"}):
+            deploy_firmware_installation({
+                "klipper_version": "kace-new123",
+                "mcu_path": "/dev/serial/by-id/mock",
+                "prepared_firmware_deployment": prepared,
+                "firmware_deployment_service": MagicMock(),
+            })
+
+        self.assertTrue(deployer_cls.call_args.kwargs["verify_firmware"])
 
     @patch('questionary.text')
     @patch('core.deployer.os.path.exists')

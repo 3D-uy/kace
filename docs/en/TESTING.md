@@ -52,7 +52,7 @@ The default runner discovers every `test_*.py` file under `tests/`. Environment-
 python tests/run_tests.py --yaml-check
 ```
 
-This gate parses `data/boards.yaml`, checks required top-level and entry fields, and detects a generic firmware pattern that would shadow a more specific pattern later in the file.
+This gate parses `data/boards.yaml`, checks required top-level and entry fields, detects a generic firmware pattern that would shadow a more specific pattern later in the file, and validates `data/firmware_deployments.yaml` through the deployment-profile loader.
 
 ### Generated-config matrix — `tests/matrix/`
 
