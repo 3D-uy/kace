@@ -37,6 +37,41 @@ class TestBootstrapInstallContract(unittest.TestCase):
         )
         self.assertNotIn("/main/install.sh", self.script)
 
+    def test_external_dependencies_use_centralized_immutable_pins(self):
+        pin_block = self.script.split("# BEGIN KACE_DEPENDENCY_PINS", 1)[1].split(
+            "# END KACE_DEPENDENCY_PINS", 1
+        )[0]
+        expected_git_refs = {
+            "KLIPPER_REF",
+            "MOONRAKER_REF",
+            "CROWSNEST_REF",
+            "MAINSAIL_CONFIG_REF",
+            "FLUIDD_CONFIG_REF",
+            "KACE_INSTALL_REF",
+        }
+        expected_hashes = {
+            "MAINSAIL_SHA256",
+            "FLUIDD_SHA256",
+            "MAINSAIL_CONFIG_SHA256",
+            "FLUIDD_CONFIG_SHA256",
+            "KACE_INSTALL_SHA256",
+        }
+        for name in expected_git_refs:
+            self.assertRegex(_shell_assignment(pin_block, name), r"^[0-9a-f]{40}$")
+        for name in expected_hashes:
+            self.assertRegex(_shell_assignment(pin_block, name), r"^[0-9a-f]{64}$")
+
+        self.assertIn('git -C "$staging" fetch --depth=1 origin "$expected_ref"', self.script)
+        self.assertIn('git -C "$staging" checkout --detach "$expected_ref"', self.script)
+        self.assertIn('git -C "$staging" rev-parse HEAD', self.script)
+        self.assertIn("download_verified_file", self.script)
+        self.assertIn("install_verified_dashboard", self.script)
+        self.assertNotIn("git pull", self.script)
+        self.assertNotRegex(
+            self.script,
+            r"(?:releases/latest|raw\.githubusercontent\.com/[^\n]+/(?:main|master)/)",
+        )
+
     def test_current_installer_matches_contract_hash(self):
         actual = hashlib.sha256(INSTALLER.read_bytes()).hexdigest()
         self.assertEqual(actual, self.install_sha256)
