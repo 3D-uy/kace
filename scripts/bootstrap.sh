@@ -128,6 +128,74 @@ PY
 }
 # END KACE_CONFIG_DEFAULT_HELPER
 
+ensure_moonraker_config() {
+    local config_path="$1"
+    local socket_path="$2"
+    local power_pin=""
+    local power_block=""
+
+    if [ "$POWER_RELAY" = "true" ]; then
+        power_pin="gpiochip0/gpio${POWER_GPIO}"
+        if [ "$POWER_ACTIVE_LOW" = "true" ]; then
+            power_pin="!${power_pin}"
+        fi
+        power_block="
+[power ${POWER_DEVICE}]
+type: gpio
+pin: ${power_pin}
+restart_klipper_when_powered: ${POWER_RESTART_KLIPPER}
+"
+    fi
+
+    if [ ! -f "$config_path" ]; then
+        local temporary_config
+        temporary_config=$(mktemp "${config_path}.XXXXXX")
+        cat > "$temporary_config" <<EOF
+[server]
+host: 0.0.0.0
+port: 7125
+klippy_uds_address: $socket_path
+
+[authorization]
+trusted_clients:
+    127.0.0.1
+    10.0.0.0/8
+    127.0.0.0/8
+    172.16.0.0/12
+    192.168.0.0/16
+    FE80::/10
+    ::1/128
+cors_domains:
+    *.lan
+    *.local
+    *://my.mainsail.xyz
+    *://app.fluidd.xyz
+
+[octoprint_compat]
+
+[history]
+
+[file_manager]
+enable_object_processing: True
+${power_block}
+EOF
+        chmod 644 "$temporary_config"
+        mv -f "$temporary_config" "$config_path"
+    fi
+
+    ensure_config_entry "$config_path" "file_manager" "enable_object_processing" "True"
+
+    if [ "$POWER_RELAY" = "true" ]; then
+        ensure_config_entry "$config_path" "power ${POWER_DEVICE}" "type" "gpio"
+        ensure_config_entry "$config_path" "power ${POWER_DEVICE}" "pin" "$power_pin"
+        ensure_config_entry "$config_path" "power ${POWER_DEVICE}" "restart_klipper_when_powered" "$POWER_RESTART_KLIPPER"
+    fi
+}
+
+if [ "${KACE_BOOTSTRAP_LIB_ONLY:-}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 wait_for_apt_locks() {
     echo "Checking for package manager locks..."
     local count=0
@@ -257,6 +325,11 @@ DASHBOARD=""
 CROWSNEST=""
 TIMEZONE=""
 PREBAKED=""
+POWER_RELAY=""
+POWER_DEVICE=""
+POWER_GPIO=""
+POWER_ACTIVE_LOW=""
+POWER_RESTART_KLIPPER=""
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -281,12 +354,19 @@ if [ -n "$BOOT_CFG" ]; then
 
     # Parse boot config in a single pass (avoids 4× file open + grep + cut chains)
     FILE_DASHBOARD="" FILE_CROWSNEST="" FILE_TIMEZONE="" FILE_PREBAKED=""
+    FILE_POWER_RELAY="" FILE_POWER_DEVICE="" FILE_POWER_GPIO=""
+    FILE_POWER_ACTIVE_LOW="" FILE_POWER_RESTART_KLIPPER=""
     while IFS='=' read -r key value; do
         case "$key" in
             DASHBOARD) FILE_DASHBOARD="$value" ;;
             CROWSNEST) FILE_CROWSNEST="$value" ;;
             TIMEZONE)  FILE_TIMEZONE="$value"  ;;
             PREBAKED)  FILE_PREBAKED="$value"   ;;
+            POWER_RELAY) FILE_POWER_RELAY="$value" ;;
+            POWER_DEVICE) FILE_POWER_DEVICE="$value" ;;
+            POWER_GPIO) FILE_POWER_GPIO="$value" ;;
+            POWER_ACTIVE_LOW) FILE_POWER_ACTIVE_LOW="$value" ;;
+            POWER_RESTART_KLIPPER) FILE_POWER_RESTART_KLIPPER="$value" ;;
         esac
     done < "$BOOT_CFG"
 
@@ -294,6 +374,11 @@ if [ -n "$BOOT_CFG" ]; then
     CROWSNEST="${CROWSNEST:-$FILE_CROWSNEST}"
     TIMEZONE="${TIMEZONE:-$FILE_TIMEZONE}"
     PREBAKED="${PREBAKED:-$FILE_PREBAKED}"
+    POWER_RELAY="${POWER_RELAY:-$FILE_POWER_RELAY}"
+    POWER_DEVICE="${POWER_DEVICE:-$FILE_POWER_DEVICE}"
+    POWER_GPIO="${POWER_GPIO:-$FILE_POWER_GPIO}"
+    POWER_ACTIVE_LOW="${POWER_ACTIVE_LOW:-$FILE_POWER_ACTIVE_LOW}"
+    POWER_RESTART_KLIPPER="${POWER_RESTART_KLIPPER:-$FILE_POWER_RESTART_KLIPPER}"
 fi
 
 # ── Input Sanitization & Allowlist Validation ────────────────────────────────
@@ -330,6 +415,18 @@ else
     PREBAKED="false"
 fi
 
+if [ "$POWER_RELAY" = "true" ]; then
+    if [[ ! "$POWER_DEVICE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || \
+       [[ ! "$POWER_GPIO" =~ ^[0-9]{1,3}$ ]] || \
+       [[ ! "$POWER_ACTIVE_LOW" =~ ^(true|false)$ ]] || \
+       [[ ! "$POWER_RESTART_KLIPPER" =~ ^(true|false)$ ]]; then
+        log_warn "Invalid GPIO relay configuration. Relay setup will be skipped."
+        POWER_RELAY="false"
+    fi
+else
+    POWER_RELAY="false"
+fi
+
 echo -e "${C_BOLD}"
 echo "--------------------------------------------------------"
 echo "  Target Configuration"
@@ -337,6 +434,9 @@ echo "  Dashboard UI : $DASHBOARD"
 echo "  Webcam Stream: $CROWSNEST"
 echo "  Timezone     : ${TIMEZONE:-'(Keep system default)'}"
 echo "  Pre-baked OS : $PREBAKED"
+if [ "$POWER_RELAY" = "true" ]; then
+    echo "  GPIO relay   : ${POWER_DEVICE} on GPIO${POWER_GPIO}"
+fi
 echo "--------------------------------------------------------"
 echo -e "${C_RESET}"
 
@@ -369,6 +469,13 @@ echo "Resolved printer home directory: $PRINTER_HOME"
 # Get the owner and group of the printer user home directory
 PRINTER_USER=$(stat -c '%U' "$PRINTER_HOME" 2>/dev/null || echo "$USER")
 PRINTER_GROUP=$(stat -c '%G' "$PRINTER_HOME" 2>/dev/null || echo "$USER")
+
+mkdir -p "$PRINTER_HOME/printer_data/config"
+mkdir -p "$PRINTER_HOME/printer_data/gcodes"
+mkdir -p "$PRINTER_HOME/printer_data/comms"
+ensure_moonraker_config \
+    "$PRINTER_HOME/printer_data/config/moonraker.conf" \
+    "$PRINTER_HOME/printer_data/comms/klippy.sock"
 
 # ── 1. Timezone Configuration ────────────────────────────────────────────────
 if [ -n "$TIMEZONE" ]; then
@@ -499,46 +606,6 @@ log_ok "Moonraker boot-order optimization applied (starts 5s after Klipper)."
 
 # ── 5. Printer Data Directories & Config Files ───────────────────────────────
 log_stage "CONFIGS" "Creating Printer Configuration"
-mkdir -p "$PRINTER_HOME/printer_data/config"
-mkdir -p "$PRINTER_HOME/printer_data/gcodes"
-mkdir -p "$PRINTER_HOME/printer_data/comms"
-
-# moonraker.conf — create a baseline only when no user configuration exists.
-if [ ! -f "$PRINTER_HOME/printer_data/config/moonraker.conf" ]; then
-    echo "Creating default moonraker.conf..."
-    cat <<EOF > "$PRINTER_HOME/printer_data/config/moonraker.conf"
-[server]
-host: 0.0.0.0
-port: 7125
-klippy_uds_address: $PRINTER_HOME/printer_data/comms/klippy.sock
-
-[authorization]
-trusted_clients:
-    127.0.0.1
-    10.0.0.0/8
-    127.0.0.0/8
-    172.16.0.0/12
-    192.168.0.0/16
-    FE80::/10
-    ::1/128
-cors_domains:
-    *.lan
-    *.local
-    *://my.mainsail.xyz
-    *://app.fluidd.xyz
-
-[octoprint_compat]
-
-[history]
-
-[file_manager]
-enable_object_processing: True
-EOF
-fi
-
-ensure_config_entry \
-    "$PRINTER_HOME/printer_data/config/moonraker.conf" \
-    "file_manager" "enable_object_processing" "True"
 
 # printer.cfg — [include] line written conditionally per selected dashboard
 if [ "$PREBAKED" = "true" ]; then
