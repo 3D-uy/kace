@@ -2,6 +2,7 @@
 # Klipper source: https://www.klipper3d.org/Command_Templates.html
 #
 import os
+from core.reconciler import write_text_atomically
 from core.translations import t
 
 def generate_starter_macros(output_dir: str) -> str:
@@ -86,7 +87,6 @@ gcode:
     os.makedirs(output_dir, exist_ok=True)
     macros_path = os.path.join(output_dir, 'macros.cfg')
     
-    with open(macros_path, 'w', encoding='utf-8') as f:
-        f.write(macros_content)
+    write_text_atomically(macros_path, macros_content)
         
     return macros_path

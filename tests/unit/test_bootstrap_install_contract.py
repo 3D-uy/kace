@@ -92,9 +92,14 @@ class TestBootstrapInstallContract(unittest.TestCase):
         self.assertIn("=== KACE_BOOTSTRAP_ERROR: KACE_INSTALL ===", failure_block)
         self.assertIn("exit 1", failure_block)
 
-    def test_installed_repository_uses_same_pinned_revision(self):
+    def test_installed_repository_uses_same_pinned_revision_and_launches_wizard(self):
         self.assertIn('KACE_SOURCE_REF="$KACE_INSTALL_REF"', self.script)
-        self.assertIn("KACE_NO_LAUNCH=1", self.script)
+        self.assertNotIn("KACE_NO_LAUNCH=1", self.script)
+        installer_index = self.script.index('bash "$tmp_script"')
+        finalization_index = self.script.index(
+            'finalize_bootstrap_success "$MOONRAKER_CONFIG" "$BOOT_CFG"'
+        )
+        self.assertLess(installer_index, finalization_index)
 
     def test_bootstrap_does_not_disable_os_security_updates(self):
         self.assertNotIn("systemctl disable --now apt-daily", self.script)

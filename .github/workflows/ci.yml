@@ -40,6 +40,9 @@ jobs:
             | xargs python3 -m py_compile
           echo "All Python files passed syntax check."
 
+      - name: Reject developer-local paths
+        run: python3 scripts/check_portability.py
+
   # ── Stage 2: Unit tests ──────────────────────────────────────────────────────
   unit-tests:
     name: Unit Tests

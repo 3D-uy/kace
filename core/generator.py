@@ -443,6 +443,39 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
             todos=active_todos,
         )
 
+    # Reconcile printer.cfg content against target printer.cfg if it already exists
+    existing_target = None
+    target_config_dir = os.path.expanduser('~/printer_data/config')
+    possible_targets = [os.path.join(target_config_dir, 'printer.cfg')]
+    if output_path:
+        possible_targets.insert(0, os.path.abspath(output_path))
+
+    for pt in possible_targets:
+        if os.path.isfile(pt):
+            try:
+                with open(pt, 'r', encoding='utf-8') as f:
+                    content_read = f.read()
+                    if content_read:
+                        if existing_target is None:
+                            existing_target = content_read
+                        if "enable_force_move" in content_read.lower():
+                            existing_target = content_read
+                            break
+            except Exception:
+                pass
+
+    from core.reconciler import (
+        reconcile_printer_cfg_content,
+        reconcile_file_atomically,
+        reconcile_moonraker_conf_content,
+        write_text_atomically,
+    )
+    final_output, _ = reconcile_printer_cfg_content(final_output, existing_target_content=existing_target)
+
+    # Reconcile moonraker.conf in target_config_dir if printer_data directory exists
+    if os.path.isdir(target_config_dir):
+        reconcile_file_atomically(os.path.join(target_config_dir, 'moonraker.conf'), reconcile_moonraker_conf_content)
+
     # Write to printer.cfg
     if not output_path:
         base_path = os.path.expanduser('~/kace')
@@ -454,8 +487,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
             os.makedirs(parent, exist_ok=True)
         cfg_file = output_path
 
-    with open(cfg_file, 'w', encoding='utf-8') as f:
-        f.write(final_output)
+    write_text_atomically(cfg_file, final_output)
 
     if include_macros or user_data.get("macros_generated"):
         output_dir = os.path.dirname(cfg_file)

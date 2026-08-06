@@ -211,9 +211,20 @@ class _HeadlessMixin:
 
     Setting KACE_AUTO=1 in setUp() causes main() to set _bypassed=True and
     skip the dashboard import entirely.
+
+    3.  kace.py runs `_ap.parse_known_args()` at module-import time.  When
+        pytest is invoked with ``-v`` (verbose), that flag is seen as the
+        ``--version``/``-v`` CLI option and `sys.exit(0)` fires during the
+        lazy `import kace` triggered by @patch decorators.  Neutralising
+        sys.argv in setUp() prevents this; tearDown() restores it so other
+        test modules are unaffected.
     """
 
     def setUp(self):
+        # Neutralise sys.argv so kace.py's module-level argparse does not
+        # misinterpret pytest's -v/--verbose flag as --version.
+        self._orig_argv = sys.argv[:]
+        sys.argv = ["kace"]
         # Bypass dashboard / prompt_toolkit import inside kace.main()
         os.environ["KACE_AUTO"] = "1"
         self._pt_patch = patch(
@@ -225,6 +236,7 @@ class _HeadlessMixin:
     def tearDown(self):
         self._pt_patch.stop()
         os.environ.pop("KACE_AUTO", None)
+        sys.argv = self._orig_argv
 
 
 # ── Phase-transition & error-handling tests ────────────────────────────────────
