@@ -208,4 +208,9 @@ echo -e "  ${C}Launching KACE...${R}"
 sleep 1
 # Reconnect stdin to the terminal so interactive prompts (questionary) work
 exec < /dev/tty || true
-cd "$INSTALL_DIR" && ./venv/bin/python kace.py
+cd "$INSTALL_DIR"
+set +e
+./venv/bin/python kace.py
+KACE_EXIT=$?
+set -e
+exit "$KACE_EXIT"

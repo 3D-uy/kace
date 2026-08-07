@@ -4,6 +4,13 @@ import posixpath
 import shutil
 import sys
 
+from core.workflow_outcome import (
+    WorkflowOutcome,
+    cancelled,
+    failed,
+    success as workflow_success,
+)
+
 
 def _preflight_check(cfg_path, user_data, yes_no_fn):
     """Run structural + pin validation before any upload.
@@ -181,7 +188,10 @@ def deploy_config(user_data):
     password_for_reconnect = password
     paramiko = _require_paramiko()
     if paramiko is None:
-        return  # error already printed by _require_paramiko
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "Paramiko is unavailable; SSH deployment cannot start.",
+        )
 
     # BUG-007: Verify the config file exists locally before attempting upload.
     # sftp.put() raises a cryptic FileNotFoundError that the broad except below
@@ -190,7 +200,7 @@ def deploy_config(user_data):
     if not os.path.isfile(cfg_path):
         print(f"\033[91m[!] Deployment aborted: printer.cfg not found at {cfg_path}\033[0m")
         print("\033[93m    Run 'Generate new config' first to create the file.\033[0m")
-        return
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, "printer.cfg is missing.")
 
     # Pre-flight structural integrity check.
     # Pushing a printer.cfg that Klipper can't load causes an instant fatal
@@ -201,7 +211,10 @@ def deploy_config(user_data):
     from core.pin_validator import validate_required_sections, validate_pins_for_mcu
     from core.menu import yes_no as _yes_no
     if not _preflight_check(cfg_path, user_data, _yes_no):
-        return
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "printer.cfg failed deployment preflight.",
+        )
 
     # RES-01 fix: declare handles as None so the finally block can safely test
     # whether each resource was successfully created before attempting to close it.
@@ -218,6 +231,10 @@ def deploy_config(user_data):
     dest_file = ""
     dest_macros = ""
     macros_uploaded = False
+    workflow_result = failed(
+        WorkflowOutcome.DEPLOYMENT_FAILED,
+        "SSH deployment did not complete.",
+    )
 
     try:
         ssh = paramiko.SSHClient()
@@ -327,6 +344,7 @@ def deploy_config(user_data):
 
         # ── Step 6: Post-Deployment Success & Instructions ─────────
         deployed_successfully = True
+        workflow_result = workflow_success("Configuration uploaded through SSH.")
         print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
         if restart_done:
             print(f"\033[96m[*]\033[0m Klipper restart issued successfully.")
@@ -335,12 +353,16 @@ def deploy_config(user_data):
         print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}/\033[0m")
 
     except paramiko.AuthenticationException as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH authentication failed: {e}")
         print(f"\033[91mDeployment failed: Authentication error — check username and password. Details: {e}\033[0m")
     except TimeoutError as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH connection timed out: {e}")
         print(f"\033[91mDeployment failed: Connection timed out — is the Pi powered on and reachable? Details: {e}\033[0m")
     except OSError as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH network error: {e}")
         print(f"\033[91mDeployment failed: Network error — {e}\033[0m")
     except Exception as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH deployment failed: {e}")
         print(f"\033[91mDeployment failed: {e}\033[0m")
     finally:
         # Perform rollback if backups exist and deployment wasn't successful
@@ -452,6 +474,8 @@ def deploy_config(user_data):
             except Exception:
                 pass
 
+    return workflow_result
+
 
 def _copy_artifacts(user_data, dest, artifact_type) -> bool:
     success = False
@@ -503,7 +527,7 @@ def deploy_usb(user_data, artifact_type="all"):
             )
             
             if not dest:
-                return False
+                return cancelled("Removable-media deployment cancelled.")
                 
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
@@ -516,19 +540,26 @@ def deploy_usb(user_data, artifact_type="all"):
         
         if not dest or not os.path.isdir(dest):
             print(f"\033[91mDeployment failed: Invalid path or directory does not exist: {dest}\033[0m")
-            return False
+            return failed(
+                WorkflowOutcome.PRECONDITION_FAILED,
+                f"Invalid removable-media destination: {dest}",
+            )
             
         success = _copy_artifacts(user_data, dest, artifact_type)
                     
         if success:
             print("\033[92mUSB Deployment Successful!\033[0m")
+            return workflow_success("Configuration copied to removable media.")
         else:
             print("\033[93mNo requested artifacts found to copy.\033[0m")
-        return success
+            return failed(
+                WorkflowOutcome.DEPLOYMENT_FAILED,
+                "No requested artifacts were available to copy.",
+            )
             
     except Exception as e:
         print(f"\033[91mDeployment failed: {e}\033[0m")
-        return False
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Removable-media deployment failed: {e}")
 
 def deploy_local(user_data, artifact_type="all"):
     """Copies the requested artifact(s) to a local folder on the PC."""
@@ -547,7 +578,7 @@ def deploy_local(user_data, artifact_type="all"):
             )
             
             if not dest:
-                return
+                return cancelled("Local deployment cancelled.")
  
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
@@ -567,10 +598,16 @@ def deploy_local(user_data, artifact_type="all"):
                     
         if success:
             print(f"\033[92mSuccessfully saved to {dest}!\033[0m")
+            return workflow_success("Configuration copied to a local directory.")
         else:
             print("\033[93mNo requested artifacts found to copy.\033[0m")
+            return failed(
+                WorkflowOutcome.DEPLOYMENT_FAILED,
+                "No requested artifacts were available to copy.",
+            )
     except Exception as e:
         print(f"\033[91mSave failed: {e}\033[0m")
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Local deployment failed: {e}")
 
 class _MoonrakerClient:
     """Thin adapter that wraps core.moonraker functions to match the interface
@@ -792,7 +829,7 @@ def deploy_moonraker(user_data):
 
     if not host:
         print("\033[93mMoonraker deployment cancelled.\033[0m")
-        return
+        return cancelled("Moonraker deployment cancelled before connecting.")
 
     port_str = simple_input(
         t("moonraker.port_prompt"),
@@ -818,7 +855,10 @@ def deploy_moonraker(user_data):
         print("\033[91m    Sending an API key over plain HTTP exposes it to any observer on the\033[0m")
         print("\033[91m    local network. Change the host to use https:// and try again.\033[0m")
         print(f"\n\033[91m[!] {t('moonraker.http_warning_cancelled')}\033[0m")
-        return
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "Moonraker API key cannot be sent over explicit plain HTTP.",
+        )
 
     # Persist for potential SSH fallback later
     user_data["moonraker_host"] = host
@@ -847,9 +887,13 @@ def deploy_moonraker(user_data):
                 user_data['user']      = ssh_user
                 user_data['dest_path'] = ssh_dest
                 user_data['password']  = ssh_pass   # deploy_config pops this immediately
-                deploy_config(user_data)
+                return deploy_config(user_data)
             # ssh_pass goes out of scope here whether deploy ran or not
-        return
+            return cancelled("SSH fallback was not fully configured.")
+        return failed(
+            WorkflowOutcome.DEPLOYMENT_FAILED,
+            f"Moonraker is unreachable: {info}",
+        )
 
     print(f"\033[92m[OK] {t('moonraker.connected', version=info)}\033[0m")
 
@@ -887,12 +931,19 @@ def deploy_moonraker(user_data):
     cfg_path = os.path.expanduser("~/kace/printer.cfg")
     if os.path.isfile(cfg_path):
         if not _preflight_check(cfg_path, user_data, yes_no):
-            return
+            return failed(
+                WorkflowOutcome.PRECONDITION_FAILED,
+                "printer.cfg failed deployment preflight.",
+            )
     else:
         print(f"\033[91m[!] Deployment aborted: printer.cfg not found at {cfg_path}\033[0m")
         print("\033[93m    Run 'Generate new config' first to create the file.\033[0m")
-        return
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, "printer.cfg is missing.")
 
+    workflow_result = failed(
+        WorkflowOutcome.DEPLOYMENT_FAILED,
+        "Moonraker deployment did not complete.",
+    )
     try:
         # ── Step 4: Upload printer.cfg & macros.cfg ────────────────────────────────
         print(f"\033[96m[*]\033[0m {t('moonraker.uploading')}")
@@ -938,10 +989,15 @@ def deploy_moonraker(user_data):
             print(f"\033[92m[OK] {t('moonraker.restart_ok')}\033[0m")
 
         deployed_successfully = True
+        workflow_result = workflow_success("Configuration uploaded through Moonraker.")
         print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
         print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
 
     except Exception as e:
+        workflow_result = failed(
+            WorkflowOutcome.DEPLOYMENT_FAILED,
+            f"Moonraker deployment failed: {e}",
+        )
         print(f"\033[91mMoonraker deployment failed: {e}\033[0m")
     finally:
         # Perform rollback if a snapshot was captured and deployment failed.
@@ -952,3 +1008,5 @@ def deploy_moonraker(user_data):
                 print(f"\033[91m[!] Rollback incomplete — failed to restore: {', '.join(failed_files)}\033[0m")
             else:
                 print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")
+
+    return workflow_result

@@ -90,7 +90,9 @@ class TestBootstrapInstallContract(unittest.TestCase):
         failure_block = self.script.split('if [ "$INSTALL_OK" -ne 1 ]; then', 1)[1]
         failure_block = failure_block.split("fi", 1)[0]
         self.assertIn("=== KACE_BOOTSTRAP_ERROR: KACE_INSTALL ===", failure_block)
-        self.assertIn("exit 1", failure_block)
+        self.assertIn('exit "$INSTALL_EXIT"', failure_block)
+        for exit_code in (2, 10, 20, 30, 40):
+            self.assertRegex(failure_block, rf"(?m)^\s*{exit_code}\)\s*$")
 
     def test_installed_repository_uses_same_pinned_revision_and_launches_wizard(self):
         self.assertIn('KACE_SOURCE_REF="$KACE_INSTALL_REF"', self.script)

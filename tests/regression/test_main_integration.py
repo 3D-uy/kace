@@ -253,24 +253,24 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
     @patch('kace.print_kace_banner')
     @patch('kace.run_wizard', side_effect=__import__('core.exceptions', fromlist=['WizardExit']).WizardExit)
     @patch('builtins.print')
-    def test_wizard_exit_is_caught_and_exits_0(self, mock_print, mock_wizard, mock_banner):
-        """WizardExit raised by run_wizard must be caught and exit cleanly (code 0)."""
+    def test_wizard_exit_is_caught_and_exits_cancelled(self, mock_print, mock_wizard, mock_banner):
+        """WizardExit is a terminal cancellation, never workflow success."""
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(ctx.exception.code, 2)
 
     # ── KeyboardInterrupt ─────────────────────────────────────────────────────
 
     @patch('kace.print_kace_banner')
     @patch('kace.run_wizard', side_effect=KeyboardInterrupt)
     @patch('builtins.print')
-    def test_keyboard_interrupt_is_caught_and_exits_0(self, mock_print, mock_wizard, mock_banner):
-        """Ctrl-C (KeyboardInterrupt) from the wizard must exit cleanly (code 0)."""
+    def test_keyboard_interrupt_is_caught_and_exits_cancelled(self, mock_print, mock_wizard, mock_banner):
+        """Ctrl-C from the wizard is a terminal cancellation."""
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(ctx.exception.code, 2)
 
     # ── Missing dependency ────────────────────────────────────────────────────
 
@@ -282,7 +282,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(ctx.exception.code, 10)
 
     # ── Board fetch failure ───────────────────────────────────────────────────
 
@@ -296,7 +296,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(ctx.exception.code, 10)
         printed = ' '.join(str(c) for c in mock_print.call_args_list)
         self.assertIn("Board configuration could not be fetched", printed)
 
@@ -392,7 +392,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 kace.main()
 
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(ctx.exception.code, 20)
         printed = ' '.join(str(c) for c in mock_print.call_args_list)
         self.assertIn("ERROR", printed)
 
@@ -636,7 +636,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
 
     def test_non_done_exits_nonzero(self):
         from core.moonraker_deployer import DeployState
-        self.assertEqual(self._run(DeployState.FAILED_FLASH), 1)
+        self.assertEqual(self._run(DeployState.FAILED_FLASH), 30)
 
 
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────
