@@ -21,6 +21,7 @@ except (AttributeError, OSError):
 # so unrecognised args are silently ignored rather than causing a hard error
 # before the main import block runs.
 import argparse as _argparse
+import json as _json
 _ap = _argparse.ArgumentParser(
     prog="kace",
     description="Klipper Automated Configuration Ecosystem",
@@ -31,6 +32,11 @@ _ap.add_argument("--auto", action="store_true", help="Non-interactive mode (CI/a
 _ap.add_argument("--dev-deploy", action="store_true", dest="dev_deploy", help="Enable dev-deploy mode")
 _ap.add_argument("--debug", action="store_true", help="Enable KACE_DEBUG verbose output")
 _ap.add_argument("--real-build", action="store_true", dest="real_build", help="Use the real system make binary")
+_ap.add_argument(
+    "--power",
+    choices=("status", "on", "off", "wait"),
+    help="Run one non-interactive Moonraker power operation and return JSON",
+)
 _known, _ = _ap.parse_known_args()
 
 if _known.version:
@@ -44,6 +50,41 @@ if _known.debug:
     os.environ["KACE_DEBUG"] = "1"
 if _known.real_build:
     os.environ["KACE_REAL_BUILD"] = "1"
+
+if _known.power:
+    from core.power_controller import PowerControllerError, configured_power_controller
+
+    response = {
+        "ok": False,
+        "available": False,
+        "device": None,
+        "status": "error",
+        "detail": "",
+    }
+    try:
+        controller = configured_power_controller()
+        if controller is None:
+            response["detail"] = "POWER_RELAY is not enabled for this KACE installation"
+        else:
+            response["available"] = True
+            response["device"] = controller.device
+            if _known.power == "status":
+                status = controller.get_status()
+            elif _known.power == "on":
+                status = controller.power_on()
+            elif _known.power == "off":
+                status = controller.power_off()
+            else:
+                status = controller.wait_until_ready()
+            response.update(ok=status != "error", status=status)
+            if status == "error":
+                response["detail"] = (
+                    f"Moonraker power device '{controller.device}' is in error state"
+                )
+    except (PowerControllerError, OSError, ValueError) as exc:
+        response["detail"] = str(exc)
+    print(_json.dumps(response, separators=(",", ":")))
+    sys.exit(0 if response["ok"] else 2)
 # Resolve make command at the application boundary
 _make_command = "make"
 if os.environ.get("KACE_REAL_BUILD") == "1":

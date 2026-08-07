@@ -9,6 +9,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.9.3.5] — Unreleased
 
 ### Added
+- **Reusable Moonraker Power Controller**: Added one configured-device controller for real power status, readiness, verified ON/OFF operations, Studio's Power button, and firmware deployment power cycles without direct GPIO access.
+- **Pre-KACE Relay Power Gate**: When Studio requests GPIO relay control, the bootstrap now waits for Moonraker, validates the configured power device, explicitly confirms it on, and requires an MCU device node before launching KACE.
 - **Interactive Terminal Simulation**: Expanded the Docker development testbed with selectable mocked Pi environments, Klipper/Moonraker service state, simulated MCU serial paths, and a Moonraker API mock for exercising the wizard without physical hardware.
 - **Semantic Terminal Color System**: Added a shared ANSI palette for questions, active input, success, warnings, errors, informational/progress messages, section headers, and hints; covered core menu styling with regression tests.
 - **Locale Continuity Regression Coverage**: Added catalog-completeness and runtime tests that ensure the selected EN/ES/PT locale persists through dashboard, wizard, MCU detection, menus, and probe-offset visualization.

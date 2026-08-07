@@ -133,6 +133,32 @@ def check_moonraker(host: str, port: int = DEFAULT_PORT, api_key: str = None) ->
     return True, f"Moonraker {version}"
 
 
+def get_power_devices(host: str, port: int = DEFAULT_PORT, api_key: str = None) -> tuple[bool, str, list]:
+    """Return Moonraker's configured power devices.
+
+    This deliberately exposes only Moonraker's Power API. GPIO details remain
+    owned by ``moonraker.conf`` and are never read or manipulated by KACE.
+    """
+    url = f"{_base_url(host, port)}/machine/device_power/devices"
+    ok, msg, body = _get(url, api_key=api_key)
+    if not ok:
+        return False, msg, []
+    devices = body.get("result", {}).get("devices", [])
+    if not isinstance(devices, list):
+        return False, "Moonraker returned an invalid power device list", []
+    return True, "OK", devices
+
+
+def set_power_device(host: str, port: int, device: str, action: str, api_key: str = None) -> tuple[bool, str]:
+    """Set one named Moonraker power device to ``on`` or ``off``."""
+    if action not in ("on", "off"):
+        return False, f"Invalid power action: {action}"
+    url = f"{_base_url(host, port)}/machine/device_power/device"
+    payload = json.dumps({"device": device, "action": action}).encode("utf-8")
+    ok, msg, _ = _post(url, data=payload, api_key=api_key)
+    return ok, msg
+
+
 def upload_printer_cfg(host: str, port: int, cfg_path: str, filename: str = None, api_key: str = None) -> tuple[bool, str]:
     """Upload a configuration file to Moonraker's config root via /server/files/upload.
 

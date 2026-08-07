@@ -304,6 +304,240 @@ ensure_moonraker_config "$1" "$2"
             content = moonraker_cfg.read_text(encoding="utf-8")
             self.assertIn(existing_power, content)
 
+    def test_power_relay_gate_orders_api_device_on_and_mcu_before_kace(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmpdir:
+            root = Path(tmpdir)
+            device_root = root / "dev"
+            device_root.mkdir()
+            command = r'''
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+KACE_MCU_DEVICE_ROOT="$1/dev"
+KACE_POWER_API_TIMEOUT=3
+KACE_POWER_DEVICE_TIMEOUT=3
+KACE_POWER_ON_TIMEOUT=3
+KACE_POWER_MCU_TIMEOUT=3
+TEST_STATE_DIR="$1/state"
+mkdir -p "$TEST_STATE_DIR"
+
+sleep() {
+    SECONDS=$((SECONDS + ${1:-1}))
+}
+
+curl() {
+    local argument=""
+    local url=""
+    local payload=""
+    local capture_payload=false
+    for argument in "$@"; do
+        if [ "$capture_payload" = true ]; then
+            payload="$argument"
+            capture_payload=false
+        elif [ "$argument" = "--data" ]; then
+            capture_payload=true
+        fi
+        url="$argument"
+    done
+
+    case "$url" in
+        */server/info)
+            printf '%s\n' '{"result":{"moonraker_version":"test"}}'
+            ;;
+        */machine/device_power/devices)
+            local call_count=0
+            if [ -f "$TEST_STATE_DIR/device_calls" ]; then
+                call_count=$(cat "$TEST_STATE_DIR/device_calls")
+            fi
+            call_count=$((call_count + 1))
+            printf '%s\n' "$call_count" > "$TEST_STATE_DIR/device_calls"
+            if [ -f "$TEST_STATE_DIR/powered" ]; then
+                printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"on","type":"gpio"}]}}'
+            elif [ "$call_count" -eq 1 ]; then
+                printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"init","type":"gpio"}]}}'
+            else
+                printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"off","type":"gpio"}]}}'
+            fi
+            ;;
+        */machine/device_power/device)
+            printf '%s\n' "$payload" > "$TEST_STATE_DIR/request.json"
+            touch "$TEST_STATE_DIR/powered"
+            mkdir -p "$KACE_MCU_DEVICE_ROOT/serial/by-id"
+            touch "$KACE_MCU_DEVICE_ROOT/serial/by-id/usb-Klipper_test-if00"
+            printf '%s\n' '{"result":{"main_psu":"on"}}'
+            ;;
+        *)
+            return 22
+            ;;
+    esac
+}
+
+prepare_power_relay_for_kace
+'''
+            result = self._run_bootstrap_library(command, root)
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+            output = result.stdout
+            api_ready = output.index("Moonraker API is ready.")
+            device_ready = output.index("power device 'main_psu' is ready")
+            on_accepted = output.index("explicit ON command for 'main_psu'")
+            on_confirmed = output.index("power device 'main_psu' is confirmed ON")
+            mcu_detected = output.index("MCU detected after printer power-on")
+            self.assertLess(api_ready, device_ready)
+            self.assertLess(device_ready, on_accepted)
+            self.assertLess(on_accepted, on_confirmed)
+            self.assertLess(on_confirmed, mcu_detected)
+            self.assertEqual(
+                (root / "state" / "request.json").read_text(encoding="utf-8").strip(),
+                '{"device":"main_psu","action":"on"}',
+            )
+
+            script = BOOTSTRAP.read_text(encoding="utf-8")
+            config_call = script.index(
+                '    "$PRINTER_HOME/printer_data/config/moonraker.conf"'
+            )
+            restart_call = script.index("systemctl restart moonraker")
+            power_gate_call = script.index("if ! prepare_power_relay_for_kace; then")
+            kace_stage = script.index('log_stage "KACE" "Installing KACE Agent"')
+            self.assertLess(config_call, restart_call)
+            self.assertLess(restart_call, power_gate_call)
+            self.assertLess(power_gate_call, kace_stage)
+
+    def test_power_relay_gate_fails_when_configured_device_is_missing(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmpdir:
+            root = Path(tmpdir)
+            command = r'''
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+KACE_POWER_API_TIMEOUT=2
+KACE_POWER_DEVICE_TIMEOUT=2
+TEST_STATE_DIR="$1/state"
+mkdir -p "$TEST_STATE_DIR"
+curl() {
+    local url="${!#}"
+    case "$url" in
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */machine/device_power/devices) printf '%s\n' '{"result":{"devices":[]}}' ;;
+        */machine/device_power/device) touch "$TEST_STATE_DIR/post-called" ; return 22 ;;
+        *) return 22 ;;
+    esac
+}
+if prepare_power_relay_for_kace; then
+    exit 9
+fi
+test ! -e "$TEST_STATE_DIR/post-called"
+'''
+            result = self._run_bootstrap_library(command, root)
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertIn("power device 'main_psu' was not found", result.stderr)
+
+    def test_power_relay_gate_fails_immediately_on_device_error(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmpdir:
+            root = Path(tmpdir)
+            command = r'''
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+KACE_POWER_API_TIMEOUT=2
+KACE_POWER_DEVICE_TIMEOUT=2
+TEST_STATE_DIR="$1/state"
+mkdir -p "$TEST_STATE_DIR"
+curl() {
+    local url="${!#}"
+    case "$url" in
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */machine/device_power/devices)
+            printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"error","type":"gpio"}]}}'
+            ;;
+        */machine/device_power/device) touch "$TEST_STATE_DIR/post-called" ; return 22 ;;
+        *) return 22 ;;
+    esac
+}
+if prepare_power_relay_for_kace; then
+    exit 9
+fi
+test ! -e "$TEST_STATE_DIR/post-called"
+'''
+            result = self._run_bootstrap_library(command, root)
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertIn("power device 'main_psu' entered the error state", result.stderr)
+
+    def test_power_relay_gate_requires_final_on_confirmation(self):
+        command = r'''
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+KACE_POWER_API_TIMEOUT=2
+KACE_POWER_DEVICE_TIMEOUT=2
+KACE_POWER_ON_TIMEOUT=2
+sleep() { SECONDS=$((SECONDS + ${1:-1})); }
+curl() {
+    local url="${!#}"
+    case "$url" in
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */machine/device_power/devices)
+            printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"off","type":"gpio"}]}}'
+            ;;
+        */machine/device_power/device) printf '%s\n' '{"result":{"main_psu":"off"}}' ;;
+        *) return 22 ;;
+    esac
+}
+if prepare_power_relay_for_kace; then
+    exit 9
+fi
+'''
+        result = self._run_bootstrap_library(command)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertIn("power device 'main_psu' did not reach ON", result.stderr)
+
+    def test_power_relay_gate_times_out_when_mcu_does_not_appear(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmpdir:
+            root = Path(tmpdir)
+            (root / "dev").mkdir()
+            command = r'''
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+KACE_MCU_DEVICE_ROOT="$1/dev"
+KACE_POWER_API_TIMEOUT=2
+KACE_POWER_DEVICE_TIMEOUT=2
+KACE_POWER_ON_TIMEOUT=2
+KACE_POWER_MCU_TIMEOUT=2
+TEST_STATE_DIR="$1/state"
+mkdir -p "$TEST_STATE_DIR"
+sleep() { SECONDS=$((SECONDS + ${1:-1})); }
+curl() {
+    local url="${!#}"
+    case "$url" in
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */machine/device_power/devices)
+            if [ -f "$TEST_STATE_DIR/powered" ]; then
+                printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"on","type":"gpio"}]}}'
+            else
+                printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"off","type":"gpio"}]}}'
+            fi
+            ;;
+        */machine/device_power/device)
+            touch "$TEST_STATE_DIR/powered"
+            printf '%s\n' '{"result":{"main_psu":"on"}}'
+            ;;
+        *) return 22 ;;
+    esac
+}
+if prepare_power_relay_for_kace; then
+    exit 9
+fi
+'''
+            result = self._run_bootstrap_library(command, root)
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertIn("No MCU appeared in /dev/serial/by-id", result.stderr)
+
+    def test_power_relay_gate_is_noop_when_relay_is_disabled(self):
+        command = r'''
+POWER_RELAY=false
+curl() { return 99; }
+find_connected_mcu_path() { return 99; }
+prepare_power_relay_for_kace
+'''
+        result = self._run_bootstrap_library(command)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

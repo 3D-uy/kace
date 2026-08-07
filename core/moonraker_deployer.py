@@ -146,6 +146,8 @@ class Deployer:
         *,
         mcu_monitor=None,
         power_cycle_prompt: Optional[Callable[[], None]] = None,
+        power_off: Optional[Callable[[], object]] = None,
+        power_on: Optional[Callable[[], object]] = None,
         cancel_event: Optional[threading.Event] = None,
         event_sink: Optional[Callable[[dict], None]] = None,
         snapshot_loader: Optional[Callable[[], object]] = None,
@@ -160,6 +162,8 @@ class Deployer:
         self.snapshot = snapshot
         self.mcu_monitor = mcu_monitor
         self.power_cycle_prompt = power_cycle_prompt
+        self.power_off = power_off
+        self.power_on = power_on
         self.cancel_event = cancel_event or threading.Event()
         self.snapshot_loader = snapshot_loader
         self.firmware_copy = firmware_copy
@@ -348,9 +352,13 @@ class Deployer:
                     self._transition(DeployState.MONITOR_ARMED, "physical MCU monitor armed")
                 if self.power_cycle_prompt:
                     self.power_cycle_prompt()
+                if self.power_off:
+                    self.power_off()
                 self._transition(DeployState.AWAITING_DISCONNECT, "waiting for physical MCU removal")
                 self.mcu_monitor.wait_for_absent(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
                 self._transition(DeployState.MCU_ABSENT, "physical MCU absent")
+                if self.power_on:
+                    self.power_on()
                 self._transition(DeployState.AWAITING_RECONNECT, "waiting for the same physical MCU")
                 identity = self.mcu_monitor.wait_for_present(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
                 self._transition(DeployState.MCU_PRESENT, "same physical MCU present", device=identity.device_node)

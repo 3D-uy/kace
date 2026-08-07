@@ -1,0 +1,109 @@
+import json
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+import pytest
+
+from core.power_controller import (
+    MoonrakerPowerController,
+    PowerControllerError,
+    load_power_config,
+)
+
+
+def test_get_status_selects_the_configured_power_device():
+    devices = [
+        {"device": "lights", "status": "off"},
+        {"device": "main_psu", "status": "on"},
+    ]
+    with patch("core.power_controller.get_power_devices", return_value=(True, "OK", devices)):
+        controller = MoonrakerPowerController("main_psu")
+        assert controller.get_status() == "on"
+
+
+def test_power_on_uses_moonraker_and_confirms_final_state():
+    states = [
+        (True, "OK", [{"device": "main_psu", "status": "off"}]),
+        (True, "OK", [{"device": "main_psu", "status": "on"}]),
+    ]
+    with patch("core.power_controller.get_power_devices", side_effect=states), patch(
+        "core.power_controller.set_power_device", return_value=(True, "OK")
+    ) as set_device:
+        controller = MoonrakerPowerController("main_psu", poll_interval=0)
+        assert controller.power_on(timeout=1) == "on"
+    set_device.assert_called_once_with(
+        "localhost", 7125, "main_psu", "on", api_key=None
+    )
+
+
+def test_wait_until_ready_fails_when_moonraker_reports_error():
+    with patch(
+        "core.power_controller.get_power_devices",
+        return_value=(True, "OK", [{"device": "main_psu", "status": "error"}]),
+    ):
+        with pytest.raises(PowerControllerError, match="entered error state"):
+            MoonrakerPowerController("main_psu").wait_until_ready(timeout=1)
+
+
+def test_missing_configured_device_is_a_clear_error():
+    with patch(
+        "core.power_controller.get_power_devices",
+        return_value=(True, "OK", [{"device": "lights", "status": "on"}]),
+    ):
+        with pytest.raises(PowerControllerError, match="main_psu.*not configured"):
+            MoonrakerPowerController("main_psu").get_status()
+
+
+def test_power_device_identity_is_loaded_from_bootstrap_config(tmp_path):
+    config = tmp_path / "power.json"
+    config.write_text(
+        json.dumps({"schema": 1, "enabled": True, "device": "main_psu"}),
+        encoding="utf-8",
+    )
+    assert load_power_config(str(config)) == {"enabled": True, "device": "main_psu"}
+
+
+def test_invalid_power_config_shape_fails_clearly(tmp_path):
+    config = tmp_path / "power.json"
+    config.write_text("[]", encoding="utf-8")
+    with pytest.raises(PowerControllerError, match="JSON object"):
+        load_power_config(str(config))
+
+
+def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
+    from core import deployer
+
+    events = []
+    controller = Mock()
+    controller.power_on.side_effect = lambda: events.append("on") or "on"
+    controller.power_off.side_effect = lambda: events.append("off") or "off"
+
+    class FakeDeployer:
+        def __init__(self, _client, _manifest, **kwargs):
+            self.kwargs = kwargs
+
+        def run(self):
+            self.kwargs["power_off"]()
+            self.kwargs["power_on"]()
+            events.append("firmware")
+            return "done"
+
+    monkeypatch.setattr(
+        "core.power_controller.configured_power_controller",
+        lambda **_kwargs: controller,
+    )
+    monkeypatch.setattr("core.moonraker_deployer.Deployer", FakeDeployer)
+    monkeypatch.setattr("core.mcu_monitor.McuPresenceMonitor", lambda _path: object())
+
+    user_data = {
+        "klipper_version": "v1",
+        "mcu_path": "/dev/serial/by-id/test",
+        "prepared_firmware_deployment": SimpleNamespace(
+            plan=SimpleNamespace(method=SimpleNamespace(value="MANUAL"))
+        ),
+        "firmware_deployment_service": Mock(),
+    }
+    assert deployer.deploy_firmware_installation(user_data) == "done"
+    assert events == ["on", "off", "on", "firmware"]
+    assert controller.power_on.call_count == 2
+    controller.power_off.assert_called_once_with()

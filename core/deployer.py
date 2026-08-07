@@ -660,6 +660,7 @@ def deploy_firmware_installation(user_data):
     """
     from core.mcu_monitor import McuPresenceMonitor
     from core.moonraker import DEFAULT_PORT, list_config_files
+    from core.power_controller import PowerControllerError, configured_power_controller
     from core.moonraker_deployer import (
         Deployer, DeploymentManifest, DeployResult, DeployState, McuTarget,
     )
@@ -681,6 +682,19 @@ def deploy_firmware_installation(user_data):
     api_key = user_data.get("moonraker_api_key") or None
     mcu_name = user_data.get("mcu_name", "mcu")
     client = _MoonrakerClient(host, port, api_key=api_key)
+    try:
+        power_controller = configured_power_controller(
+            host=host, port=port, api_key=api_key
+        )
+        if power_controller is not None:
+            # The same controller backs Studio's button. Firmware work never
+            # starts until Moonraker has confirmed the configured device ON.
+            power_controller.power_on()
+    except PowerControllerError as exc:
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            f"printer power is not ready: {exc}",
+        )
 
     def _capture_backup():
         try:
@@ -735,7 +749,13 @@ def deploy_firmware_installation(user_data):
         verify_firmware=True,
         snapshot_loader=_capture_backup,
         mcu_monitor=monitor,
-        power_cycle_prompt=_prompt_power_cycle if method == "MANUAL" else None,
+        power_cycle_prompt=(
+            _prompt_power_cycle
+            if method == "MANUAL" and power_controller is None
+            else None
+        ),
+        power_off=power_controller.power_off if power_controller is not None else None,
+        power_on=power_controller.power_on if power_controller is not None else None,
         firmware_deploy=_run_firmware_method,
         monitor_before_firmware=(method == "USB"),
     ).run()

@@ -122,6 +122,31 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.assertEqual(observed, [["arm"]])
         self.assertIn(("absent", None), monitor.calls)
 
+    def test_moonraker_power_cycle_wraps_the_existing_mcu_monitor_states(self):
+        order = []
+        monitor = Monitor()
+        original_absent = monitor.wait_for_absent
+        original_present = monitor.wait_for_present
+        monitor.wait_for_absent = lambda **kwargs: (
+            order.append("mcu_absent"), original_absent(**kwargs)
+        )[1]
+        monitor.wait_for_present = lambda **kwargs: (
+            order.append("mcu_present"), original_present(**kwargs)
+        )[1]
+        deployer = Deployer(
+            Client({}), self.manifest, snapshot=self.snapshot,
+            mcu_monitor=monitor,
+            power_off=lambda: order.append("off"),
+            power_on=lambda: order.append("on"),
+            event_sink=lambda _event: None,
+            firmware_already_copied=True,
+        )
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
+
+        self.assertEqual(deployer.run().state, DeployState.DONE)
+        self.assertEqual(order, ["off", "mcu_absent", "on", "mcu_present"])
+
     def test_copy_is_inside_transaction_and_precedes_monitor(self):
         order = []
         monitor = Monitor()
