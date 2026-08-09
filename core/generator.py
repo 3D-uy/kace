@@ -5,6 +5,16 @@ from core.translations import translate_comment, get_lang
 from core.macro_generator import generate_starter_macros
 from core.advanced_module_handler import get_advanced_sections
 from core.exceptions import GenerationError
+from core.capabilities import (
+    normalize_and_validate_configuration,
+    validate_display_selection,
+    validate_kinematics,
+)
+from core.profile_values import (
+    ValueProvenance,
+    require_resolved_safety_values,
+    resolve_generation_values,
+)
 from core.probe_configuration import (
     apply_probe_compatibility_context,
     resolve_probe_configuration,
@@ -64,139 +74,8 @@ def _native_feature_sections(parsed_data: dict) -> dict:
 
 
 def _validate_and_sanitize_geometry(user_ctx: dict) -> None:
-    """Enforce stepper constraints, sanitize geometry values, and validate printable area.
-
-    Mutates user_ctx in place.
-    """
-    _uses_probe = bool(user_ctx.get("probe_uses_virtual_z_endstop"))
-
-    for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
-        # When a probe is active (BLTouch/CR-Touch), the Z axis uses
-        # probe:z_virtual_endstop — there is no position_endstop at all.
-        # Skip endstop constraint enforcement for Z and ensure position_min
-        # is negative so PROBE_CALIBRATE can work.
-        if axis == "z" and _uses_probe:
-            try:
-                p_min = float(user_ctx.get("z_position_min", 0.0))
-            except (ValueError, TypeError):
-                p_min = 0.0
-            if p_min >= 0:
-                user_ctx["z_position_min"] = "-2"
-            continue
-
-        try:
-            endstop = float(user_ctx.get(f"{axis}_position_endstop", 0.0))
-        except (ValueError, TypeError):
-            endstop = 0.0
-
-        try:
-            p_min = float(user_ctx.get(f"{axis}_position_min", 0.0))
-        except (ValueError, TypeError):
-            p_min = 0.0
-
-        try:
-            p_max = float(user_ctx.get(f"{axis}_position_max", user_ctx.get(size_key, 235.0)))
-        except (ValueError, TypeError):
-            p_max = 235.0
-
-        if p_min > endstop:
-            if axis == "z":
-                # For Z-axis, give a standard safety buffer below the endstop (default -2.0 or endstop - 1.0)
-                p_min = min(endstop - 1.0, -2.0)
-            else:
-                p_min = endstop
-            user_ctx[f"{axis}_position_min"] = f"{p_min:g}"
-
-        if p_max < endstop:
-            p_max = endstop
-            user_ctx[f"{axis}_position_max"] = f"{p_max:g}"
-
-    # ── ADR 001 Validation Layer ──────────────────────────────────────────────
-    try:
-        # Stepper positions
-        x_min_stepper = float(user_ctx.get("x_position_min", 0.0))
-        x_max_stepper = float(user_ctx.get("x_position_max", float(user_ctx.get("x_size", 235.0))))
-        y_min_stepper = float(user_ctx.get("y_position_min", 0.0))
-        y_max_stepper = float(user_ctx.get("y_position_max", float(user_ctx.get("y_size", 235.0))))
-        z_min_stepper = float(user_ctx.get("z_position_min", 0.0))
-        z_max_stepper = float(user_ctx.get("z_position_max", float(user_ctx.get("z_size", 250.0))))
-
-        # Printable limits (with robust derivation fallback and shift alignment)
-        p_x_min_val = user_ctx.get("printable_x_min")
-        printable_x_min = float(p_x_min_val) if p_x_min_val is not None else (x_min_stepper if x_min_stepper > 0.0 else 0.0)
-        p_x_max_val = user_ctx.get("printable_x_max")
-        printable_x_max = float(p_x_max_val) if p_x_max_val is not None else float(user_ctx.get("x_size", 235.0))
-
-        # Shift printable X area within physical limits if possible, only if NOT explicitly set by user
-        if p_x_min_val is None and p_x_max_val is None:
-            if printable_x_max > x_max_stepper:
-                shift_x = printable_x_max - x_max_stepper
-                if printable_x_min - shift_x >= x_min_stepper:
-                    printable_x_min -= shift_x
-                    printable_x_max -= shift_x
-            elif printable_x_min < x_min_stepper:
-                shift_x = x_min_stepper - printable_x_min
-                if printable_x_max + shift_x <= x_max_stepper:
-                    printable_x_min += shift_x
-                    printable_x_max += shift_x
-
-        p_y_min_val = user_ctx.get("printable_y_min")
-        printable_y_min = float(p_y_min_val) if p_y_min_val is not None else (y_min_stepper if y_min_stepper > 0.0 else 0.0)
-        p_y_max_val = user_ctx.get("printable_y_max")
-        printable_y_max = float(p_y_max_val) if p_y_max_val is not None else float(user_ctx.get("y_size", 235.0))
-
-        # Shift printable Y area within physical limits if possible, only if NOT explicitly set by user
-        if p_y_min_val is None and p_y_max_val is None:
-            if printable_y_max > y_max_stepper:
-                shift_y = printable_y_max - y_max_stepper
-                if printable_y_min - shift_y >= y_min_stepper:
-                    printable_y_min -= shift_y
-                    printable_y_max -= shift_y
-            elif printable_y_min < y_min_stepper:
-                shift_y = y_min_stepper - printable_y_min
-                if printable_y_max + shift_y <= y_max_stepper:
-                    printable_y_min += shift_y
-                    printable_y_max += shift_y
-
-        printable_z_max = float(user_ctx.get("printable_z_max", float(user_ctx.get("z_size", 250.0))))
-
-        user_ctx["printable_x_min"] = f"{printable_x_min:g}"
-        user_ctx["printable_x_max"] = f"{printable_x_max:g}"
-        user_ctx["printable_y_min"] = f"{printable_y_min:g}"
-        user_ctx["printable_y_max"] = f"{printable_y_max:g}"
-    except (ValueError, TypeError) as e:
-        raise GenerationError(f"Invalid numeric value in geometry settings: {e}")
-
-    # Validate endstop bounds constraints (except Z when probe is active)
-    for axis, p_min, p_max in [("x", x_min_stepper, x_max_stepper), 
-                               ("y", y_min_stepper, y_max_stepper), 
-                               ("z", z_min_stepper, z_max_stepper)]:
-        if axis == "z" and _uses_probe:
-            continue
-        try:
-            endstop = float(user_ctx.get(f"{axis}_position_endstop", 0.0))
-            if not (p_min <= endstop <= p_max):
-                raise GenerationError(f"{axis.upper()} position_endstop ({endstop:g}) must be within mechanical limits [{p_min:g}, {p_max:g}].")
-        except (ValueError, TypeError):
-            pass
-
-    # Validate Printable Area fits within travel boundaries
-    if (printable_x_max - printable_x_min) > (x_max_stepper - x_min_stepper):
-        raise GenerationError(f"Printable area width ({printable_x_max - printable_x_min:g}mm) exceeds maximum X travel range ({x_max_stepper - x_min_stepper:g}mm).")
-    if (printable_y_max - printable_y_min) > (y_max_stepper - y_min_stepper):
-        raise GenerationError(f"Printable area depth ({printable_y_max - printable_y_min:g}mm) exceeds maximum Y travel range ({y_max_stepper - y_min_stepper:g}mm).")
-    if printable_z_max > z_max_stepper:
-        raise GenerationError(f"Printable area height ({printable_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper:g}mm).")
-
-    # Validate Printable Area inclusion within travel limits
-    if printable_x_min < x_min_stepper or printable_x_max > x_max_stepper:
-        raise GenerationError(f"Printable X boundary [{printable_x_min:g}, {printable_x_max:g}] is outside physical X travel limits [{x_min_stepper:g}, {x_max_stepper:g}].")
-    if printable_y_min < y_min_stepper or printable_y_max > y_max_stepper:
-        raise GenerationError(f"Printable Y boundary [{printable_y_min:g}, {printable_y_max:g}] is outside physical Y travel limits [{y_min_stepper:g}, {y_max_stepper:g}].")
-
-    user_ctx["printable_center_x"] = f"{(printable_x_min + printable_x_max) / 2:g}"
-    user_ctx["printable_center_y"] = f"{(printable_y_min + printable_y_max) / 2:g}"
-
+    """Compatibility wrapper over the authoritative capability validator."""
+    normalize_and_validate_configuration(user_ctx)
 
 def _render_display_blocks(user_ctx, pins_ctx, parsed_data) -> str:
     """Generate display hardware blocks and strip display pins if display is 'none'.
@@ -355,23 +234,38 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     """Generate printer.cfg from parsed config and user data using Jinja2."""
     # Avoid in-place mutation of user_data by using a localized context dict
     user_ctx = dict(user_data)
-    kinematics = str(user_ctx.get("kinematics") or "").strip().lower()
-    if kinematics not in {"cartesian", "corexy"}:
-        raise GenerationError(
-            f"KACE cannot safely generate '{kinematics or 'unspecified'}' kinematics yet; "
-            "supported kinematics are cartesian and corexy."
-        )
-    user_ctx["kinematics"] = kinematics
+    resolved_values, value_provenance = resolve_generation_values(parsed_data, user_ctx)
+    require_resolved_safety_values(value_provenance)
+    user_ctx.update(resolved_values)
+    user_ctx["value_provenance"] = value_provenance
+    user_ctx["emit_value_provenance"] = bool(user_data.get("_value_provenance"))
+    user_ctx["kinematics"] = validate_kinematics(user_ctx.get("kinematics"))
     user_ctx["include_macros"] = include_macros
     probe_configuration = resolve_probe_configuration(user_ctx)
     apply_probe_compatibility_context(user_ctx, probe_configuration)
     user_ctx["probe_configuration"] = probe_configuration
+    if (
+        user_ctx.get("probe_uses_virtual_z_endstop")
+        and value_provenance.get("z_position_min") == ValueProvenance.SAFE_DEFAULT.value
+    ):
+        # A small negative calibration range is the safe contextual default for
+        # probe-based Z homing. Never replace an explicit profile/user value.
+        user_ctx["z_position_min"] = "-2"
 
-    _validate_and_sanitize_geometry(user_ctx)
+    normalize_and_validate_configuration(user_ctx)
+    validate_display_selection(user_ctx, parsed_data)
 
     # Build and serialize the motion space model using the sanitized user_ctx
     from core.motion_model import PrinterMotionSpace
     space = PrinterMotionSpace(user_ctx)
+    if probe_configuration.generates_safe_z_home or probe_configuration.generates_bed_mesh:
+        try:
+            space.validate_probeable_area()
+            safe_home_x, safe_home_y = space.safe_z_home_position()
+        except ValueError as exc:
+            raise GenerationError(str(exc)) from exc
+        user_ctx["safe_z_home_x"] = f"{safe_home_x:g}"
+        user_ctx["safe_z_home_y"] = f"{safe_home_y:g}"
     user_ctx["motion_space"] = space.to_dict()
 
     # Auto-generate bed_mesh config
@@ -464,12 +358,13 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
 
     if include_macros or user_data.get("macros_generated"):
         output_dir = os.path.dirname(cfg_file)
-        generate_starter_macros(output_dir)
+        generate_starter_macros(output_dir, motion_space=space)
 
     return {
         "content": final_output,
         "motion_space": user_ctx["motion_space"],
-        "bed_mesh": user_ctx.get("bed_mesh")
+        "bed_mesh": user_ctx.get("bed_mesh"),
+        "value_provenance": value_provenance,
     }
 
 

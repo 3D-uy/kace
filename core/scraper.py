@@ -470,6 +470,21 @@ def extract_profile_defaults(parsed_data):
         if 'heater_bed' in parsed_data:
             defaults['bed_thermistor'] = parsed_data['heater_bed'].get('sensor_type', 'EPCOS 100K B57560G104F')
             
+        # Preserve the broader set of profile-derived Klipper behavior used by
+        # the generator (motion, PID, currents, homing direction and material
+        # dimensions).  The compatibility keys above remain for the wizard UI.
+        from core.profile_values import extract_profile_values
+        geometry_keys = {
+            f"{axis}_{suffix}"
+            for axis in ("x", "y", "z")
+            for suffix in ("size", "position_min", "position_max", "position_endstop")
+        }
+        defaults.update(
+            (key, value)
+            for key, value in extract_profile_values(parsed_data).items()
+            if key not in geometry_keys
+        )
+
         if parsed_data.get('bltouch'):
             defaults['probe'] = 'BLTouch'
         elif parsed_data.get('probe') or parsed_data.get('smart_effector'):
@@ -656,4 +671,3 @@ def detect_fan_pins(raw_cfg: str) -> list:
                 seen_pins.add(pin_clean)
                 
     return fan_pins
-

@@ -185,5 +185,14 @@ class TestMotionModel(unittest.TestCase):
         self.assertEqual(space.printable_y_min, -10.0)
         self.assertEqual(space.printable_y_max, 290.0)
 
+    def test_safe_z_home_accounts_for_probe_offset(self):
+        space = PrinterMotionSpace({
+            "x_size": "235", "y_size": "235", "z_size": "250",
+            "x_position_min": "0", "x_position_max": "235",
+            "y_position_min": "0", "y_position_max": "235",
+            "probe_x_offset": "-40", "probe_y_offset": "10",
+        })
+        self.assertEqual(space.safe_z_home_position(), (137.5, 112.5))
+
 if __name__ == '__main__':
     unittest.main()

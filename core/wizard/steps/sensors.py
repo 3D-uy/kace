@@ -3,8 +3,9 @@ import os
 from core.menu import autocomplete_select, simple_input, yes_no, numbered_select
 from core.translations import t, get_lang
 from core.exceptions import WizardExit
-from core.validators import questionary_pin_validator
+from core.validators import questionary_pin_validator, questionary_thermistor_validator
 from core.probe_offset_visualizer import run_probe_offset_step
+from core.profile_values import mark_user_override
 from data.profiles import THERMISTOR_PRESETS
 from core.wizard.runner import _BACK, _QUIT
 from core.wizard.ui import _back_choice, _quit_choice
@@ -676,6 +677,7 @@ def _step_probe_offsets(user_data):
         return _BACK
     user_data["probe_x_offset"] = offset_result.get("probe_x_offset", "0")
     user_data["probe_y_offset"] = offset_result.get("probe_y_offset", "0")
+    mark_user_override(user_data, "probe_x_offset", "probe_y_offset")
     return "done"
 
 
@@ -708,10 +710,11 @@ def _step_therm(user_data, therm_key, select_msg, custom_msg):
     if ans == _BACK:
         return _BACK
     if ans == "__other__":
-        manual_ans = simple_input(custom_msg)
+        manual_ans = simple_input(custom_msg, validate=questionary_thermistor_validator)
         if manual_ans is None:
             return "__retry__"
         user_data[therm_key] = manual_ans
     else:
         user_data[therm_key] = ans
+    mark_user_override(user_data, therm_key)
     return ans

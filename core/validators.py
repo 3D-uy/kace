@@ -1,10 +1,13 @@
 # core/validators.py
+import math
 import re
 from typing import Union
 
 # Covers standard Klipper pin formats (PA0, ^PB7, !gpio4, P0.10, etc.)
 # and multi-MCU/CAN bus pins (e.g. toolhead:gpio5, can0:gpio4).
-_PIN_RE = re.compile(r'^[!^~]*(?:[A-Za-z0-9_-]+:)?[!^~]*[A-Za-z0-9_.]+$')
+_PIN_RE = re.compile(
+    r'^[!^~]*(?:[A-Za-z0-9_-]+:)?[!^~]*(?=[A-Za-z0-9_.]*[A-Za-z0-9])[A-Za-z0-9_.]+$'
+)
 
 
 def validate_klipper_pin(s: str) -> bool:
@@ -32,7 +35,9 @@ def questionary_numeric_validator(value: str) -> Union[bool, str]:
     if val_strip in ("<", "back", "volver", ""):
         return True
     try:
-        float(val_strip)
+        number = float(val_strip)
+        if not math.isfinite(number):
+            raise ValueError
         return True
     except ValueError:
         # Q-02: Deferred import — validators.py is imported very early in kace.py
@@ -55,7 +60,7 @@ def questionary_pos_numeric_validator(value: str) -> Union[bool, str]:
         return True
     try:
         f = float(val_strip)
-        if f <= 0:
+        if not math.isfinite(f) or f <= 0:
             # Q-02: Same deferred import as above — see comment in questionary_numeric_validator.
             from core.translations import get_lang
             lang = get_lang()
@@ -92,6 +97,8 @@ def questionary_thermistor_validator(value: str) -> Union[bool, str]:
     val_strip = value.strip()
     if val_strip.lower() in ("<", "back", "volver"):
         return True
+    if not val_strip:
+        return "Thermistor name must not be empty"
     return True
 
 
@@ -110,7 +117,12 @@ def questionary_arch_validator(value: str) -> Union[bool, str]:
     if val_strip.lower() in ("<", "back", "volver", ""):
         return True
     if re.match(r'^[a-zA-Z0-9_]+$', val_strip):
-        return True
+        try:
+            from core.capabilities import validate_firmware_architecture
+            validate_firmware_architecture(val_strip)
+            return True
+        except ValueError as exc:
+            return str(exc)
     from core.translations import get_lang
     lang = get_lang()
     if lang == "Español":
@@ -119,6 +131,19 @@ def questionary_arch_validator(value: str) -> Union[bool, str]:
         return "Arquitetura inválida. Use apenas letras, números e sublinhados (ex. stm32, rp2040)"
     else:
         return "Invalid architecture. Use only letters, numbers, and underscores (e.g. stm32, rp2040)"
+
+
+def questionary_processor_validator(value: str) -> Union[bool, str]:
+    """Validate a processor/model against the firmware derivation database."""
+    val_strip = str(value or "").strip()
+    if val_strip.lower() in ("<", "back", "volver"):
+        return True
+    try:
+        from core.capabilities import validate_firmware_processor
+        validate_firmware_processor(val_strip)
+        return True
+    except ValueError as exc:
+        return str(exc)
 
 
 def questionary_hex_offset_validator(value: str) -> Union[bool, str]:
@@ -145,5 +170,3 @@ def questionary_hex_offset_validator(value: str) -> Union[bool, str]:
         return "Offset HEX inválido. Deve ser um formato hexadecimal começando com 0x (ex. 0x8000, 0x0)"
     else:
         return "Invalid HEX offset. Must be a hexadecimal format starting with 0x (e.g. 0x8000, 0x0)"
-
-

@@ -1,6 +1,10 @@
 import sys
 from core.menu import simple_input, yes_no, numbered_select
-from core.validators import questionary_arch_validator, questionary_hex_offset_validator
+from core.validators import (
+    questionary_arch_validator,
+    questionary_hex_offset_validator,
+    questionary_processor_validator,
+)
 from core.translations import t
 from core.terminal import BOLD, INFO, RESET, WARNING
 from core.exceptions import DerivationAmbiguityError
@@ -144,7 +148,9 @@ def run_firmware_wizard(user_data: dict):
             new_arch = simple_input(t("builder.enter_arch"), default=arch, validate=questionary_arch_validator)
             if new_arch: config_dict["CONFIG_MCU"] = f'"{new_arch}"'
         elif ans_summary == t("builder.edit_proc"):
-            new_model = simple_input(t("builder.enter_proc"), default=model)
+            new_model = simple_input(
+                t("builder.enter_proc"), default=model, validate=questionary_processor_validator
+            )
             if new_model: current_mcu = new_model
         elif ans_summary == t("builder.edit_boot"):
             opts = [

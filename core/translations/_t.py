@@ -33,9 +33,9 @@ def translate_comment(comment, lang):
             "Español": "Conexión serial a la placa controladora. Auto-detectado por KACE. Verifica en /dev/serial/by-id/ si falla.",
             "Português": "Conexão serial com a placa controladora. Auto-detectado pelo KACE. Verifique em /dev/serial/by-id/ se falhar."
         },
-        "Printer kinematics type (cartesian, corexy, delta)": {
-            "Español": "Tipo de cinemática de la impresora (cartesiana, corexy, delta)",
-            "Português": "Tipo de cinemática da impressora (cartesiana, corexy, delta)"
+        "Printer kinematics type (cartesian, corexy)": {
+            "Español": "Tipo de cinemática de la impresora (cartesiana, corexy)",
+            "Português": "Tipo de cinemática da impressora (cartesiana, corexy)"
         },
         "Maximum velocity (in mm/s) of the toolhead": {
             "Español": "Velocidad máxima (en mm/s) del cabezal",

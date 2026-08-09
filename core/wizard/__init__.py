@@ -349,6 +349,8 @@ def run_wizard(user_data_arg=None):
         "fan_part_cooling_pin":  None,
         "fan_hotend_pin":        None,
     }
+    from core.profile_values import safe_default_provenance
+    initial_defaults["_value_provenance"] = safe_default_provenance(initial_defaults)
 
     # ── Step order: hardware first, software last ──────────────────────────────
     step_order = [

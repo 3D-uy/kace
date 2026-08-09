@@ -422,7 +422,7 @@ gcode:
             _generate(_parsed(), _user(probe="Custom Probe", custom_probe=custom))
 
     def test_delta_is_rejected_until_a_delta_template_exists(self):
-        with self.assertRaisesRegex(GenerationError, "cannot safely generate 'delta'"):
+        with self.assertRaisesRegex(GenerationError, "kinematics must be one of"):
             _generate(_parsed(), _user(kinematics="delta"))
 
     def test_custom_probe_missing_offsets_is_rejected_before_generation(self):
@@ -781,6 +781,8 @@ class TestGenerateConfigSideEffects(unittest.TestCase):
 
         user["x_size"] = "350"
         user["y_size"] = "350"
+        user["x_position_max"] = "350"
+        user["y_position_max"] = "350"
         _generate(_parsed(), user)
         second_x_size = user["motion_space"]["printable_bed_area"]["x"][1]
 
@@ -894,7 +896,11 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
     def test_display_choice_recommended_unsafe(self):
         # Choose unsafe display in wizard
         parsed = _parsed()
-        user = _user(display_choice="recommended:t5uid1", board="generic-creality-v4.2.2.cfg")
+        user = _user(
+            display_choice="override:t5uid1",
+            display_risk_accepted=True,
+            board="generic-creality-v4.2.2.cfg",
+        )
         output = _generate(parsed, user)
         self.assertIn("# DISPLAY: T5UID1", output)
         self.assertIn("# Compatibility: UNSAFE", output)
@@ -912,13 +918,11 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
         self.assertIn("# [dwin_set]", output)
 
     def test_display_choice_experimental(self):
-        # Choose experimental display in wizard
+        # An unknown display cannot render an active, incomplete Klipper section.
         parsed = _parsed()
-        user = _user(display_choice="override:some_unknown_display")
-        output = _generate(parsed, user)
-        self.assertIn("# DISPLAY: SOME_UNKNOWN_DISPLAY", output)
-        self.assertIn("# Compatibility: EXPERIMENTAL", output)
-        self.assertIn("# 🟠 EXPERIMENTAL: Community reports only", output)
+        user = _user(display_choice="manual:some_unknown_display")
+        with self.assertRaisesRegex(GenerationError, "no complete profile section"):
+            _generate(parsed, user)
 
     def test_display_choice_fully_compatible_with_existing_fields(self):
         # Choose fully compatible display in wizard with existing fields in parsed
@@ -952,7 +956,7 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
             # Let's verify that comments like "# Printer kinematics type (cartesian, corexy, delta)" are translated
             # and replaced correctly in the output.
             output = _generate(parsed, user)
-            self.assertIn("# Tipo de cinemática da impressora (cartesiana, corexy, delta)", output)
+            self.assertIn("# Tipo de cinemática da impressora (cartesiana, corexy)", output)
         finally:
             set_lang(orig_lang)
 
@@ -1013,34 +1017,24 @@ class TestGenerateConfigFanBranch(unittest.TestCase):
 
 
 @_skip_no_jinja2
-class TestGenerateConfigAxisSanitization(unittest.TestCase):
-    def test_z_axis_min_adjustment(self):
-        # When z_position_endstop is negative and z_position_min is default (0),
-        # position_min should be adjusted to -2.0 to ensure Klipper startup success.
+class TestGenerateConfigAxisValidation(unittest.TestCase):
+    def test_z_axis_min_conflict_is_rejected(self):
         parsed = _parsed()
         user = _user(z_position_endstop="-0.5", z_position_min="0")
-        output = _generate(parsed, user)
-        self.assertIn("position_endstop: -0.5", output)
-        self.assertIn("position_min: -2", output)
+        with self.assertRaisesRegex(GenerationError, "z_position_endstop"):
+            _generate(parsed, user)
 
-    def test_z_axis_max_adjustment(self):
-        # When z_position_endstop is greater than z_position_max,
-        # position_max should be adjusted to equal z_position_endstop.
+    def test_z_axis_max_conflict_is_rejected(self):
         parsed = _parsed()
         user = _user(z_position_endstop="300", z_position_max="250")
-        output = _generate(parsed, user)
-        self.assertIn("position_endstop: 300", output)
-        self.assertIn("position_max: 300", output)
+        with self.assertRaisesRegex(GenerationError, "z_position_endstop"):
+            _generate(parsed, user)
 
-    def test_other_axis_min_adjustment(self):
-        # When x_position_endstop is positive but x_position_min is larger than endstop,
-        # position_min should be adjusted to match the endstop.
-        # Since X endstop in wizard defaults to 0, let's set endstop to 0 and min to 10.
+    def test_other_axis_min_conflict_is_rejected(self):
         parsed = _parsed()
         user = _user(x_position_endstop="0", x_position_min="10")
-        output = _generate(parsed, user)
-        self.assertIn("position_endstop: 0", output)
-        self.assertIn("position_min: 0", output)
+        with self.assertRaisesRegex(GenerationError, "x_position_endstop"):
+            _generate(parsed, user)
 
 
 # ── T-05: Comment alignment regex edge cases ──────────────────────────────────

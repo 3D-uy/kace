@@ -2,6 +2,7 @@
 # Klipper source: https://www.klipper3d.org/Bed_Mesh.html
 #
 import unittest
+from core.exceptions import GenerationError
 from core.motion_model import PrinterMotionSpace
 from core.bed_mesh import generate_bed_mesh_config
 from core.leveling import validate_probe_reachability, filter_reachable_points, derive_probing_points
@@ -153,6 +154,22 @@ class TestBedMeshAndLeveling(unittest.TestCase):
         # For (295, 295): X=min(270-5, 295) -> 265, Y=min(300-5, 295) -> 295
         self.assertEqual(clamped[0], (5.0, 5.0))
         self.assertEqual(clamped[1], (265.0, 295.0))
+
+    def test_empty_probeable_area_is_rejected(self):
+        user_data = {
+            "x_size": "100",
+            "y_size": "100",
+            "x_position_min": "0",
+            "x_position_max": "100",
+            "y_position_min": "0",
+            "y_position_max": "100",
+            "probe": "Inductive",
+            "probe_x_offset": "200",
+            "probe_y_offset": "0",
+        }
+        space = PrinterMotionSpace(user_data)
+        with self.assertRaisesRegex(GenerationError, "Probeable X area"):
+            generate_bed_mesh_config(space, user_data, {})
 
 if __name__ == '__main__':
     unittest.main()
