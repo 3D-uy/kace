@@ -4,12 +4,11 @@ The configured device name is persisted by bootstrap. Runtime state always
 comes from Moonraker's Power API; this module never accesses GPIO directly.
 """
 
-import json
-import os
 import re
 import time
 
 from core.moonraker import DEFAULT_PORT, get_power_devices, set_power_device
+from core.power_config import PowerConfigError, load_power_config as load_versioned_power_config
 
 
 DEFAULT_CONFIG_PATH = "~/.config/kace/power.json"
@@ -22,23 +21,23 @@ class PowerControllerError(RuntimeError):
 
 
 def load_power_config(path: str = DEFAULT_CONFIG_PATH) -> dict:
-    """Load bootstrap's non-secret power identity configuration."""
-    config_path = os.path.expanduser(path)
+    """Load bootstrap's verified power identity and full desired-state schema."""
     try:
-        with open(config_path, "r", encoding="utf-8") as source:
-            data = json.load(source)
-    except FileNotFoundError:
-        return {"enabled": False, "device": None}
-    except (OSError, ValueError, TypeError) as exc:
+        config = load_versioned_power_config(path)
+    except PowerConfigError as exc:
         raise PowerControllerError(f"could not read power configuration: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise PowerControllerError("KACE power configuration must be a JSON object")
-    enabled = data.get("enabled") is True
-    device = data.get("device")
-    if enabled and (not isinstance(device, str) or not _DEVICE_RE.fullmatch(device)):
-        raise PowerControllerError("POWER_DEVICE is missing or invalid in KACE power configuration")
-    return {"enabled": enabled, "device": device if enabled else None}
+    return {
+        "schema": config.schema,
+        "revision": config.revision,
+        "enabled": config.enabled,
+        "device": config.device if config.enabled else None,
+        "pin": config.pin if config.enabled else None,
+        "active_low": config.active_low,
+        "initial_state": config.initial_state,
+        "restart_klipper_when_powered": config.restart_klipper_when_powered,
+        "off_when_shutdown": config.off_when_shutdown,
+        "legacy": config.legacy,
+    }
 
 
 class MoonrakerPowerController:

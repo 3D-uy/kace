@@ -60,7 +60,10 @@ def test_power_device_identity_is_loaded_from_bootstrap_config(tmp_path):
         json.dumps({"schema": 1, "enabled": True, "device": "main_psu"}),
         encoding="utf-8",
     )
-    assert load_power_config(str(config)) == {"enabled": True, "device": "main_psu"}
+    loaded = load_power_config(str(config))
+    assert loaded["enabled"] is True
+    assert loaded["device"] == "main_psu"
+    assert loaded["legacy"] is True
 
 
 def test_invalid_power_config_shape_fails_clearly(tmp_path):
