@@ -1,4 +1,6 @@
 
+from firmware.configuration import BootloaderOffset, BootloaderOffsetKind
+
 # ── Firmware configuration database ───────────────────────────────────────────
 # Loaded from data/boards.yaml (mcu_firmware section).
 # The hardcoded list below is the fallback used when the YAML file is missing
@@ -141,14 +143,22 @@ def derive_config(mcu, hint=None, flash_start=None):
         # Bootloader offset:
         #   key absent          → no flash config needed (e.g. rp2040, avr, linux)
         #   flash_start = null  → ambiguous, raise error
-        #   flash_start = "0x0" → explicitly no offset, skip CONFIG_FLASH_START
+        #   flash_start = "0x0" → explicitly no bootloader; persist CONFIG_FLASH_START=0x0
         #   flash_start = "0xN" → set CONFIG_FLASH_START
+        requested_offset = (
+            BootloaderOffset.from_value(flash_start)
+            if flash_start is not None
+            else None
+        )
         if "flash_start" not in matched:
-            pass  # no bootloader configuration needed for this architecture
+            if (
+                requested_offset is not None
+                and requested_offset.kind is not BootloaderOffsetKind.NOT_APPLICABLE
+            ):
+                raise ValueError(f"Bootloader offset is not applicable to {arch}")
         elif matched["flash_start"] is None:
-            if flash_start is not None:
-                if flash_start != "0x0":
-                    config["CONFIG_FLASH_START"] = flash_start
+            if requested_offset is not None:
+                config["CONFIG_FLASH_START"] = requested_offset.kconfig_value
             else:
                 options = {
                     "No bootloader (0x0)":        "0x0",
@@ -159,8 +169,11 @@ def derive_config(mcu, hint=None, flash_start=None):
                     "128KiB bootloader (0x20000)":"0x20000",
                 }
                 raise DerivationAmbiguityError("bootloader_offset", options, mcu)
-        elif matched["flash_start"] != "0x0":
-            config["CONFIG_FLASH_START"] = matched["flash_start"]
+        else:
+            effective_offset = requested_offset or BootloaderOffset.from_value(
+                matched["flash_start"]
+            )
+            config["CONFIG_FLASH_START"] = effective_offset.kconfig_value
 
         # Optional clock frequency
         clock = matched.get("clock_freq")

@@ -33,6 +33,10 @@ class TestDerivation(unittest.TestCase):
         cfg = drv.derive_config('stm32f103', hint='usb')
         self.assertEqual(cfg['CONFIG_FLASH_START'], '0x7000')
 
+    def test_stm32_no_bootloader_is_explicit_zero_not_missing(self):
+        cfg = drv.derive_config('stm32f1', hint='usb')
+        self.assertEqual(cfg['CONFIG_FLASH_START'], '0x0')
+
     def test_stm32f103rc_substring_match(self):
         # Should match stm32f103, not generic stm32f1
         cfg = drv.derive_config('stm32f103rc', hint='usb')

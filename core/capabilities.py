@@ -318,3 +318,13 @@ def validate_firmware_processor(value: object) -> str:
     if not text or not any(pattern in text for pattern in supported_firmware_processors()):
         raise ValueError(f"Unsupported firmware processor {text!r}.")
     return text
+
+
+def validate_firmware_processor_for_architecture(
+    value: object, architecture: object
+) -> str:
+    """Validate both processor support and its derived architecture family."""
+    text = validate_firmware_processor(value)
+    from firmware.configuration import validate_processor_for_architecture
+
+    return validate_processor_for_architecture(text, architecture)
