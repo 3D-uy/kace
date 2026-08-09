@@ -44,6 +44,7 @@ import io
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -610,6 +611,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
         user_data["pending_firmware_deployment"] = True
         user_data["klipper_version"] = "kace-test"
+        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=object())
         result = DeployResult(terminal_state, "test result")
 
         with patch('kace.print_kace_banner'), \

@@ -9,8 +9,58 @@ from unittest.mock import patch, MagicMock
 import time
 
 from firmware.builder import build_firmware_orchestrator
+from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 class TestFirmwareBuilder(unittest.TestCase):
+
+    def test_real_artifact_embeds_and_returns_complete_build_identity(self):
+        import tempfile
+
+        inputs = FirmwareBuildInputs.create(
+            klipper_commit="1" * 40,
+            canonical_config='CONFIG_MCU="stm32"\nCONFIG_USB=y\n',
+            toolchain=ToolchainIdentity("make", "GNU Make 4.4", "gcc", "gcc 13"),
+            build_id="2" * 32,
+        )
+        compile_commands = []
+
+        with tempfile.TemporaryDirectory() as tmp_klipper, tempfile.TemporaryDirectory() as tmp_output:
+            config_path = os.path.join(tmp_klipper, ".config")
+            with open(config_path, "w", encoding="utf-8") as config_file:
+                config_file.write('CONFIG_MCU="stm32"\nCONFIG_USB=y\n')
+            out_dir = os.path.join(tmp_klipper, "out")
+
+            def run_make(command, **_kwargs):
+                if "olddefconfig" not in command and "clean" not in command:
+                    compile_commands.append(list(command))
+                    os.makedirs(out_dir, exist_ok=True)
+                    with open(os.path.join(out_dir, "klipper.bin"), "wb") as artifact:
+                        artifact.write(b"firmware" * 2048)
+                return MagicMock(stdout="", stderr="", returncode=0)
+
+            with patch('firmware.builder.generate_firmware_config', return_value=(True, "")), \
+                 patch('firmware.builder.validate_config', return_value=(True, "")), \
+                 patch('firmware.builder.create_build_inputs', return_value=inputs), \
+                 patch('firmware.builder.is_mock_build', return_value=False), \
+                 patch('firmware.builder.subprocess.run', side_effect=run_make), \
+                 patch('firmware.builder.subprocess.check_output', return_value=b"1"):
+                result = build_firmware_orchestrator(
+                    derived_mcu="stm32f446",
+                    klipper_path=tmp_klipper,
+                    output_dir=tmp_output,
+                    config_dict={"CONFIG_MCU": '"stm32"'},
+                )
+
+        self.assertEqual(result["status"], "success")
+        identity = result["artifact"].firmware_identity
+        self.assertIsNotNone(identity)
+        self.assertEqual(identity.klipper_commit, "1" * 40)
+        self.assertEqual(identity.artifact_sha256, result["artifact"].sha256)
+        self.assertEqual(result["klipper_version"], inputs.reported_version)
+        self.assertEqual(len(compile_commands), 1)
+        self.assertIn(
+            f"KLIPPER_VERSION={inputs.reported_version}", compile_commands[0]
+        )
 
     @patch('firmware.builder.generate_firmware_config', return_value=(True, ""))
     @patch('firmware.builder.validate_config', return_value=(True, ""))
@@ -143,6 +193,12 @@ class TestFirmwareBuilder(unittest.TestCase):
         import tempfile
         import shutil
         
+        inputs = FirmwareBuildInputs.create(
+            klipper_commit="1" * 40,
+            canonical_config='CONFIG_MCU="avr"\nCONFIG_USB=y\n',
+            toolchain=ToolchainIdentity("make", "GNU Make 4.4", "avr-gcc", "avr-gcc 13"),
+            build_id="3" * 32,
+        )
         with tempfile.TemporaryDirectory() as tmp_klipper:
             # Create a mock .config with CONFIG_MCU="avr"
             with open(os.path.join(tmp_klipper, ".config"), "w") as f:
@@ -164,6 +220,7 @@ class TestFirmwareBuilder(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp_output:
                 # Patch validator, compile subprocess calls, and getmtime to return future timestamp
                 with patch('firmware.builder.validate_config', return_value=(True, "")), \
+                     patch('firmware.builder.create_build_inputs', return_value=inputs), \
                      patch('firmware.builder.subprocess.run', side_effect=mock_compile), \
                      patch('firmware.builder.subprocess.check_output', return_value=b"4"), \
                      patch('firmware.builder.os.path.getmtime', return_value=time.time() + 10.0):

@@ -21,6 +21,7 @@ from core.deployer import (
 )
 from core.moonraker_deployer import DeployState
 from core.workflow_outcome import WorkflowOutcome, success
+from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 
 class FakeParamiko:
@@ -166,13 +167,50 @@ class LocalExportBoundaryTests(unittest.TestCase):
 
 class FirmwareInstallationPreconditionTests(unittest.TestCase):
     def _user(self):
-        prepared = SimpleNamespace(plan=SimpleNamespace(method=SimpleNamespace(value="MANUAL")))
+        digest = "a" * 64
+        identity = FirmwareBuildInputs.create(
+            klipper_commit="1" * 40,
+            canonical_config='CONFIG_MCU="stm32"\n',
+            toolchain=ToolchainIdentity("make", "GNU Make 4.4", "gcc", "gcc 13"),
+            build_id="2" * 32,
+        ).complete(
+            artifact_sha256=digest,
+            artifact_size=4096,
+            artifact_format="bin",
+        )
+        artifact = SimpleNamespace(firmware_identity=identity, sha256=digest)
+        prepared = SimpleNamespace(
+            plan=SimpleNamespace(
+                method=SimpleNamespace(value="MANUAL"), artifact=artifact
+            ),
+            sha256=digest,
+        )
         return {
             "prepared_firmware_deployment": prepared,
             "firmware_deployment_service": MagicMock(),
-            "klipper_version": "kace-fingerprint",
             "mcu_path": "/dev/serial/by-id/test",
         }
+
+    def test_legacy_version_string_cannot_replace_typed_build_identity(self):
+        user = self._user()
+        user["klipper_version"] = "kace-legacy-config-hash"
+        user["prepared_firmware_deployment"].plan.artifact.firmware_identity = None
+
+        result = deploy_firmware_installation(user)
+
+        self.assertEqual(result.state, DeployState.FAILED_FLASH)
+        self.assertIn("build identity", result.detail)
+        user["firmware_deployment_service"].execute.assert_not_called()
+
+    def test_tampered_staged_artifact_cannot_enter_flash_workflow(self):
+        user = self._user()
+        user["prepared_firmware_deployment"].sha256 = "b" * 64
+
+        result = deploy_firmware_installation(user)
+
+        self.assertEqual(result.state, DeployState.FAILED_FLASH)
+        self.assertIn("does not match", result.detail)
+        user["firmware_deployment_service"].execute.assert_not_called()
 
     @patch("core.deployer._preflight_check", return_value=True)
     @patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", b"[mcu]\n[printer]\n", None))

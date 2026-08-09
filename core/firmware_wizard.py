@@ -204,7 +204,14 @@ def run_firmware_wizard(user_data: dict):
                 size_warning=bool(result.get('size_warning', False)),
             )
         user_data['firmware_artifact'] = artifact
-        if result.get('klipper_version'):
+        identity = getattr(artifact, "firmware_identity", None)
+        if identity is not None:
+            user_data['firmware_identity'] = identity
+            user_data['klipper_version'] = identity.reported_version
+            user_data['mcu_name'] = result.get('mcu_name', 'mcu')
+        elif result.get('klipper_version'):
+            # Compatibility metadata may still be displayed/exported, but it
+            # cannot authorize the integrated post-flash verification path.
             user_data['klipper_version'] = result.get('klipper_version')
             user_data['mcu_name'] = result.get('mcu_name', 'mcu')
 

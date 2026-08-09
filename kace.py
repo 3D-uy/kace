@@ -306,7 +306,8 @@ def main():
     # available, compose it with the verified configuration transaction.
     if user_data.get("pending_firmware_deployment"):
         from core.moonraker_deployer import DeployState
-        if user_data.get("klipper_version") and user_data.get("mcu_path"):
+        artifact = user_data.get("firmware_artifact")
+        if getattr(artifact, "firmware_identity", None) and user_data.get("mcu_path"):
             result = deploy_firmware_installation(user_data)
             if result.state is DeployState.DONE:
                 print("\n\033[92m[OK] Installation completed and validated.\033[0m")

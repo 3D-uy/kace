@@ -118,6 +118,9 @@ class FirmwareDeploymentService:
         digest = _sha256(staged_path)
         if plan.artifact.sha256 and digest != plan.artifact.sha256:
             raise RuntimeError("staged firmware checksum does not match build artifact")
+        identity = getattr(plan.artifact, "firmware_identity", None)
+        if identity is not None and digest != identity.artifact_sha256:
+            raise RuntimeError("staged firmware checksum does not match firmware build identity")
         prepared = PreparedDeployment(plan=plan, staged_path=staged_path, sha256=digest)
         self._emit(
             plan.deployment_id,
@@ -177,6 +180,9 @@ class FirmwareDeploymentService:
             "state": state,
             "deployment": prepared.to_dict(),
         }
+        identity = getattr(prepared.plan.artifact, "firmware_identity", None)
+        if identity is not None:
+            payload["firmware_identity"] = identity.to_dict()
         if result is not None:
             payload["result"] = {
                 "status": result.status.value,

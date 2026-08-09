@@ -942,15 +942,23 @@ def deploy_firmware_installation(user_data):
         ConfigArtifact, Deployer, DeploymentManifest, DeployResult, DeployState, McuTarget,
     )
     from core.snapshot import create_snapshot
+    from firmware.identity import FirmwareBuildIdentity
 
-    expected = user_data.get("klipper_version", "")
     mcu_path = user_data.get("mcu_path", "")
     prepared = user_data.get("prepared_firmware_deployment")
     service = user_data.get("firmware_deployment_service")
     if prepared is None or service is None:
         return DeployResult(DeployState.FAILED_PRECONDITION, "prepared firmware deployment is unavailable")
-    if not expected:
-        return DeployResult(DeployState.FAILED_FLASH, "compiled firmware fingerprint is unavailable")
+    artifact = getattr(getattr(prepared, "plan", None), "artifact", None)
+    identity = getattr(artifact, "firmware_identity", None)
+    if not isinstance(identity, FirmwareBuildIdentity):
+        return DeployResult(DeployState.FAILED_FLASH, "compiled firmware build identity is unavailable")
+    if (
+        not getattr(artifact, "sha256", "")
+        or identity.artifact_sha256 != artifact.sha256
+        or identity.artifact_sha256 != getattr(prepared, "sha256", "")
+    ):
+        return DeployResult(DeployState.FAILED_FLASH, "firmware artifact does not match its build identity")
     if not mcu_path:
         return DeployResult(DeployState.FAILED_MONITOR, "MCU device path is unavailable")
 
@@ -1034,7 +1042,7 @@ def deploy_firmware_installation(user_data):
             f"could not stage managed configuration: {exc}",
         )
     manifest = DeploymentManifest(
-        targets=[McuTarget(mcu_name, expected)],
+        targets=[McuTarget(mcu_name, identity.reported_version, identity.to_dict())],
         printer_cfg_path=printer_cfg,
         macros_cfg_path=macros_cfg if os.path.isfile(macros_cfg) else None,
         config_artifacts=config_artifacts,

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from firmware.artifacts import BuildArtifact, BuildProvenance, FirmwareFormat
+from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 from firmware.deployment import (
     DeploymentExecutionContext,
     DeploymentMethodId,
@@ -24,6 +25,16 @@ from firmware.deployment.profiles import (
 def artifact(path, *, fmt=FirmwareFormat.BIN, flashable=True):
     with open(path, "rb") as source:
         payload = source.read()
+    identity = FirmwareBuildInputs.create(
+        klipper_commit="1" * 40,
+        canonical_config='CONFIG_MCU="stm32"\n',
+        toolchain=ToolchainIdentity("make", "GNU Make 4.4", "gcc", "gcc 13.2"),
+        build_id="a" * 32,
+    ).complete(
+        artifact_sha256=hashlib.sha256(payload).hexdigest(),
+        artifact_size=len(payload),
+        artifact_format=fmt.value,
+    )
     return BuildArtifact(
         build_id="build-1",
         path=path,
@@ -39,6 +50,7 @@ def artifact(path, *, fmt=FirmwareFormat.BIN, flashable=True):
         firmware_fingerprint="kace-deadbeef",
         provenance=BuildProvenance.REAL,
         flashable=flashable,
+        firmware_identity=identity,
     )
 
 
@@ -70,6 +82,10 @@ class FirmwareDeploymentTests(unittest.TestCase):
             with open(os.path.join(root, "deployment-manifest.json"), encoding="utf-8") as manifest_file:
                 manifest = json.load(manifest_file)
             self.assertEqual(manifest["deployment"]["final_filename"], "firmware.bin")
+            self.assertEqual(manifest["firmware_identity"]["build_id"], "a" * 32)
+            self.assertEqual(
+                manifest["firmware_identity"]["artifact_sha256"], build.sha256
+            )
             self.assertEqual(events[-1]["workflow_kind"], "firmware_deployment")
             self.assertEqual(events[-1]["state"], "ARTIFACT_READY")
 

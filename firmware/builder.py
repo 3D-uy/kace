@@ -1,4 +1,3 @@
-import hashlib
 import os
 import time
 import shutil
@@ -15,7 +14,8 @@ from .build_mode import (
     FIRMWARE_MINIMUM_SIZE_BYTES,
     is_mock_build,
 )
-from .artifacts import BuildArtifact
+from .artifacts import BuildArtifact, BuildProvenance
+from .identity import FirmwareIdentityError, create_build_inputs
 from core.translations import t
 
 
@@ -119,19 +119,23 @@ def build_firmware_orchestrator(
             env=sub_env,
         )
         
-        # 4. Compute config fingerprint for firmware verification
-        # sha256 of the resolved .config is deterministic per build configuration,
-        # avoiding shallow-clone / git-describe unreliability (see design notes).
-        _config_sha8 = ""
+        # 4. Create a unique, source-aware identity and embed its build ID in
+        # Klipper's reported MCU version. A real artifact without this identity
+        # is never considered flashable.
+        _build_identity = None
+        _identity_error = ""
         _klipper_version_override = None
+        _cfg_file = os.path.join(klipper_path, ".config")
         try:
-            _cfg_file = os.path.join(klipper_path, ".config")
-            if os.path.isfile(_cfg_file):
-                with open(_cfg_file, "rb") as _f:
-                    _config_sha8 = hashlib.sha256(_f.read()).hexdigest()[:8]
-                _klipper_version_override = f"kace-{_config_sha8}"
-        except Exception:
-            pass  # non-fatal; version check will be skipped if sha is absent
+            _build_identity = create_build_inputs(
+                klipper_path=klipper_path,
+                config_path=_cfg_file,
+                make_command=_make,
+                env=sub_env,
+            )
+            _klipper_version_override = _build_identity.reported_version
+        except FirmwareIdentityError as exc:
+            _identity_error = str(exc)
 
         # 4b. Post-olddefconfig Validation
         val_success, val_msg = validate_config(klipper_path)
@@ -149,8 +153,8 @@ def build_firmware_orchestrator(
         )
 
         build_cmd = [_make]
-        # Embed the config fingerprint into the binary so Moonraker can return
-        # it via the mcu object's mcu_version field for post-flash verification.
+        # Embed the unique build ID so Moonraker can return it via the MCU
+        # object's mcu_version field for post-flash verification.
         if _klipper_version_override:
             build_cmd.append(f"KLIPPER_VERSION={_klipper_version_override}")
         if build_context.concurrency is not None:
@@ -211,6 +215,25 @@ def build_firmware_orchestrator(
                         
                     # Inject wrapper directory to sub_env's PATH
                     sub_env["PATH"] = w_dir + os.pathsep + sub_env.get("PATH", "")
+
+                    # The retry changes the effective build options. Preserve
+                    # the unique embedded build ID while recording that fact in
+                    # the signed input identity used by the manifest.
+                    if _build_identity is not None:
+                        _build_identity = create_build_inputs(
+                            klipper_path=klipper_path,
+                            config_path=_cfg_file,
+                            make_command=_make,
+                            env=sub_env,
+                            lto_retry=True,
+                            build_id=_build_identity.build_id,
+                        )
+                        _klipper_version_override = _build_identity.reported_version
+                        build_cmd = [
+                            item for item in build_cmd
+                            if not str(item).startswith("KLIPPER_VERSION=")
+                        ]
+                        build_cmd.insert(1, f"KLIPPER_VERSION={_klipper_version_override}")
                     
                     # Clean and compile again
                     subprocess.run(
@@ -295,7 +318,21 @@ def build_firmware_orchestrator(
                         firmware_fingerprint=_klipper_version_override or "",
                         mock_build=is_mock_build(build_context.make_command),
                         size_warning=size_warning,
+                        build_identity=_build_identity,
                     )
+                    if (
+                        artifact.provenance is BuildProvenance.REAL
+                        and not size_warning
+                        and artifact.sha256
+                        and artifact.firmware_identity is None
+                    ):
+                        return {
+                            "status": "error",
+                            "message": (
+                                "Firmware compiled but its build identity is unavailable: "
+                                + (_identity_error or "unknown identity error")
+                            ),
+                        }
                     return {
                         "status": "success",
                         "mcu": derived_mcu,
@@ -305,6 +342,10 @@ def build_firmware_orchestrator(
                         "size_warning": size_warning,
                         "size_bytes": artifact_size,
                         "klipper_version": _klipper_version_override or "",
+                        "firmware_identity": (
+                            artifact.firmware_identity.to_dict()
+                            if artifact.firmware_identity is not None else None
+                        ),
                         "mcu_name": "mcu",
                     }
 

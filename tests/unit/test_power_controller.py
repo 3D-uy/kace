@@ -9,6 +9,7 @@ from core.power_controller import (
     PowerControllerError,
     load_power_config,
 )
+from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 
 def test_get_status_selects_the_configured_power_device():
@@ -97,12 +98,38 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
     )
     monkeypatch.setattr("core.moonraker_deployer.Deployer", FakeDeployer)
     monkeypatch.setattr("core.mcu_monitor.McuPresenceMonitor", lambda _path: object())
+    monkeypatch.setattr(
+        deployer,
+        "_generated_config_bytes",
+        lambda: ("generated.cfg", b"[mcu]\n[printer]\n", None),
+    )
+    monkeypatch.setattr(deployer, "_preflight_check", lambda *_args: True)
+    monkeypatch.setattr(
+        "core.config_transaction.MoonrakerConfigTransport.read_files",
+        lambda *_args: {},
+    )
+    monkeypatch.setattr("core.menu.yes_no", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("core.snapshot.create_snapshot", lambda *_args, **_kwargs: None)
 
+    digest = "a" * 64
+    identity = FirmwareBuildInputs.create(
+        klipper_commit="1" * 40,
+        canonical_config='CONFIG_MCU="stm32"\n',
+        toolchain=ToolchainIdentity("make", "GNU Make 4.4", "gcc", "gcc 13"),
+        build_id="2" * 32,
+    ).complete(
+        artifact_sha256=digest,
+        artifact_size=4096,
+        artifact_format="bin",
+    )
+    artifact = SimpleNamespace(firmware_identity=identity, sha256=digest)
     user_data = {
-        "klipper_version": "v1",
         "mcu_path": "/dev/serial/by-id/test",
         "prepared_firmware_deployment": SimpleNamespace(
-            plan=SimpleNamespace(method=SimpleNamespace(value="MANUAL"))
+            plan=SimpleNamespace(
+                method=SimpleNamespace(value="MANUAL"), artifact=artifact
+            ),
+            sha256=digest,
         ),
         "firmware_deployment_service": Mock(),
     }

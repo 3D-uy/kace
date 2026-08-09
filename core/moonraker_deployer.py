@@ -68,6 +68,7 @@ class DeployState(Enum):
 class McuTarget:
     name: str
     expected_version: str
+    firmware_identity: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -302,6 +303,21 @@ class Deployer:
                 wrong.append(target.name)
         return wrong, missing
 
+    def _identity_summaries(self) -> list[dict]:
+        summaries = []
+        for target in self.manifest.targets:
+            identity = target.firmware_identity
+            if not isinstance(identity, dict):
+                continue
+            summaries.append({
+                "mcu": target.name,
+                "build_id": identity.get("build_id"),
+                "input_sha256": identity.get("input_sha256"),
+                "artifact_sha256": identity.get("artifact_sha256"),
+                "artifact_build_id": identity.get("artifact_build_id"),
+            })
+        return summaries
+
     def _verify_uploads(self) -> tuple[bool, str]:
         for artifact in self.manifest.artifacts():
             ok, remote = self.client.download_config(artifact.remote_name)
@@ -413,7 +429,11 @@ class Deployer:
                 return self._result(DeployState.TIMEOUT, "MCU registration wait expired")
             self._transition(DeployState.MCU_REGISTERED, "all expected MCUs registered", versions=versions)
 
-            self._transition(DeployState.VERIFYING_FIRMWARE, "verifying firmware fingerprint")
+            self._transition(
+                DeployState.VERIFYING_FIRMWARE,
+                "verifying firmware build identity",
+                identities=self._identity_summaries(),
+            )
             if self.verify_firmware:
                 wrong, missing = self._check_versions(versions)
                 if wrong or missing:
@@ -423,7 +443,11 @@ class Deployer:
                     if missing:
                         detail.append("missing MCU: " + ", ".join(missing))
                     return self._result(DeployState.FAILED_FLASH, "; ".join(detail), versions)
-            self._transition(DeployState.FIRMWARE_VERIFIED, "firmware fingerprint verified")
+            self._transition(
+                DeployState.FIRMWARE_VERIFIED,
+                "firmware build identity verified",
+                identities=self._identity_summaries(),
+            )
 
             self._transition(DeployState.APPLYING_CONFIG, "uploading configuration")
             for artifact in self.manifest.artifacts():

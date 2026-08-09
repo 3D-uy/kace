@@ -11,6 +11,7 @@ from core.moonraker_deployer import (
 )
 from core.snapshot import DeploymentSnapshot
 from core.terminal_progress import WorkflowEventEmitter
+from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 
 class Monitor:
@@ -302,6 +303,51 @@ class InstallationWorkflowTests(unittest.TestCase):
         result = self.make(client).run()
         self.assertEqual(result.state, DeployState.FAILED_FLASH)
         self.assertFalse(any(isinstance(c, tuple) and c[0] == "upload" for c in client.calls))
+
+    def test_previous_firmware_with_same_config_cannot_verify_after_failed_flash(self):
+        toolchain = ToolchainIdentity("make", "GNU Make 4.4", "gcc", "gcc 13")
+        config = 'CONFIG_MCU="stm32"\nCONFIG_USB=y\n'
+        previous = FirmwareBuildInputs.create(
+            klipper_commit="1" * 40,
+            canonical_config=config,
+            toolchain=toolchain,
+            build_id="a" * 32,
+        )
+        desired = FirmwareBuildInputs.create(
+            klipper_commit="2" * 40,
+            canonical_config=config,
+            toolchain=toolchain,
+            build_id="b" * 32,
+        ).complete(
+            artifact_sha256="c" * 64,
+            artifact_size=4096,
+            artifact_format="bin",
+        )
+        self.assertEqual(previous.config_sha256, desired.config_sha256)
+        self.assertNotEqual(previous.input_sha256, desired.input_sha256)
+
+        manifest = DeploymentManifest(
+            [McuTarget("mcu", desired.reported_version, desired.to_dict())],
+            self.printer,
+            self.macros,
+        )
+        client = Client({}, versions=[{"mcu": previous.reported_version}])
+        deployer = Deployer(
+            client,
+            manifest,
+            snapshot=self.snapshot,
+            mcu_monitor=Monitor(),
+            event_sink=lambda _event: None,
+            firmware_already_copied=True,
+        )
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
+
+        result = deployer.run()
+        self.assertEqual(result.state, DeployState.FAILED_FLASH)
+        self.assertFalse(
+            any(isinstance(call, tuple) and call[0] == "upload" for call in client.calls)
+        )
 
     def test_restart_and_second_ready(self):
         client = Client({}, states=["ready", "ready", "startup", "ready", "ready"])
