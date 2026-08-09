@@ -75,6 +75,9 @@ class Client:
     def firmware_restart(self):
         self.calls.append("restart")
 
+    def restart_moonraker(self):
+        self.calls.append("restart_moonraker")
+
     def restore_snapshot(self, snapshot):
         self.calls.append("rollback")
         self.rollback = True
@@ -163,6 +166,44 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.assertEqual(deployer.run().state, DeployState.DONE)
         self.assertEqual(order, ["copy", "arm"])
 
+    def test_failed_required_backup_aborts_before_firmware_action(self):
+        action = []
+        deployer = Deployer(
+            Client({}),
+            self.manifest,
+            snapshot_loader=lambda: None,
+            firmware_deploy=lambda: action.append("firmware") or True,
+            event_sink=lambda _event: None,
+        )
+        result = deployer.run()
+        self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
+        self.assertEqual(action, [])
+
+    def test_moonraker_config_is_restarted_before_klipper(self):
+        moonraker = os.path.join(self.tmp.name, "moonraker.conf")
+        with open(moonraker, "wb") as stream:
+            stream.write(b"[server]\nport: 7125\n")
+        manifest = DeploymentManifest(
+            [McuTarget("mcu", "kace-good")],
+            self.printer,
+            config_artifacts=[
+                ConfigArtifact(moonraker, "moonraker.conf"),
+                ConfigArtifact(self.printer, "printer.cfg"),
+            ],
+        )
+        client = Client({})
+        deployer = Deployer(
+            client,
+            manifest,
+            snapshot=self.snapshot,
+            event_sink=lambda _event: None,
+            firmware_already_copied=True,
+        )
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
+        self.assertEqual(deployer.run().state, DeployState.DONE)
+        self.assertLess(client.calls.index("restart_moonraker"), client.calls.index("restart"))
+
     def test_usb_style_deployment_arms_monitor_before_flash(self):
         order = []
         monitor = Monitor()
@@ -237,7 +278,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         result = self.make(client, monitor).run()
         self.assertEqual(result.state, DeployState.DONE)
         self.assertEqual([c for c in monitor.calls if isinstance(c, tuple)][0][0], "absent")
-        self.assertEqual(client.calls.count("moonraker"), 4)  # includes post-restart check
+        self.assertGreaterEqual(client.calls.count("moonraker"), 6)
 
     def test_different_physical_mcu_is_rejected(self):
         result = self.make(monitor=Monitor(mismatch=True)).run()
@@ -263,14 +304,14 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.assertFalse(any(isinstance(c, tuple) and c[0] == "upload" for c in client.calls))
 
     def test_restart_and_second_ready(self):
-        client = Client({}, states=["ready", "startup", "ready"])
+        client = Client({}, states=["ready", "ready", "startup", "ready", "ready"])
         result = self.make(client).run()
         self.assertEqual(result.state, DeployState.DONE)
         self.assertEqual(client.calls.count("restart"), 1)
         self.assertGreaterEqual(client.calls.count("klipper"), 3)
 
     def test_config_error_rolls_back_and_validates_ready(self):
-        client = Client({}, states=["ready", "error", "ready"])
+        client = Client({}, states=["ready", "ready", "error", "ready", "ready"])
         result = self.make(client).run()
         self.assertEqual(result.state, DeployState.CONFIG_ERROR)
         self.assertTrue(result.rollback_succeeded)

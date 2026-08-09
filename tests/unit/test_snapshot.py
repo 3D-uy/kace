@@ -3,14 +3,36 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 import sys
+import json
+import tempfile
 
 # Ensure root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from core.snapshot import capture_snapshot, restore_snapshot, DeploymentSnapshot
+from core.snapshot import capture_snapshot, create_snapshot, restore_snapshot, DeploymentSnapshot
 
 
 class TestSnapshot(unittest.TestCase):
+
+    def test_strict_snapshot_persists_hashes_and_confirmed_absence(self):
+        with tempfile.TemporaryDirectory() as root:
+            snap = create_snapshot(
+                {"printer.cfg": b"original", "kace/new.cfg": None},
+                persist_root=root,
+            )
+            with open(os.path.join(snap.storage_path, "snapshot.json"), encoding="utf-8") as source:
+                manifest = json.load(source)
+        self.assertEqual(manifest["schema"], "kace-config-snapshot/v1")
+        self.assertEqual(
+            manifest["sha256"]["printer.cfg"],
+            "0682c5f2076f099c34cfdd15a9e063849ed437a49677e6fcc5b4198c76575be5",
+        )
+        self.assertEqual(manifest["missing_files"], ["kace/new.cfg"])
+
+    def test_strict_snapshot_rejects_path_like_transaction_id(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaises(ValueError):
+                create_snapshot({"printer.cfg": b"x"}, deployment_id="../escape", persist_root=root)
 
     @patch('core.snapshot.download_printer_cfg')
     def test_capture_snapshot_success(self, mock_download):
@@ -65,6 +87,7 @@ class TestSnapshot(unittest.TestCase):
     @patch('core.snapshot.upload_printer_cfg')
     def test_restore_snapshot_upload_order_and_restart(self, mock_upload, mock_restart):
         mock_upload.return_value = (True, "OK")
+        mock_restart.return_value = (True, "OK")
 
         snap = DeploymentSnapshot(
             deployment_id="test-id",

@@ -13,9 +13,7 @@
 {% elif user.web_interface == 'Fluidd' -%}
 [include fluidd.cfg]
 {%- endif %}
-{% if user.include_macros or user.macros_generated -%}
-[include macros.cfg]
-{%- endif %}
+{# Generated macros are included by the deployment-managed root block. #}
 
 # --------------------------------------------------
 # MCU

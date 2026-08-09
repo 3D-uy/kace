@@ -19,6 +19,7 @@ class WorkflowOutcome(Enum):
     GENERATION_FAILED = 20
     FIRMWARE_FAILED = 30
     DEPLOYMENT_FAILED = 40
+    DEPLOYED_PENDING_ACTIVATION = 41
 
     @property
     def exit_code(self) -> int:
@@ -56,7 +57,15 @@ def cancelled(detail: str = "") -> WorkflowResult:
     return WorkflowResult(WorkflowOutcome.CANCELLED, detail)
 
 
+def pending_activation(detail: str = "") -> WorkflowResult:
+    return WorkflowResult(WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION, detail)
+
+
 def failed(outcome: WorkflowOutcome, detail: str) -> WorkflowResult:
-    if outcome in (WorkflowOutcome.SUCCESS, WorkflowOutcome.CANCELLED):
+    if outcome in (
+        WorkflowOutcome.SUCCESS,
+        WorkflowOutcome.CANCELLED,
+        WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION,
+    ):
         raise ValueError("failed() requires a failure outcome")
     return WorkflowResult(outcome, detail)

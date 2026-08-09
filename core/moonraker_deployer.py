@@ -90,8 +90,14 @@ class DeploymentManifest:
     printer_cfg_path: str
     macros_cfg_path: object = None
     auxiliary_files: list = field(default_factory=list)
+    config_artifacts: Optional[list] = None
 
     def artifacts(self) -> list[ConfigArtifact]:
+        if self.config_artifacts is not None:
+            return [
+                item if isinstance(item, ConfigArtifact) else ConfigArtifact(*item)
+                for item in self.config_artifacts
+            ]
         result = [ConfigArtifact(self.printer_cfg_path, "printer.cfg")]
         if self.macros_cfg_path and os.path.isfile(self.macros_cfg_path):
             result.append(ConfigArtifact(str(self.macros_cfg_path), "macros.cfg"))
@@ -235,14 +241,19 @@ class Deployer:
     def _wait_moonraker(self) -> bool:
         deadline = self._deadline()
         interval = self.POLL_INTERVAL_S
+        online_samples = 0
         while not self._expired(deadline):
             if self._cancelled():
                 raise McuMonitorCancelled("cancelled")
             try:
                 if self.client.is_moonraker_online():
-                    return True
+                    online_samples += 1
+                    if online_samples >= 2:
+                        return True
+                else:
+                    online_samples = 0
             except _NETWORK_ERRORS:
-                pass
+                online_samples = 0
             self._pause(interval)
             interval = min(interval * 1.5, self.POLL_BACKOFF_MAX_S)
         return False
@@ -251,12 +262,17 @@ class Deployer:
         deadline = self._deadline()
         interval = self.POLL_INTERVAL_S
         last = "disconnected"
+        ready_samples = 0
         while not self._expired(deadline):
             if self._cancelled():
                 raise McuMonitorCancelled("cancelled")
             last = self._safe_klippy_state()
             if last == "ready":
-                return True, last
+                ready_samples += 1
+                if ready_samples >= 2:
+                    return True, last
+            else:
+                ready_samples = 0
             if fail_on_config_error and last in ("shutdown", "error"):
                 return False, last
             self._pause(interval)
@@ -307,8 +323,20 @@ class Deployer:
         if failed:
             return False, "rollback upload failed: " + ", ".join(failed)
         self._transition(DeployState.VERIFYING_ROLLBACK, "waiting for Klipper Ready after rollback")
+        snapshot_names = set(self.snapshot.config_files) | set(
+            getattr(self.snapshot, "missing_files", ())
+        )
+        if "moonraker.conf" in snapshot_names:
+            try:
+                self.client.restart_moonraker()
+            except Exception as exc:
+                return False, f"Moonraker rollback restart failed: {exc}"
         if not self._wait_moonraker():
             return False, "Moonraker did not recover after rollback"
+        try:
+            self.client.firmware_restart()
+        except Exception as exc:
+            return False, f"Klipper rollback restart failed: {exc}"
         ready, state = self._wait_klipper_ready(fail_on_config_error=True)
         if not ready:
             return False, f"Klipper did not become Ready after rollback (state={state})"
@@ -321,6 +349,11 @@ class Deployer:
             if self.snapshot_loader is not None:
                 self._transition(DeployState.BACKUP, "capturing pre-deployment configuration")
                 self.snapshot = self.snapshot_loader()
+                if self.manifest.artifacts() and self.snapshot is None:
+                    return self._result(
+                        DeployState.FAILED_PRECONDITION,
+                        "configuration backup failed; firmware deployment was not started",
+                    )
 
             if self.monitor_before_firmware and self.mcu_monitor is not None:
                 self.mcu_monitor.arm()
@@ -401,6 +434,21 @@ class Deployer:
             if not upload_ok:
                 rollback_ok, rollback_detail = self._rollback()
                 return self._result(DeployState.FAILED_UPLOAD, f"{detail}; {rollback_detail}", versions, rollback_ok)
+
+            if any(
+                artifact.remote_name == "moonraker.conf"
+                for artifact in self.manifest.artifacts()
+            ):
+                self.client.restart_moonraker()
+                self._transition(DeployState.WAITING_MOONRAKER, "waiting for Moonraker after config reconciliation")
+                if not self._wait_moonraker():
+                    rollback_ok, rollback_detail = self._rollback()
+                    return self._result(
+                        DeployState.CONFIG_ERROR,
+                        f"Moonraker did not recover after config reconciliation; {rollback_detail}",
+                        versions,
+                        rollback_ok,
+                    )
 
             self._transition(DeployState.FIRMWARE_RESTART, "restarting Klipper")
             self.client.firmware_restart()

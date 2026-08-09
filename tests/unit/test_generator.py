@@ -638,14 +638,14 @@ class TestGenerateConfigMacros(unittest.TestCase):
         output = _generate(_parsed(), _user(), include_macros=False)
         self.assertNotIn("[include macros.cfg]", output)
 
-    def test_include_macros_true_adds_include_line(self):
-        """include_macros=True must add [include macros.cfg] to the output."""
+    def test_include_macros_true_leaves_include_ownership_to_deployment(self):
+        """Pure generation must not embed the legacy live-path include."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "printer.cfg")
             result = generate_config(
                 _parsed(), _user(), output_path=out, include_macros=True
             )
-        self.assertIn("[include macros.cfg]", result["content"])
+        self.assertNotIn("[include macros.cfg]", result["content"])
 
     def test_include_macros_true_creates_macros_cfg(self):
         """include_macros=True must also write a macros.cfg file alongside the output."""
@@ -658,18 +658,43 @@ class TestGenerateConfigMacros(unittest.TestCase):
             )
 
     def test_include_macros_fallback_to_user_data(self):
-        """A persisted macro choice must still add and create macros.cfg."""
+        """A persisted macro choice creates macros without coupling live paths."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "printer.cfg")
             user = _user(macros_generated=True)
             result = generate_config(
                 _parsed(), user, output_path=out, include_macros=False
             )
-            self.assertIn("[include macros.cfg]", result["content"])
+            self.assertNotIn("[include macros.cfg]", result["content"])
             self.assertTrue(
                 os.path.exists(os.path.join(tmpdir, "macros.cfg")),
                 "macros.cfg must be created when user_data['macros_generated']=True"
             )
+
+    def test_generation_does_not_touch_live_printer_or_moonraker_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = os.path.join(tmpdir, "output")
+            live_dir = os.path.join(tmpdir, "printer_data", "config")
+            os.makedirs(output_dir)
+            os.makedirs(live_dir)
+            live_printer = os.path.join(live_dir, "printer.cfg")
+            live_moonraker = os.path.join(live_dir, "moonraker.conf")
+            with open(live_printer, "wb") as target:
+                target.write(b"user printer bytes")
+            with open(live_moonraker, "wb") as target:
+                target.write(b"user moonraker bytes")
+
+            generate_config(
+                _parsed(),
+                _user(),
+                output_path=os.path.join(output_dir, "printer.cfg"),
+                include_macros=True,
+            )
+
+            with open(live_printer, "rb") as source:
+                self.assertEqual(source.read(), b"user printer bytes")
+            with open(live_moonraker, "rb") as source:
+                self.assertEqual(source.read(), b"user moonraker bytes")
 
 
 @_skip_no_jinja2

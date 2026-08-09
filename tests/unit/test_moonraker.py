@@ -19,8 +19,11 @@ from core.moonraker import (
     _base_url,
     check_moonraker,
     upload_printer_cfg,
+    delete_config_file,
+    list_config_files_checked,
     restart_firmware,
     restart_klipper_service,
+    restart_moonraker_service,
 )
 
 
@@ -256,6 +259,38 @@ class TestRestartKlipperService(unittest.TestCase):
         url_str = called_url.full_url if hasattr(called_url, "full_url") else str(called_url)
         self.assertIn("/machine/services/restart", url_str)
         self.assertIn("klipper", url_str)
+
+
+class TestStrictConfigOperations(unittest.TestCase):
+    @patch("core.moonraker._get")
+    def test_checked_listing_preserves_transport_failure(self, get):
+        get.return_value = (False, "connection refused", {})
+        ok, detail, files = list_config_files_checked("mypi", 7125)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "connection refused")
+        self.assertEqual(files, [])
+
+    @patch("core.moonraker._get")
+    def test_checked_listing_returns_nested_managed_paths(self, get):
+        get.return_value = (
+            True,
+            "OK",
+            {"result": [{"path": "printer.cfg"}, {"path": "kace/generated-hardware.cfg"}]},
+        )
+        self.assertEqual(
+            list_config_files_checked("mypi", 7125),
+            (True, "OK", ["printer.cfg", "kace/generated-hardware.cfg"]),
+        )
+
+    @patch("core.moonraker._delete", return_value=(True, "OK", {}))
+    def test_delete_encodes_each_path_component(self, delete):
+        self.assertEqual(delete_config_file("mypi", 7125, "kace/name with space.cfg"), (True, "OK"))
+        self.assertIn("/kace/name%20with%20space.cfg", delete.call_args.args[0])
+
+    @patch("core.moonraker._post", return_value=(True, "OK", {}))
+    def test_restart_moonraker_uses_machine_service_endpoint(self, post):
+        self.assertTrue(restart_moonraker_service("mypi", 7125)[0])
+        self.assertIn("service=moonraker", post.call_args.args[0])
 
 
 if __name__ == "__main__":

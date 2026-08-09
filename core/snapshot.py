@@ -12,13 +12,23 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
 import os
+import re
+import shutil
+import stat
 import tempfile
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from core.moonraker import download_printer_cfg, upload_printer_cfg, restart_firmware
+from core.moonraker import (
+    delete_config_file,
+    download_printer_cfg,
+    upload_printer_cfg,
+    restart_firmware,
+)
 
 
 # ── Public dataclass ─────────────────────────────────────────────────────────
@@ -64,6 +74,106 @@ class DeploymentSnapshot:
     mcus: Tuple[str, ...]
     dev_deploy: bool
     config_files: Dict[str, bytes] = field(default_factory=dict, hash=False, compare=False)
+    missing_files: Tuple[str, ...] = ()
+    storage_path: str = ""
+
+
+def create_snapshot(
+    originals: Dict[str, Optional[bytes]],
+    *,
+    deployment_id: Optional[str] = None,
+    manifest_mcus: Tuple[str, ...] = (),
+    dev_deploy: bool = False,
+    board: str = "",
+    kace_version: str = "unknown",
+    firmware_fingerprint: str = "",
+    persist_root: Optional[str] = None,
+) -> DeploymentSnapshot:
+    """Persist a strict snapshot from confirmed existing/absent file facts.
+
+    A value of ``None`` means the caller positively confirmed that the remote
+    file did not exist. Read errors must be raised before calling this helper.
+    """
+    transaction_id = deployment_id or str(uuid.uuid4())
+    if (
+        transaction_id in {"", ".", ".."}
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", transaction_id)
+    ):
+        raise ValueError("deployment_id is not a safe snapshot directory name")
+    existing = {name: data for name, data in originals.items() if data is not None}
+    missing = tuple(name for name, data in originals.items() if data is None)
+    captured_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    root = os.path.expanduser(persist_root or "~/kace/snapshots")
+    transaction_dir = os.path.join(root, transaction_id)
+    staging_dir = os.path.join(root, f".{transaction_id}.tmp-{uuid.uuid4().hex}")
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    os.makedirs(staging_dir, mode=0o700, exist_ok=False)
+    os.chmod(staging_dir, stat.S_IRWXU)
+
+    def _fsync_directory(path: str) -> None:
+        if os.name != "posix":
+            return
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _publish(name: str, payload: bytes) -> None:
+        path = os.path.join(staging_dir, name)
+        fd, temporary = tempfile.mkstemp(prefix=f".{name}.", dir=staging_dir)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+            os.replace(temporary, path)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
+
+    try:
+        for remote_name, data in existing.items():
+            _publish(remote_name.replace("/", "__"), data)
+        metadata = json.dumps({
+            "schema": "kace-config-snapshot/v1",
+            "deployment_id": transaction_id,
+            "timestamp": captured_at,
+            "board": board,
+            "kace_version": kace_version,
+            "files": sorted(existing),
+            "sha256": {
+                name: hashlib.sha256(data).hexdigest()
+                for name, data in sorted(existing.items())
+            },
+            "missing_files": list(missing),
+        }, sort_keys=True).encode("utf-8") + b"\n"
+        _publish("snapshot.json", metadata)
+        # Publishing the directory is the commit point. A failed snapshot is
+        # never exposed under its final transaction ID.
+        _fsync_directory(staging_dir)
+        os.replace(staging_dir, transaction_dir)
+        _fsync_directory(root)
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+    return DeploymentSnapshot(
+        deployment_id=transaction_id,
+        timestamp=captured_at,
+        board=board,
+        kace_version=kace_version,
+        firmware_fingerprint=firmware_fingerprint,
+        mcus=tuple(manifest_mcus),
+        dev_deploy=dev_deploy,
+        config_files=dict(existing),
+        missing_files=missing,
+        storage_path=transaction_dir,
+    )
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────
@@ -209,10 +319,21 @@ def restore_snapshot(
                 except OSError:
                     pass
 
+    # Files confirmed absent before deployment must not survive rollback.
+    for filename in snapshot.missing_files:
+        try:
+            ok, _ = delete_config_file(host, port, filename, api_key=api_key)
+            if not ok:
+                failed.append(filename)
+        except Exception:
+            failed.append(filename)
+
     if issue_restart:
         try:
-            restart_firmware(host, port, api_key=api_key)
+            ok, _ = restart_firmware(host, port, api_key=api_key)
+            if not ok:
+                failed.append("<restart>")
         except Exception:
-            pass  # Restart failure is non-fatal for the restore operation itself.
+            failed.append("<restart>")
 
     return failed

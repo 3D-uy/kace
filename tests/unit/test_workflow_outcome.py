@@ -27,6 +27,7 @@ class TestWorkflowOutcomeContract(unittest.TestCase):
                 "GENERATION_FAILED": 20,
                 "FIRMWARE_FAILED": 30,
                 "DEPLOYMENT_FAILED": 40,
+                "DEPLOYED_PENDING_ACTIVATION": 41,
             },
         )
 
@@ -49,7 +50,11 @@ class TestWorkflowOutcomeContract(unittest.TestCase):
         )
 
     def test_failed_rejects_non_failure_outcomes(self):
-        for outcome in (WorkflowOutcome.SUCCESS, WorkflowOutcome.CANCELLED):
+        for outcome in (
+            WorkflowOutcome.SUCCESS,
+            WorkflowOutcome.CANCELLED,
+            WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION,
+        ):
             with self.assertRaises(ValueError):
                 failed(outcome, "invalid")
 

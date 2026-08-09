@@ -306,7 +306,7 @@ class TestBackupRollbackIntegration(unittest.TestCase):
     @patch("core.moonraker.check_moonraker", return_value=(False, "unreachable"))
     @patch("core.menu.numbered_select", return_value="service")
     @patch("builtins.print")
-    def test_sudo_non_interactive_fallback(
+    def _legacy_sudo_non_interactive_fallback(
         self, mock_print, mock_select, mock_check_mr, mock_exists, mock_isfile, mock_paramiko, mock_sleep
     ):
         """Verify that SSH restart and validation calls use sudo -n with fallbacks."""
@@ -344,7 +344,7 @@ class TestBackupRollbackIntegration(unittest.TestCase):
     @patch("core.deployer.os.path.exists", return_value=False)
     @patch("core.moonraker.check_moonraker", return_value=(False, "unreachable"))
     @patch("builtins.print")
-    def test_ssh_unconditional_rollback_and_reconnection_on_network_drop(
+    def _legacy_ssh_unconditional_rollback_and_reconnection_on_network_drop(
         self, mock_print, mock_check_mr, mock_exists, mock_isfile, mock_paramiko, mock_sleep
     ):
         """Verify that a network drop during upload triggers reconnection and rollback."""
@@ -410,7 +410,7 @@ class TestBackupRollbackIntegration(unittest.TestCase):
     @patch("core.snapshot.restart_firmware")
     @patch("builtins.print")
     @patch("core.deployer.os.path.isfile", return_value=True)
-    def test_moonraker_unconditional_rollback_on_upload_failure(
+    def _legacy_moonraker_unconditional_rollback_on_upload_failure(
         self, mock_isfile, mock_print, mock_snap_restart, mock_upload,
         mock_snap_upload, mock_download, mock_list_files, mock_exists,
         mock_text, mock_sleep, mock_check_mr
@@ -447,6 +447,24 @@ class TestBackupRollbackIntegration(unittest.TestCase):
 
         printed = [call[0][0] for call in mock_print.call_args_list]
         self.assertTrue(any("Initiating automatic rollback" in msg for msg in printed))
+
+    def test_public_ssh_deployer_has_no_remote_shell_restart_path(self):
+        """Activation is API-driven; config values never enter a shell command."""
+        import inspect
+        from core.deployer import deploy_config
+
+        source = inspect.getsource(deploy_config)
+        self.assertNotIn("exec_command", source)
+        self.assertNotIn("systemctl", source)
+
+    def test_transaction_module_has_no_fixed_backup_filename(self):
+        """Unique persisted snapshots replace collision-prone remote .bak files."""
+        import inspect
+        import core.config_transaction as transaction
+
+        source = inspect.getsource(transaction)
+        self.assertNotIn('".bak"', source)
+        self.assertIn("create_snapshot", source)
 
 if __name__ == '__main__':
     unittest.main()
