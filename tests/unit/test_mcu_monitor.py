@@ -1,4 +1,5 @@
 import threading
+import inspect
 import unittest
 from unittest.mock import patch
 
@@ -311,14 +312,20 @@ class McuMonitorTests(unittest.TestCase):
         with self.assertRaises(McuMonitorUnavailable):
             monitor.arm()
 
-    def test_indefinite_wait_is_cancelable(self):
+    def test_default_monitor_waits_have_a_finite_deadline(self):
+        for method in (McuPresenceMonitor.wait_for_absent, McuPresenceMonitor.wait_for_present):
+            default = inspect.signature(method).parameters["timeout"].default
+            self.assertIsInstance(default, (int, float))
+            self.assertGreater(default, 0)
+
+    def test_bounded_wait_is_cancelable(self):
         baseline = self.identity()
         monitor = self.make([baseline, baseline], Source())
         monitor.arm()
         cancelled = threading.Event()
         cancelled.set()
         with self.assertRaises(McuMonitorCancelled):
-            monitor.wait_for_absent(cancel_event=cancelled, timeout=None)
+            monitor.wait_for_absent(cancel_event=cancelled, timeout=1.0)
 
     @patch("core.mcu_monitor.os.path.realpath")
     @patch("core.mcu_monitor.glob.glob")

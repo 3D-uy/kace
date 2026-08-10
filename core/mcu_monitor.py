@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 import glob
+import math
 import os
 import re
 import shutil
@@ -515,33 +516,38 @@ class McuPresenceMonitor:
             self._mismatch.set()
 
     @staticmethod
-    def _wait(event: threading.Event, cancel_event: threading.Event, timeout=None) -> bool:
-        deadline = None if timeout is None else time.monotonic() + timeout
+    def _wait(event: threading.Event, cancel_event: threading.Event, timeout=120.0) -> bool:
+        if not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("MCU wait timeout must be a finite positive number")
+        deadline = time.monotonic() + timeout
         while not event.wait(0.1):
             if cancel_event.is_set():
                 raise McuMonitorCancelled("MCU wait cancelled by user")
-            if deadline is not None and time.monotonic() >= deadline:
+            if time.monotonic() >= deadline:
                 return False
         return True
 
-    def wait_until_absent(self, cancel_event: threading.Event) -> None:
-        if not self._armed:
-            raise McuMonitorError("MCU monitor was not armed")
-        self._wait(self._absent, cancel_event)
-
-    def wait_until_present(self, cancel_event: threading.Event) -> McuIdentity:
-        return self.wait_for_present(cancel_event=cancel_event, timeout=None)
-
-    def wait_for_absent(self, *, cancel_event: threading.Event, timeout=None) -> None:
+    def wait_until_absent(self, cancel_event: threading.Event, timeout=120.0) -> None:
         if not self._armed:
             raise McuMonitorError("MCU monitor was not armed")
         if not self._wait(self._absent, cancel_event, timeout):
             raise TimeoutError("MCU did not disappear before the configured deadline")
 
-    def wait_for_present(self, *, cancel_event: threading.Event, timeout=None) -> McuIdentity:
+    def wait_until_present(self, cancel_event: threading.Event, timeout=120.0) -> McuIdentity:
+        return self.wait_for_present(cancel_event=cancel_event, timeout=timeout)
+
+    def wait_for_absent(self, *, cancel_event: threading.Event, timeout=120.0) -> None:
         if not self._armed:
             raise McuMonitorError("MCU monitor was not armed")
-        deadline = None if timeout is None else time.monotonic() + timeout
+        if not self._wait(self._absent, cancel_event, timeout):
+            raise TimeoutError("MCU did not disappear before the configured deadline")
+
+    def wait_for_present(self, *, cancel_event: threading.Event, timeout=120.0) -> McuIdentity:
+        if not self._armed:
+            raise McuMonitorError("MCU monitor was not armed")
+        if not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("MCU wait timeout must be a finite positive number")
+        deadline = time.monotonic() + timeout
         while True:
             if self._mismatch.is_set():
                 detail = self.last_assessment.describe() if self.last_assessment else "identity mismatch"
@@ -568,7 +574,7 @@ class McuPresenceMonitor:
                 return self.reconnected
             if cancel_event.is_set():
                 raise McuMonitorCancelled("MCU wait cancelled by user")
-            if deadline is not None and time.monotonic() >= deadline:
+            if time.monotonic() >= deadline:
                 raise TimeoutError("MCU did not reappear before the configured deadline")
 
     def close(self) -> None:

@@ -16,6 +16,7 @@ from core.moonraker_deployer import (
     ConfigArtifact,
     Deployer,
     DeploymentManifest,
+    DeploymentTimeouts,
     DeployState,
     JsonEventSink,
     McuTarget,
@@ -178,7 +179,7 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
         )
         deployer.POLL_INTERVAL_S = 0.001
         deployer.POLL_BACKOFF_MAX_S = 0.002
-        deployer.WAIT_TIMEOUT_S = 0.2
+        deployer.timeouts = DeploymentTimeouts(0.2, 0.2, 0.2, 0.2, 0.2)
         return deployer, transcript
 
     def test_sd_power_cycle_runs_real_contracts_in_safe_order(self):
@@ -377,7 +378,7 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             )
             deployer.POLL_INTERVAL_S = 0.001
             deployer.POLL_BACKOFF_MAX_S = 0.002
-            deployer.WAIT_TIMEOUT_S = 0.2
+            deployer.timeouts = DeploymentTimeouts(0.2, 0.2, 0.2, 0.2, 0.2)
 
             with patch("firmware.deployment.usb.shutil.which", return_value="/usr/bin/avrdude"):
                 result = deployer.run()
@@ -436,7 +437,7 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             lab.version_after_reconnect = artifact.firmware_identity.reported_version
             deployer, transcript = self._manual_sd_deployer(lab, artifact)
             lab.moonraker_available = False
-            deployer.WAIT_TIMEOUT_S = 0.02
+            deployer.timeouts = DeploymentTimeouts(0.2, 0.2, 0.02, 0.2, 0.2)
 
             result = deployer.run()
 

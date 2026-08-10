@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
 import threading
@@ -17,7 +18,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import Callable, ClassVar, Mapping, Optional
 
 from core.mcu_monitor import McuIdentityMismatch, McuMonitorCancelled, McuMonitorError
 from core.terminal_progress import TerminalProgressRenderer, WorkflowEventEmitter
@@ -78,6 +79,47 @@ class McuTarget:
     name: str
     expected_version: str
     firmware_identity: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class DeploymentTimeouts:
+    """Finite deadlines for each non-interactive deployment wait."""
+
+    mcu_disconnect_s: float = 120.0
+    mcu_reenumeration_s: float = 180.0
+    moonraker_s: float = 90.0
+    klipper_ready_s: float = 120.0
+    mcu_registration_s: float = 120.0
+
+    _ENV_FIELDS: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("KACE_TIMEOUT_MCU_DISCONNECT_S", "mcu_disconnect_s"),
+        ("KACE_TIMEOUT_MCU_REENUMERATION_S", "mcu_reenumeration_s"),
+        ("KACE_TIMEOUT_MOONRAKER_S", "moonraker_s"),
+        ("KACE_TIMEOUT_KLIPPER_READY_S", "klipper_ready_s"),
+        ("KACE_TIMEOUT_MCU_REGISTRATION_S", "mcu_registration_s"),
+    )
+
+    def __post_init__(self) -> None:
+        env_by_field = {field: env for env, field in self._ENV_FIELDS}
+        for field_name in env_by_field:
+            value = getattr(self, field_name)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{env_by_field[field_name]} must be a finite positive number")
+            object.__setattr__(self, field_name, float(value))
+
+    @classmethod
+    def from_env(cls, environment: Optional[Mapping[str, str]] = None) -> "DeploymentTimeouts":
+        source = os.environ if environment is None else environment
+        values = {}
+        for env_name, field_name in cls._ENV_FIELDS:
+            raw = source.get(env_name)
+            if raw is None:
+                continue
+            try:
+                values[field_name] = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{env_name} must be a finite positive number") from exc
+        return cls(**values)
 
 
 @dataclass(frozen=True)
@@ -149,7 +191,6 @@ class JsonEventSink:
 class Deployer:
     """Execute one firmware/config transaction from physical reboot to DONE."""
 
-    WAIT_TIMEOUT_S = None  # user waits are indefinite by default
     POLL_INTERVAL_S = 1.0
     POLL_BACKOFF_MAX_S = 5.0
 
@@ -173,6 +214,7 @@ class Deployer:
         firmware_deploy: Optional[Callable[[], object]] = None,
         monitor_before_firmware: bool = False,
         firmware_already_copied: bool = False,
+        timeouts: Optional[DeploymentTimeouts] = None,
     ):
         self.client = client
         self.manifest = manifest
@@ -190,6 +232,7 @@ class Deployer:
         self.firmware_deploy = firmware_deploy
         self.monitor_before_firmware = monitor_before_firmware
         self.firmware_already_copied = firmware_already_copied
+        self.timeouts = timeouts if timeouts is not None else DeploymentTimeouts.from_env()
         self.state = DeployState.INIT
         self.workflow_id = str(uuid.uuid4())
         self._sequence = 0
@@ -247,8 +290,9 @@ class Deployer:
     def _cancelled(self) -> bool:
         return self.cancel_event.is_set()
 
-    def _deadline(self):
-        return None if self.WAIT_TIMEOUT_S is None else time.monotonic() + self.WAIT_TIMEOUT_S
+    @staticmethod
+    def _deadline(timeout: float):
+        return time.monotonic() + timeout
 
     @staticmethod
     def _expired(deadline) -> bool:
@@ -271,7 +315,7 @@ class Deployer:
             return {}
 
     def _wait_moonraker(self) -> bool:
-        deadline = self._deadline()
+        deadline = self._deadline(self.timeouts.moonraker_s)
         interval = self.POLL_INTERVAL_S
         online_samples = 0
         while not self._expired(deadline):
@@ -291,7 +335,7 @@ class Deployer:
         return False
 
     def _wait_klipper_ready(self, *, fail_on_config_error: bool) -> tuple[bool, str]:
-        deadline = self._deadline()
+        deadline = self._deadline(self.timeouts.klipper_ready_s)
         interval = self.POLL_INTERVAL_S
         last = "disconnected"
         ready_samples = 0
@@ -312,7 +356,7 @@ class Deployer:
         return False, last
 
     def _wait_mcu_registered(self) -> Optional[dict]:
-        deadline = self._deadline()
+        deadline = self._deadline(self.timeouts.mcu_registration_s)
         interval = self.POLL_INTERVAL_S
         while not self._expired(deadline):
             if self._cancelled():
@@ -527,7 +571,10 @@ class Deployer:
                         )
 
                 self._transition(DeployState.AWAITING_DISCONNECT, "waiting for physical MCU removal")
-                self.mcu_monitor.wait_for_absent(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
+                self.mcu_monitor.wait_for_absent(
+                    cancel_event=self.cancel_event,
+                    timeout=self.timeouts.mcu_disconnect_s,
+                )
                 self._transition(DeployState.MCU_ABSENT, "physical MCU absent")
 
                 if media_prepared:
@@ -561,7 +608,10 @@ class Deployer:
                     DeployState.AWAITING_REENUMERATION,
                     "waiting for the same physical MCU to reenumerate",
                 )
-                identity = self.mcu_monitor.wait_for_present(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
+                identity = self.mcu_monitor.wait_for_present(
+                    cancel_event=self.cancel_event,
+                    timeout=self.timeouts.mcu_reenumeration_s,
+                )
                 assessment = getattr(self.mcu_monitor, "last_assessment", None)
                 identity_data = identity.to_dict() if hasattr(identity, "to_dict") else {}
                 assessment_data = (

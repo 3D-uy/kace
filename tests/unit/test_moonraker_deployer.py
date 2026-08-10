@@ -13,7 +13,7 @@ from core.mcu_monitor import (
     McuMonitorCancelled,
 )
 from core.moonraker_deployer import (
-    ConfigArtifact, Deployer, DeploymentManifest, DeployState, McuTarget,
+    ConfigArtifact, Deployer, DeploymentManifest, DeploymentTimeouts, DeployState, McuTarget,
 )
 from core.snapshot import DeploymentSnapshot
 from core.terminal_progress import WorkflowEventEmitter
@@ -127,13 +127,14 @@ class InstallationWorkflowTests(unittest.TestCase):
     def test_quick_disconnect_is_not_lost_and_monitor_is_armed_before_prompt(self):
         monitor = Monitor()
         observed = []
-        result = self.make(
+        deployer = self.make(
             monitor=monitor,
             prompt=lambda: observed.append(list(monitor.calls)) or True,
-        ).run()
+        )
+        result = deployer.run()
         self.assertEqual(result.state, DeployState.DONE)
         self.assertEqual(observed, [["arm"]])
-        self.assertIn(("absent", None), monitor.calls)
+        self.assertIn(("absent", deployer.timeouts.mcu_disconnect_s), monitor.calls)
 
     def test_moonraker_power_cycle_wraps_the_existing_mcu_monitor_states(self):
         order = []
@@ -192,7 +193,7 @@ class InstallationWorkflowTests(unittest.TestCase):
 
         self.assertEqual(result.state, DeployState.CANCELLED)
         self.assertEqual(order, ["confirmation"])
-        self.assertNotIn(("absent", None), monitor.calls)
+        self.assertFalse(any(call[0] == "absent" for call in monitor.calls if isinstance(call, tuple)))
         self.assertEqual(events[-1]["state"], "CANCELLED")
 
     def test_cancel_while_relay_is_off_never_powers_back_on(self):
@@ -352,12 +353,19 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.assertEqual(result.state, DeployState.FAILED_FLASH)
         self.assertNotIn("arm", monitor.calls)
 
-    def test_wait_is_indefinite_by_default(self):
+    def test_physical_waits_use_distinct_finite_stage_timeouts(self):
         monitor = Monitor()
         deployer = self.make(monitor=monitor)
-        self.assertIsNone(deployer.WAIT_TIMEOUT_S)
+        deployer.timeouts = DeploymentTimeouts(
+            mcu_disconnect_s=11,
+            mcu_reenumeration_s=12,
+            moonraker_s=13,
+            klipper_ready_s=14,
+            mcu_registration_s=15,
+        )
         deployer.run()
-        self.assertIn(("present", None), monitor.calls)
+        self.assertIn(("absent", 11), monitor.calls)
+        self.assertIn(("present", 12), monitor.calls)
 
     def test_cancellation_returns_aborted_without_upload(self):
         monitor = Monitor(cancel=True)
