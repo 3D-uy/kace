@@ -39,6 +39,8 @@ class DeployState(Enum):
     FLASHING = auto()
     AWAITING_POWER_CYCLE = auto()
     AWAITING_REENUMERATION = auto()
+    AWAITING_MCU_CONFIRMATION = auto()
+    MCU_IDENTITY_CONFIRMED = auto()
     COPYING_FIRMWARE = auto()
     FIRMWARE_COPIED = auto()
     MONITOR_ARMED = auto()
@@ -161,6 +163,7 @@ class Deployer:
         mcu_monitor=None,
         power_cycle_prompt: Optional[Callable[[], bool]] = None,
         media_installation_prompt: Optional[Callable[[], bool]] = None,
+        identity_confirmation_prompt: Optional[Callable[[object], bool]] = None,
         power_off: Optional[Callable[[], object]] = None,
         power_on: Optional[Callable[[], object]] = None,
         cancel_event: Optional[threading.Event] = None,
@@ -178,6 +181,7 @@ class Deployer:
         self.mcu_monitor = mcu_monitor
         self.power_cycle_prompt = power_cycle_prompt
         self.media_installation_prompt = media_installation_prompt
+        self.identity_confirmation_prompt = identity_confirmation_prompt
         self.power_off = power_off
         self.power_on = power_on
         self.cancel_event = cancel_event or threading.Event()
@@ -201,6 +205,24 @@ class Deployer:
             self.event_sink = WorkflowEventEmitter(JsonEventSink(sys.stdout), renderer)
         else:
             self.event_sink = event_sink
+        if self.mcu_monitor is not None and self.identity_confirmation_prompt is not None:
+            self.mcu_monitor.ambiguity_resolver = self._confirm_ambiguous_identity
+
+    def _confirm_ambiguous_identity(self, assessment) -> bool:
+        data = assessment.to_dict() if hasattr(assessment, "to_dict") else {}
+        self._transition(
+            DeployState.AWAITING_MCU_CONFIRMATION,
+            "physical MCU identity requires explicit confirmation",
+            identity_assessment=data,
+        )
+        confirmed = self.identity_confirmation_prompt(assessment) is True
+        if confirmed:
+            self._transition(
+                DeployState.MCU_IDENTITY_CONFIRMED,
+                "operator physically confirmed the ambiguous MCU identity",
+                identity_assessment=data,
+            )
+        return confirmed
 
     def _transition(self, state: DeployState, detail: str = "", **data) -> None:
         self.state = state
@@ -455,9 +477,16 @@ class Deployer:
 
             if self.mcu_monitor is not None:
                 if not monitor_armed:
-                    self.mcu_monitor.arm()
+                    baseline = self.mcu_monitor.arm()
                     monitor_armed = True
-                    self._transition(DeployState.MONITOR_ARMED, "physical MCU monitor armed")
+                    baseline_data = (
+                        baseline.to_dict() if hasattr(baseline, "to_dict") else None
+                    )
+                    self._transition(
+                        DeployState.MONITOR_ARMED,
+                        "physical MCU monitor armed",
+                        **({"baseline_identity": baseline_data} if baseline_data else {}),
+                    )
 
                 if media_prepared:
                     if self.power_off:
@@ -533,7 +562,21 @@ class Deployer:
                     "waiting for the same physical MCU to reenumerate",
                 )
                 identity = self.mcu_monitor.wait_for_present(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
-                self._transition(DeployState.MCU_PRESENT, "same physical MCU present", device=identity.device_node)
+                assessment = getattr(self.mcu_monitor, "last_assessment", None)
+                identity_data = identity.to_dict() if hasattr(identity, "to_dict") else {}
+                assessment_data = (
+                    assessment.to_dict() if hasattr(assessment, "to_dict") else {}
+                )
+                self._transition(
+                    DeployState.MCU_PRESENT,
+                    "physical MCU identity accepted",
+                    device=identity.device_node,
+                    identity=identity_data,
+                    identity_assessment=assessment_data,
+                    manually_confirmed=bool(
+                        getattr(self.mcu_monitor, "manual_confirmation_used", False)
+                    ),
+                )
 
             self._transition(DeployState.WAITING_MOONRAKER, "waiting for Moonraker")
             if not self._wait_moonraker():

@@ -512,6 +512,22 @@ class FirmwareDeploymentTests(unittest.TestCase):
         finally:
             os.remove(path)
 
+    def test_sd_profile_requires_post_flash_application_vid_pid_allowlist(self):
+        path = write_profile_file(
+            valid_profile_payload(
+                usb={
+                    "topology": "NATIVE_USB_CDC",
+                    "application_vid_pids": [],
+                    "bootloader_vid_pids": ["0483:df11"],
+                }
+            )
+        )
+        try:
+            with self.assertRaisesRegex(DeploymentProfileError, "post-flash application"):
+                load_profiles(path)
+        finally:
+            os.remove(path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1070,6 +1070,15 @@ def deploy_firmware_installation(user_data):
     )
 
     method = prepared.plan.method.value
+    profile_usb = getattr(profile, "usb", None)
+    expected_vid_pids = tuple(getattr(profile_usb, "application_vid_pids", ()))
+    bootloader_vid_pids = tuple(getattr(profile_usb, "bootloader_vid_pids", ()))
+    if not expected_vid_pids:
+        bundle.cleanup()
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            "physical firmware strategy has no post-flash application VID:PID contract",
+        )
 
     def _run_firmware_method():
         result = service.execute(prepared, _firmware_execution_context(user_data))
@@ -1092,8 +1101,44 @@ def deploy_firmware_installation(user_data):
         print("\033[93m    Press Ctrl+C or answer no to cancel safely.\033[0m")
         return bool(yes_no(prompt, default=False))
 
+    def _confirm_ambiguous_mcu_identity(assessment):
+        baseline = assessment.baseline
+        candidate = assessment.candidate
+        print("\n\033[91m[!] KACE cannot prove that the reenumerated MCU is the same board.\033[0m")
+        for reason in assessment.reasons:
+            print(f"\033[93m    - {reason}\033[0m")
+        print(
+            "\033[93m    Captured port/by-path: "
+            f"{baseline.physical_port or baseline.physical_path or ', '.join(baseline.by_path) or 'unavailable'}"
+            "\033[0m"
+        )
+        print(
+            "\033[93m    Candidate port/by-path: "
+            f"{candidate.physical_port or candidate.physical_path or ', '.join(candidate.by_path) or 'unavailable'}"
+            "\033[0m"
+        )
+        print(
+            f"\033[93m    Candidate VID:PID: {candidate.vid_pid or 'unavailable'}; "
+            f"serial: {candidate.serial or 'unavailable'}\033[0m"
+        )
+        print(
+            f"\033[93m    Evidence score: {assessment.score}/"
+            f"{assessment.automatic_threshold} required for automatic acceptance.\033[0m"
+        )
+        print("\033[91m    Confirm only after physically tracing the cable/controller.\033[0m")
+        return bool(
+            yes_no(
+                "Did you physically verify this candidate is the intended MCU?",
+                default=False,
+            )
+        )
+
     try:
-        monitor = McuPresenceMonitor(mcu_path)
+        monitor = McuPresenceMonitor(
+            mcu_path,
+            expected_vid_pids=expected_vid_pids,
+            bootloader_vid_pids=bootloader_vid_pids,
+        )
         return Deployer(
             client,
             manifest,
@@ -1110,6 +1155,7 @@ def deploy_firmware_installation(user_data):
             media_installation_prompt=(
                 _confirm_media_installation if method == "MANUAL" else None
             ),
+            identity_confirmation_prompt=_confirm_ambiguous_mcu_identity,
             power_off=power_controller.power_off if power_controller is not None else None,
             power_on=power_controller.power_on if power_controller is not None else None,
             firmware_deploy=_run_firmware_method,

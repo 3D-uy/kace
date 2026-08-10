@@ -6,7 +6,12 @@ import threading
 import unittest
 from types import SimpleNamespace
 
-from core.mcu_monitor import McuIdentity, McuIdentityMismatch, McuMonitorCancelled
+from core.mcu_monitor import (
+    McuIdentity,
+    McuIdentityAmbiguous,
+    McuIdentityMismatch,
+    McuMonitorCancelled,
+)
 from core.moonraker_deployer import (
     ConfigArtifact, Deployer, DeploymentManifest, DeployState, McuTarget,
 )
@@ -398,6 +403,68 @@ class InstallationWorkflowTests(unittest.TestCase):
     def test_different_physical_mcu_is_rejected(self):
         result = self.make(monitor=Monitor(mismatch=True)).run()
         self.assertEqual(result.state, DeployState.FAILED_MONITOR)
+
+    def test_unresolved_ambiguous_mcu_is_rejected(self):
+        monitor = Monitor()
+        monitor.wait_for_present = lambda **_kwargs: (_ for _ in ()).throw(
+            McuIdentityAmbiguous("insufficient topology evidence")
+        )
+
+        result = self.make(monitor=monitor).run()
+
+        self.assertEqual(result.state, DeployState.FAILED_MONITOR)
+        self.assertIn("insufficient topology", result.detail)
+
+    def test_accepted_identity_evidence_is_emitted_for_audit(self):
+        monitor = Monitor()
+        assessment = SimpleNamespace(
+            to_dict=lambda: {
+                "verdict": "AMBIGUOUS",
+                "score": 80,
+                "reasons": ["serial changed"],
+            }
+        )
+        monitor.last_assessment = assessment
+        monitor.manual_confirmation_used = False
+        identity = McuIdentity(
+            "/dev/serial/by-id/mcu", "/dev/ttyACM1", serial="same"
+        )
+
+        def wait_for_present(**_kwargs):
+            self.assertTrue(monitor.ambiguity_resolver(assessment))
+            monitor.manual_confirmation_used = True
+            return identity
+
+        monitor.wait_for_present = wait_for_present
+        events = []
+        deployer = Deployer(
+            Client({}),
+            self.manifest,
+            snapshot=self.snapshot,
+            mcu_monitor=monitor,
+            power_cycle_prompt=lambda: True,
+            identity_confirmation_prompt=lambda value: value is assessment,
+            event_sink=events.append,
+            firmware_already_copied=True,
+        )
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
+
+        result = deployer.run()
+
+        self.assertEqual(result.state, DeployState.DONE)
+        states = [event["state"] for event in events]
+        self.assertLess(
+            states.index("AWAITING_MCU_CONFIRMATION"),
+            states.index("MCU_IDENTITY_CONFIRMED"),
+        )
+        self.assertLess(
+            states.index("MCU_IDENTITY_CONFIRMED"), states.index("MCU_PRESENT")
+        )
+        present = next(event for event in events if event["state"] == "MCU_PRESENT")
+        self.assertTrue(present["data"]["manually_confirmed"])
+        self.assertEqual(present["data"]["identity_assessment"]["score"], 80)
+        self.assertEqual(present["data"]["identity"]["serial"], "same")
 
     def test_no_upload_before_fingerprint_and_each_file_once(self):
         events = []

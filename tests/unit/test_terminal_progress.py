@@ -59,6 +59,21 @@ class TerminalProgressRendererTests(unittest.TestCase):
         self.assertIn("MOONRAKER_ONLINE: reachable", rendered)
         self.assertNotIn("\033", rendered)
 
+    def test_ambiguous_identity_confirmation_has_an_explicit_milestone(self):
+        output = FakeTTY()
+        renderer = TerminalProgressRenderer(output, interactive=True)
+
+        renderer(
+            event(
+                state="AWAITING_MCU_CONFIRMATION",
+                detail="physical confirmation required",
+            )
+        )
+
+        rendered = output.getvalue()
+        self.assertIn("[>] MCU identity confirmed", rendered)
+        self.assertIn("Detail: physical confirmation required", rendered)
+
     def test_limited_terminal_and_ci_disable_dynamic_ansi(self):
         for environment in ({"TERM": "dumb"}, {"TERM": "xterm-256color", "CI": "true"}):
             with self.subTest(environment=environment):

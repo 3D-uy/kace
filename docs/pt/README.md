@@ -182,6 +182,8 @@ Execute `python kace.py --help` para ver as opções de CLI disponíveis.
 
 Para um caminho integrado de firmware, o KACE exibe o progresso transacional da instalação diretamente em um terminal interativo e mantém `Ctrl+C` disponível para um cancelamento seguro. Saída redirecionada, pipes, CI e terminais sem recursos dinâmicos recebem linhas simples de progresso ASCII. Os mesmos eventos canônicos de fluxo são emitidos como linhas JSON `KACE_WORKFLOW_EVENT` para o KACE Studio; nenhuma visualização de terminal controla ou reconstrói a máquina de estados da instalação.
 
+A identidade do MCU após a gravação só é aceita automaticamente quando uma avaliação pontuada inclui a porta USB física capturada ou a topologia `by-path` e o VID/PID de aplicação esperado pelo perfil, sem evidência conflitante. Um serial estável aumenta a confiança, mas nunca substitui uma porta diferente ou um VID/PID incorreto. Candidatos ambíguos exigem confirmação física explícita e a decisão fica registrada no evento do workflow.
+
 > [!TIP]
 > Revise os artefatos gerados antes da implantação e trate a primeira energização, homing, aquecedores, sensores e verificações de movimento como etapas de segurança controladas pela pessoa operadora.
 

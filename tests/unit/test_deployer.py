@@ -188,7 +188,15 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
         )
         prepared = SimpleNamespace(
             plan=SimpleNamespace(
-                method=SimpleNamespace(value="MANUAL"), artifact=artifact
+                method=SimpleNamespace(value="MANUAL"),
+                artifact=artifact,
+                profile=SimpleNamespace(
+                    strategy=DeploymentStrategyId.SD_CARD,
+                    usb=SimpleNamespace(
+                        application_vid_pids=("1d50:614e",),
+                        bootloader_vid_pids=(),
+                    ),
+                ),
             ),
             sha256=digest,
         )

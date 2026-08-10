@@ -145,6 +145,10 @@ def _validate_profile(profile: DeploymentProfile) -> None:
             raise DeploymentProfileError(f"{profile.id}: SD_CARD requires the MANUAL method")
         if profile.auto_flash or profile.backend:
             raise DeploymentProfileError(f"{profile.id}: SD_CARD cannot enable a USB backend")
+        if not profile.usb.application_vid_pids:
+            raise DeploymentProfileError(
+                f"{profile.id}: SD_CARD requires a post-flash application VID:PID allow-list"
+            )
     elif profile.strategy is DeploymentStrategyId.PREPARE_ONLY:
         if profile.method is not DeploymentMethodId.MANUAL:
             raise DeploymentProfileError(

@@ -10,6 +10,7 @@ from core.power_controller import (
     load_power_config,
 )
 from firmware.artifacts import BuildProvenance
+from firmware.deployment import DeploymentStrategyId
 from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 
@@ -88,6 +89,21 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
             self.kwargs = kwargs
 
         def run(self):
+            identity = SimpleNamespace(
+                physical_port="usb-1",
+                physical_path="usb-1:1.0",
+                by_path=("/dev/serial/by-path/usb-1",),
+                vid_pid="1d50:614e",
+                serial="stable",
+            )
+            assessment = SimpleNamespace(
+                baseline=identity,
+                candidate=identity,
+                reasons=("manual confirmation test",),
+                score=80,
+                automatic_threshold=90,
+            )
+            assert self.kwargs["identity_confirmation_prompt"](assessment) is True
             assert self.kwargs["power_cycle_prompt"]() is True
             events.append("power_off_confirmed")
             self.kwargs["power_off"]()
@@ -102,7 +118,13 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
         lambda **_kwargs: controller,
     )
     monkeypatch.setattr("core.moonraker_deployer.Deployer", FakeDeployer)
-    monkeypatch.setattr("core.mcu_monitor.McuPresenceMonitor", lambda _path: object())
+    monitor_args = {}
+
+    def make_monitor(_path, **kwargs):
+        monitor_args.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("core.mcu_monitor.McuPresenceMonitor", make_monitor)
     monkeypatch.setattr(
         deployer,
         "_generated_config_bytes",
@@ -137,7 +159,15 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
         "mcu_path": "/dev/serial/by-id/test",
         "prepared_firmware_deployment": SimpleNamespace(
             plan=SimpleNamespace(
-                method=SimpleNamespace(value="MANUAL"), artifact=artifact
+                method=SimpleNamespace(value="MANUAL"),
+                artifact=artifact,
+                profile=SimpleNamespace(
+                    strategy=DeploymentStrategyId.SD_CARD,
+                    usb=SimpleNamespace(
+                        application_vid_pids=("1d50:614e",),
+                        bootloader_vid_pids=(),
+                    ),
+                ),
             ),
             sha256=digest,
         ),
@@ -154,3 +184,4 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
     ]
     assert controller.power_on.call_count == 2
     controller.power_off.assert_called_once_with()
+    assert monitor_args["expected_vid_pids"] == ("1d50:614e",)

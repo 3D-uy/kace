@@ -42,7 +42,7 @@ def _read_deployment_usb_identity(device_path):
     return {
         "usb_vid": identity.vendor_id,
         "usb_pid": identity.model_id,
-        "usb_path": identity.physical_path,
+        "usb_path": identity.physical_port or identity.physical_path,
     }
 
 
