@@ -30,6 +30,9 @@ python tests/matrix/run_matrix.py --profile full
 
 # Broad sweep of upstream Klipper generic/printer configs
 python tests/run_tests.py --full-klipper-sweep --verbose
+
+# Hardware-free physical-workflow integration lab
+python -m unittest tests.integration.test_simulated_firmware_lab -v
 ```
 
 Use the narrowest command that covers a change, then run the complete relevant gate before submitting it.
@@ -45,6 +48,19 @@ Unit tests cover the wizard model, validation, board data, generation helpers, f
 Regression tests exercise complete generation paths, CLI integration, runtime behavior, firmware build orchestration, and byte-level snapshots in `tests/fixtures/`.
 
 The default runner discovers every `test_*.py` file under `tests/`. Environment-dependent real firmware builds skip when their required toolchain is unavailable; CI separately runs representative builds in the development container.
+
+### Simulated hardware integration — `tests/integration/`
+
+The deterministic integration lab runs the production Moonraker HTTP adapter,
+Power API controller, firmware deployment strategies, MCU presence monitor,
+firmware build-identity verification, configuration upload, and rollback
+against stateful loopback Moonraker and udev simulators. It covers successful
+SD and AVRDUDE workflows plus stale firmware, wrong VID/PID, ambiguous identity,
+timeouts, corrupted uploads, and failed activation.
+
+This gate never opens a physical serial device, GPIO, or removable disk. A pass
+proves software ordering and failure semantics, not electrical behavior, Linux
+permissions, real USB timing, bootloader behavior, or media compatibility.
 
 ### YAML integrity
 
@@ -115,6 +131,7 @@ Mock firmware created by the interactive development container is not flashable.
 | --- | --- | --- |
 | `lint` | Push and pull request | Compile every Python file |
 | `unit-tests` | Push and pull request | Full default test discovery |
+| `simulated-hardware-integration` | Push and pull request | Stateful Moonraker/power/udev firmware workflow without physical devices |
 | `yaml-integrity` | Push and pull request | Board schema and precedence |
 | `regression-tests` | Push and pull request | Snapshot regression gate |
 | `config-matrix-quick` | Push and pull request | Reduced pinned-Klipper matrix |

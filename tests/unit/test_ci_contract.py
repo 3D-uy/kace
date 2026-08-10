@@ -26,6 +26,20 @@ class ReproducibleCiContractTests(unittest.TestCase):
         self.assertIn("--require-hashes -r requirements-ssh.txt", dockerfile)
         self.assertNotIn("pip install --no-cache-dir paramiko==", dockerfile)
 
+    def test_simulated_hardware_lab_is_an_explicit_merge_gate(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("simulated-hardware-integration:", workflow)
+        self.assertIn(
+            "python3 -m unittest tests.integration.test_simulated_firmware_lab -v",
+            workflow,
+        )
+        self.assertIn(
+            "needs: [unit-tests, simulated-hardware-integration, yaml-integrity]",
+            workflow,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
