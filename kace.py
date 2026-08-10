@@ -313,7 +313,7 @@ def main():
                 print("\n\033[92m[OK] Installation completed and validated.\033[0m")
                 _finish(success("Firmware and configuration installation validated."))
             print(f"\n\033[91m[!] Installation did not complete: {result.state.name}: {result.detail}\033[0m")
-            if result.state is DeployState.ABORTED:
+            if result.state in (DeployState.CANCELLED, DeployState.ABORTED):
                 _finish(cancelled(result.detail or "Firmware installation cancelled."))
             if result.state is DeployState.FAILED_PRECONDITION:
                 _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, result.detail))
@@ -328,6 +328,8 @@ def main():
                 WorkflowOutcome.PRECONDITION_FAILED,
                 "Firmware deployment was requested but no prepared strategy exists.",
             ))
+        if deployment_result.status.value == "CANCELLED":
+            _finish(cancelled(deployment_result.detail or "Firmware deployment cancelled."))
         if not deployment_result.ok:
             print(f"\n\033[91m[!] Firmware deployment did not complete: {deployment_result.detail}\033[0m")
             _finish(failed(WorkflowOutcome.FIRMWARE_FAILED, deployment_result.detail))

@@ -3,11 +3,13 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from firmware.artifacts import BuildArtifact, BuildProvenance, FirmwareFormat
 from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 from firmware.deployment import (
+    DeploymentArtifactError,
     DeploymentExecutionContext,
     DeploymentMethodId,
     DeploymentProfile,
@@ -104,9 +106,33 @@ class FirmwareDeploymentTests(unittest.TestCase):
                 DeploymentExecutionContext(media_path_provider=lambda: media),
             )
 
-            self.assertEqual(result.status, DeploymentStatus.ACTION_REQUIRED)
+            self.assertEqual(result.status, DeploymentStatus.MEDIA_PREPARED)
+            self.assertFalse(result.ok)
+            self.assertTrue(result.action_required)
             self.assertTrue(os.path.isfile(os.path.join(media, "firmware.bin")))
             self.assertFalse(os.path.exists(os.path.join(media, "klipper.bin")))
+
+    def test_manual_destination_prompt_cancellation_is_terminal_cancelled(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = os.path.join(root, "klipper.bin")
+            with open(source, "wb") as target_file:
+                target_file.write(b"payload")
+            service = FirmwareDeploymentService(output_dir=root, event_sink=lambda _event: None)
+            prepared = service.prepare(
+                service.plan(
+                    artifact(source),
+                    DeploymentTarget("unknown.cfg", "stm32"),
+                    DeploymentMethodId.MANUAL,
+                )
+            )
+
+            result = service.execute(
+                prepared,
+                DeploymentExecutionContext(media_path_provider=lambda: ""),
+            )
+
+            self.assertEqual(result.status, DeploymentStatus.CANCELLED)
+            self.assertFalse(result.ok)
 
     def test_usb_automatic_flash_uses_allowlisted_argv_without_shell(self):
         usb_profile = DeploymentProfile(
@@ -153,7 +179,54 @@ class FirmwareDeploymentTests(unittest.TestCase):
         self.assertNotIn("shell", runner.call_args.kwargs)
         self.assertEqual(runner.call_args.kwargs["timeout"], 120)
 
-    def test_usb_refuses_non_flashable_or_ambiguous_device(self):
+    def test_usb_confirmation_decline_is_terminal_cancelled(self):
+        usb_profile = DeploymentProfile(
+            id="usb-test",
+            method=DeploymentMethodId.USB,
+            board_patterns=("generic-ramps.cfg",),
+            formats=(FirmwareFormat.IHEX,),
+            final_filename="firmware.hex",
+            instruction_keys=(),
+            exact_match_required=True,
+            auto_flash=True,
+            backend="avrdude",
+            backend_options={"part": "atmega2560", "programmer": "wiring", "baud": 115200},
+        )
+        with tempfile.TemporaryDirectory() as root:
+            source = os.path.join(root, "klipper.elf.hex")
+            with open(source, "wb") as target_file:
+                target_file.write(b"payload")
+            service = FirmwareDeploymentService(
+                resolver=DeploymentProfileResolver([usb_profile]),
+                output_dir=root,
+                event_sink=lambda _event: None,
+            )
+            prepared = service.prepare(
+                service.plan(
+                    artifact(source, fmt=FirmwareFormat.IHEX),
+                    DeploymentTarget(
+                        "generic-ramps.cfg",
+                        "atmega2560",
+                        "/dev/serial/by-id/usb-Arduino_Mega-if00",
+                    ),
+                    DeploymentMethodId.USB,
+                )
+            )
+            runner = Mock()
+
+            result = service.execute(
+                prepared,
+                DeploymentExecutionContext(
+                    confirm=lambda _prompt: False,
+                    command_runner=runner,
+                ),
+            )
+
+            self.assertEqual(result.status, DeploymentStatus.CANCELLED)
+            self.assertFalse(result.ok)
+            runner.assert_not_called()
+
+    def test_usb_action_required_is_not_success_for_ambiguous_device(self):
         profile = DeploymentProfile(
             id="usb-blocked",
             method=DeploymentMethodId.USB,
@@ -176,7 +249,7 @@ class FirmwareDeploymentTests(unittest.TestCase):
                 event_sink=lambda _event: None,
             )
             plan = service.plan(
-                artifact(source, fmt=FirmwareFormat.IHEX, flashable=False),
+                artifact(source, fmt=FirmwareFormat.IHEX),
                 DeploymentTarget("board.cfg", "atmega2560", "/dev/ttyUSB0"),
                 DeploymentMethodId.USB,
             )
@@ -188,9 +261,71 @@ class FirmwareDeploymentTests(unittest.TestCase):
             )
 
         self.assertEqual(result.status, DeploymentStatus.ACTION_REQUIRED)
-        self.assertIn("not marked flashable", result.detail)
+        self.assertFalse(result.ok)
+        self.assertTrue(result.action_required)
         self.assertIn("/dev/serial/by-id", result.detail)
         runner.assert_not_called()
+
+    def test_mock_or_nonflashable_artifact_is_rejected_by_every_method(self):
+        usb_profile = DeploymentProfile(
+            id="usb-test",
+            method=DeploymentMethodId.USB,
+            board_patterns=("board.cfg",),
+            formats=(FirmwareFormat.IHEX,),
+            final_filename="firmware.hex",
+            instruction_keys=(),
+            exact_match_required=True,
+            auto_flash=True,
+            backend="avrdude",
+            backend_options={"part": "atmega2560", "programmer": "wiring", "baud": 115200},
+        )
+        with tempfile.TemporaryDirectory() as root:
+            source = os.path.join(root, "klipper.elf.hex")
+            with open(source, "wb") as target_file:
+                target_file.write(b"payload")
+            unsafe = replace(
+                artifact(source, fmt=FirmwareFormat.IHEX),
+                provenance=BuildProvenance.MOCK,
+                flashable=False,
+            )
+            profiles = load_profiles() + [usb_profile]
+            service = FirmwareDeploymentService(
+                resolver=DeploymentProfileResolver(profiles),
+                output_dir=root,
+                event_sink=lambda _event: None,
+            )
+            target = DeploymentTarget(
+                "board.cfg", "atmega2560", "/dev/serial/by-id/test"
+            )
+
+            self.assertEqual(service.available_methods(target, unsafe), ())
+            for method in (DeploymentMethodId.MANUAL, DeploymentMethodId.USB):
+                with self.subTest(method=method), self.assertRaises(DeploymentArtifactError):
+                    service.plan(unsafe, target, method)
+
+    def test_tampered_prepared_media_is_rejected_before_manual_copy(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as media:
+            source = os.path.join(root, "klipper.bin")
+            with open(source, "wb") as target_file:
+                target_file.write(b"original")
+            service = FirmwareDeploymentService(output_dir=root, event_sink=lambda _event: None)
+            plan = service.plan(
+                artifact(source),
+                DeploymentTarget("unknown.cfg", "stm32"),
+                DeploymentMethodId.MANUAL,
+            )
+            prepared = service.prepare(plan)
+            with open(prepared.staged_path, "wb") as target_file:
+                target_file.write(b"tampered")
+
+            result = service.execute(
+                prepared,
+                DeploymentExecutionContext(media_path_provider=lambda: media),
+            )
+
+            self.assertEqual(result.status, DeploymentStatus.FAILED)
+            self.assertEqual(result.error_code, "ARTIFACT_UNSAFE")
+            self.assertFalse(os.path.exists(os.path.join(media, "firmware.bin")))
 
     def test_profile_rejects_path_traversal_filename(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as source:

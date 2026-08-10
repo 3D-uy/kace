@@ -33,6 +33,12 @@ except ImportError:
 class DeployState(Enum):
     INIT = auto()
     BACKUP = auto()
+    MEDIA_PREPARED = auto()
+    AWAITING_MEDIA_INSTALLATION = auto()
+    AWAITING_BOOTLOADER = auto()
+    FLASHING = auto()
+    AWAITING_POWER_CYCLE = auto()
+    AWAITING_REENUMERATION = auto()
     COPYING_FIRMWARE = auto()
     FIRMWARE_COPIED = auto()
     MONITOR_ARMED = auto()
@@ -58,6 +64,7 @@ class DeployState(Enum):
     FAILED_FLASH = auto()
     TIMEOUT = auto()  # retained for explicitly bounded callers/tests
     CONFIG_ERROR = auto()
+    CANCELLED = auto()
     ABORTED = auto()
     FAILED_UPLOAD = auto()
     FAILED_MONITOR = auto()
@@ -152,7 +159,8 @@ class Deployer:
         snapshot: Optional[object] = None,
         *,
         mcu_monitor=None,
-        power_cycle_prompt: Optional[Callable[[], None]] = None,
+        power_cycle_prompt: Optional[Callable[[], bool]] = None,
+        media_installation_prompt: Optional[Callable[[], bool]] = None,
         power_off: Optional[Callable[[], object]] = None,
         power_on: Optional[Callable[[], object]] = None,
         cancel_event: Optional[threading.Event] = None,
@@ -169,6 +177,7 @@ class Deployer:
         self.snapshot = snapshot
         self.mcu_monitor = mcu_monitor
         self.power_cycle_prompt = power_cycle_prompt
+        self.media_installation_prompt = media_installation_prompt
         self.power_off = power_off
         self.power_on = power_on
         self.cancel_event = cancel_event or threading.Event()
@@ -361,6 +370,7 @@ class Deployer:
     def run(self) -> DeployResult:
         versions = {}
         monitor_armed = False
+        media_prepared = False
         try:
             if self.snapshot_loader is not None:
                 self._transition(DeployState.BACKUP, "capturing pre-deployment configuration")
@@ -375,40 +385,153 @@ class Deployer:
                 self.mcu_monitor.arm()
                 monitor_armed = True
                 self._transition(DeployState.MONITOR_ARMED, "physical MCU monitor armed")
+                self._transition(
+                    DeployState.AWAITING_BOOTLOADER,
+                    "waiting for the automatic deployment backend to enter the bootloader",
+                )
+                self._transition(DeployState.FLASHING, "automatic firmware flashing started")
 
             firmware_action = self.firmware_deploy or self.firmware_copy
             if firmware_action is not None:
-                self._transition(DeployState.COPYING_FIRMWARE, "executing firmware deployment method")
-                outcome = firmware_action()
-                outcome_ok = outcome if isinstance(outcome, bool) else bool(getattr(outcome, "ok", False))
-                outcome_detail = getattr(outcome, "detail", "")
-                if not outcome_ok:
-                    return self._result(
-                        DeployState.FAILED_UPLOAD,
-                        outcome_detail or "firmware deployment method did not complete",
+                legacy_copy = self.firmware_deploy is None and self.firmware_copy is not None
+                if not self.monitor_before_firmware:
+                    self._transition(
+                        DeployState.COPYING_FIRMWARE,
+                        "preparing firmware media",
                     )
-                self._transition(
-                    DeployState.FIRMWARE_COPIED,
-                    outcome_detail or "firmware deployment method completed",
-                )
+                outcome = firmware_action()
+                outcome_detail = getattr(outcome, "detail", "")
+                if isinstance(outcome, bool):
+                    outcome_status = (
+                        "MEDIA_PREPARED" if outcome and legacy_copy
+                        else "FAILED" if not outcome
+                        else ""
+                    )
+                else:
+                    status = getattr(outcome, "status", None)
+                    outcome_status = getattr(status, "value", str(status or ""))
+
+                if outcome_status == "CANCELLED":
+                    return self._result(
+                        DeployState.CANCELLED,
+                        outcome_detail or "firmware deployment cancelled",
+                    )
+                if outcome_status == "ACTION_REQUIRED":
+                    return self._result(
+                        DeployState.FAILED_PRECONDITION,
+                        outcome_detail or "firmware deployment still requires an unresolved action",
+                    )
+                if outcome_status == "FAILED":
+                    return self._result(
+                        DeployState.FAILED_FLASH,
+                        outcome_detail or "firmware deployment method failed",
+                    )
+                if outcome_status == "MEDIA_PREPARED":
+                    media_prepared = True
+                    self._transition(
+                        DeployState.MEDIA_PREPARED,
+                        outcome_detail or "firmware media prepared",
+                    )
+                elif outcome_status == "FLASHED":
+                    if not self.monitor_before_firmware:
+                        self._transition(
+                            DeployState.FLASHING,
+                            outcome_detail or "firmware flashing completed",
+                        )
+                else:
+                    return self._result(
+                        DeployState.FAILED_PRECONDITION,
+                        outcome_detail or "firmware deployment returned an unknown state",
+                    )
             elif self.firmware_already_copied:
-                self._transition(DeployState.FIRMWARE_COPIED, "firmware.bin copied to SD")
+                media_prepared = True
+                self._transition(DeployState.MEDIA_PREPARED, "firmware media prepared")
+
+            if media_prepared and self.mcu_monitor is None:
+                return self._result(
+                    DeployState.FAILED_PRECONDITION,
+                    "prepared firmware media cannot be installed without physical MCU monitoring",
+                )
 
             if self.mcu_monitor is not None:
                 if not monitor_armed:
                     self.mcu_monitor.arm()
                     monitor_armed = True
                     self._transition(DeployState.MONITOR_ARMED, "physical MCU monitor armed")
-                if self.power_cycle_prompt:
-                    self.power_cycle_prompt()
-                if self.power_off:
-                    self.power_off()
+
+                if media_prepared:
+                    if self.power_off:
+                        self._transition(
+                            DeployState.AWAITING_POWER_CYCLE,
+                            "waiting for permission to power off before media installation",
+                        )
+                        if self.power_cycle_prompt is None:
+                            return self._result(
+                                DeployState.FAILED_PRECONDITION,
+                                "relay power cycle requires explicit user confirmation",
+                            )
+                        if self.power_cycle_prompt() is not True:
+                            return self._result(
+                                DeployState.CANCELLED,
+                                "manual firmware installation cancelled before power off",
+                            )
+                        self.power_off()
+                    else:
+                        self._transition(
+                            DeployState.AWAITING_MEDIA_INSTALLATION,
+                            "waiting for manual power-off and media installation",
+                        )
+                        prompt = self.media_installation_prompt or self.power_cycle_prompt
+                        if prompt is None:
+                            return self._result(
+                                DeployState.FAILED_PRECONDITION,
+                                "manual firmware installation requires explicit user confirmation",
+                            )
+                        if prompt() is not True:
+                            return self._result(
+                                DeployState.CANCELLED,
+                                "manual firmware installation cancelled at physical prompt",
+                            )
+                        self._transition(
+                            DeployState.AWAITING_POWER_CYCLE,
+                            "waiting for the manually requested printer power cycle",
+                        )
+
                 self._transition(DeployState.AWAITING_DISCONNECT, "waiting for physical MCU removal")
                 self.mcu_monitor.wait_for_absent(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
                 self._transition(DeployState.MCU_ABSENT, "physical MCU absent")
-                if self.power_on:
-                    self.power_on()
-                self._transition(DeployState.AWAITING_RECONNECT, "waiting for the same physical MCU")
+
+                if media_prepared:
+                    if self.power_off:
+                        self._transition(
+                            DeployState.AWAITING_MEDIA_INSTALLATION,
+                            "printer is off; waiting for confirmation that media is installed",
+                        )
+                        if self.media_installation_prompt is None:
+                            return self._result(
+                                DeployState.FAILED_PRECONDITION,
+                                "media installation requires confirmation before power on",
+                            )
+                        if self.media_installation_prompt() is not True:
+                            return self._result(
+                                DeployState.CANCELLED,
+                                "manual firmware installation cancelled while printer was off",
+                            )
+                    self._transition(
+                        DeployState.AWAITING_BOOTLOADER,
+                        "waiting for the controller bootloader to consume prepared media",
+                    )
+                    if self.power_on:
+                        self.power_on()
+                    self._transition(
+                        DeployState.FLASHING,
+                        "bootloader firmware installation in progress",
+                    )
+
+                self._transition(
+                    DeployState.AWAITING_REENUMERATION,
+                    "waiting for the same physical MCU to reenumerate",
+                )
                 identity = self.mcu_monitor.wait_for_present(cancel_event=self.cancel_event, timeout=self.WAIT_TIMEOUT_S)
                 self._transition(DeployState.MCU_PRESENT, "same physical MCU present", device=identity.device_node)
 
@@ -487,7 +610,7 @@ class Deployer:
 
             return self._result(DeployState.DONE, "deployment validated", versions)
         except (KeyboardInterrupt, McuMonitorCancelled):
-            return self._result(DeployState.ABORTED, "cancelled by user", versions)
+            return self._result(DeployState.CANCELLED, "cancelled by user", versions)
         except McuIdentityMismatch as exc:
             return self._result(DeployState.FAILED_MONITOR, str(exc), versions)
         except McuMonitorError as exc:

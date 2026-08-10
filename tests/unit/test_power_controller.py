@@ -9,6 +9,7 @@ from core.power_controller import (
     PowerControllerError,
     load_power_config,
 )
+from firmware.artifacts import BuildProvenance
 from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 
@@ -87,7 +88,11 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
             self.kwargs = kwargs
 
         def run(self):
+            assert self.kwargs["power_cycle_prompt"]() is True
+            events.append("power_off_confirmed")
             self.kwargs["power_off"]()
+            assert self.kwargs["media_installation_prompt"]() is True
+            events.append("media_installed")
             self.kwargs["power_on"]()
             events.append("firmware")
             return "done"
@@ -122,7 +127,12 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
         artifact_size=4096,
         artifact_format="bin",
     )
-    artifact = SimpleNamespace(firmware_identity=identity, sha256=digest)
+    artifact = SimpleNamespace(
+        firmware_identity=identity,
+        sha256=digest,
+        provenance=BuildProvenance.REAL,
+        flashable=True,
+    )
     user_data = {
         "mcu_path": "/dev/serial/by-id/test",
         "prepared_firmware_deployment": SimpleNamespace(
@@ -134,6 +144,13 @@ def test_firmware_installation_reuses_the_configured_controller(monkeypatch):
         "firmware_deployment_service": Mock(),
     }
     assert deployer.deploy_firmware_installation(user_data) == "done"
-    assert events == ["on", "off", "on", "firmware"]
+    assert events == [
+        "on",
+        "power_off_confirmed",
+        "off",
+        "media_installed",
+        "on",
+        "firmware",
+    ]
     assert controller.power_on.call_count == 2
     controller.power_off.assert_called_once_with()

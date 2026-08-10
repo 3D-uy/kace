@@ -640,6 +640,39 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         from core.moonraker_deployer import DeployState
         self.assertEqual(self._run(DeployState.FAILED_FLASH), 30)
 
+    def test_cancelled_physical_deployment_uses_cancelled_exit_code(self):
+        from core.moonraker_deployer import DeployState
+        self.assertEqual(self._run(DeployState.CANCELLED), 2)
+
+    def test_standalone_firmware_prompt_cancellation_is_not_reported_as_failure(self):
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
+        user_data["pending_firmware_deployment"] = True
+        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=None)
+        deployment_result = SimpleNamespace(
+            status=SimpleNamespace(value="CANCELLED"),
+            detail="manual destination selection cancelled",
+            ok=False,
+        )
+
+        with patch('kace.print_kace_banner'), \
+             patch('kace.run_wizard', return_value=user_data), \
+             patch('kace.check_display_compatibility', return_value=[]), \
+             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.has_todo_pins', return_value=[]), \
+             patch('kace.print_summary'), \
+             patch('kace.time.sleep'), \
+             patch('builtins.print'), \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select') as deploy_menu, \
+             patch('kace.execute_firmware_deployment', return_value=deployment_result):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 2)
+        deploy_menu.assert_not_called()
+
 
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────
 

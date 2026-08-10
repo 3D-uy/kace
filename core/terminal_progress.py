@@ -14,6 +14,7 @@ from typing import Callable, Optional
 
 TERMINAL_ERRORS = frozenset({
     "ABORTED",
+    "CANCELLED",
     "FAILED_FLASH",
     "TIMEOUT",
     "CONFIG_ERROR",
@@ -23,11 +24,11 @@ TERMINAL_ERRORS = frozenset({
 })
 
 MILESTONES = (
-    "Firmware copied to SD",
-    "Waiting for printer power-cycle",
-    "MCU disconnected",
-    "Waiting for MCU to return",
-    "MCU detected",
+    "Firmware media prepared",
+    "Safe media installation",
+    "Physical action confirmed",
+    "Firmware flashing",
+    "MCU reenumerated",
     "Moonraker connected",
     "Klipper ready",
     "MCU registered",
@@ -41,10 +42,16 @@ MILESTONES = (
 _POSITIONS = {
     "BACKUP": (-1, 0),
     "COPYING_FIRMWARE": (-1, 0),
+    "MEDIA_PREPARED": (0, 1),
+    "AWAITING_MEDIA_INSTALLATION": (0, 1),
+    "AWAITING_POWER_CYCLE": (0, 1),
+    "AWAITING_BOOTLOADER": (2, 3),
+    "FLASHING": (2, 3),
+    "AWAITING_REENUMERATION": (3, 4),
     "FIRMWARE_COPIED": (0, 1),
     "MONITOR_ARMED": (0, 1),
     "AWAITING_DISCONNECT": (0, 1),
-    "MCU_ABSENT": (2, 3),
+    "MCU_ABSENT": (0, 1),
     "AWAITING_RECONNECT": (2, 3),
     "MCU_PRESENT": (4, 5),
     "WAITING_MOONRAKER": (4, 5),

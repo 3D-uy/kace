@@ -942,6 +942,7 @@ def deploy_firmware_installation(user_data):
         ConfigArtifact, Deployer, DeploymentManifest, DeployResult, DeployState, McuTarget,
     )
     from core.snapshot import create_snapshot
+    from firmware.deployment import DeploymentArtifactError, require_deployable_artifact
     from firmware.identity import FirmwareBuildIdentity
 
     mcu_path = user_data.get("mcu_path", "")
@@ -950,6 +951,13 @@ def deploy_firmware_installation(user_data):
     if prepared is None or service is None:
         return DeployResult(DeployState.FAILED_PRECONDITION, "prepared firmware deployment is unavailable")
     artifact = getattr(getattr(prepared, "plan", None), "artifact", None)
+    try:
+        require_deployable_artifact(artifact)
+    except DeploymentArtifactError as exc:
+        return DeployResult(
+            DeployState.FAILED_FLASH,
+            f"firmware artifact is not deployable: {exc}",
+        )
     identity = getattr(artifact, "firmware_identity", None)
     if not isinstance(identity, FirmwareBuildIdentity):
         return DeployResult(DeployState.FAILED_FLASH, "compiled firmware build identity is unavailable")
@@ -1053,17 +1061,23 @@ def deploy_firmware_installation(user_data):
     def _run_firmware_method():
         result = service.execute(prepared, _firmware_execution_context(user_data))
         print(f"\n[*] {result.detail}")
-        if result.ok and result.status.value == "ACTION_REQUIRED" and method == "USB":
-            print("[!] Complete the board-specific manual USB flash now.")
-            try:
-                input("    Press ENTER only after the controller has been flashed... ")
-            except (KeyboardInterrupt, EOFError):
-                return False
         return result
 
-    def _prompt_power_cycle():
-        print("\n\033[93m[!] Install the prepared media, then turn only the printer OFF and ON.\033[0m")
-        print("\033[93m    KACE is monitoring the physical MCU; press Ctrl+C to cancel safely.\033[0m")
+    def _confirm_power_off():
+        print("\n\033[93m[!] Firmware media is prepared.\033[0m")
+        print("\033[93m    KACE will switch the configured relay OFF before you install it.\033[0m")
+        print("\033[93m    Press Ctrl+C or answer no to cancel safely.\033[0m")
+        return bool(yes_no("May KACE power off the printer now?", default=False))
+
+    def _confirm_media_installation():
+        if power_controller is None:
+            print("\n\033[93m[!] Turn the printer OFF, install the prepared firmware media, then turn it ON.\033[0m")
+            prompt = "Have you completed the manual media installation and power cycle?"
+        else:
+            print("\n\033[93m[!] Printer power is confirmed OFF. Install the prepared firmware media now.\033[0m")
+            prompt = "Is the media installed and may KACE power the printer on?"
+        print("\033[93m    Press Ctrl+C or answer no to cancel safely.\033[0m")
+        return bool(yes_no(prompt, default=False))
 
     try:
         monitor = McuPresenceMonitor(mcu_path)
@@ -1076,9 +1090,12 @@ def deploy_firmware_installation(user_data):
             snapshot=snapshot,
             mcu_monitor=monitor,
             power_cycle_prompt=(
-                _prompt_power_cycle
-                if method == "MANUAL" and power_controller is None
+                _confirm_power_off
+                if method == "MANUAL" and power_controller is not None
                 else None
+            ),
+            media_installation_prompt=(
+                _confirm_media_installation if method == "MANUAL" else None
             ),
             power_off=power_controller.power_off if power_controller is not None else None,
             power_on=power_controller.power_on if power_controller is not None else None,

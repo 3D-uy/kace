@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Callable, Optional
 
-from firmware.artifacts import BuildArtifact, FirmwareFormat
+from firmware.artifacts import BuildArtifact, BuildProvenance, FirmwareFormat
 
 
 class DeploymentMethodId(str, Enum):
@@ -15,10 +15,39 @@ class DeploymentMethodId(str, Enum):
 
 
 class DeploymentStatus(str, Enum):
+    MEDIA_PREPARED = "MEDIA_PREPARED"
     ACTION_REQUIRED = "ACTION_REQUIRED"
     FLASHED = "FLASHED"
     CANCELLED = "CANCELLED"
     FAILED = "FAILED"
+
+
+class DeploymentArtifactError(ValueError):
+    """Raised when an artifact cannot safely enter any deployment method."""
+
+
+def deployment_artifact_blockers(artifact: BuildArtifact) -> tuple[str, ...]:
+    """Return method-independent reasons an artifact must not be deployed."""
+    blockers = []
+    if getattr(artifact, "provenance", None) is not BuildProvenance.REAL:
+        blockers.append("mock firmware artifacts cannot be deployed")
+    if not bool(getattr(artifact, "flashable", False)):
+        blockers.append("build artifact is not marked flashable")
+    digest = str(getattr(artifact, "sha256", "") or "")
+    if len(digest) != 64 or any(char not in "0123456789abcdefABCDEF" for char in digest):
+        blockers.append("build artifact has no valid SHA-256")
+    identity = getattr(artifact, "firmware_identity", None)
+    if identity is None:
+        blockers.append("firmware build identity is unavailable")
+    elif str(getattr(identity, "artifact_sha256", "") or "") != digest:
+        blockers.append("firmware build identity does not match the artifact")
+    return tuple(blockers)
+
+
+def require_deployable_artifact(artifact: BuildArtifact) -> None:
+    blockers = deployment_artifact_blockers(artifact)
+    if blockers:
+        raise DeploymentArtifactError("; ".join(blockers))
 
 
 @dataclass(frozen=True)
@@ -104,7 +133,14 @@ class DeploymentResult:
 
     @property
     def ok(self) -> bool:
-        return self.status in (DeploymentStatus.ACTION_REQUIRED, DeploymentStatus.FLASHED)
+        return self.status is DeploymentStatus.FLASHED
+
+    @property
+    def action_required(self) -> bool:
+        return self.status in (
+            DeploymentStatus.MEDIA_PREPARED,
+            DeploymentStatus.ACTION_REQUIRED,
+        )
 
 
 @dataclass

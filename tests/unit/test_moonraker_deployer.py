@@ -4,6 +4,7 @@ import os
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 
 from core.mcu_monitor import McuIdentity, McuIdentityMismatch, McuMonitorCancelled
 from core.moonraker_deployer import (
@@ -110,7 +111,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         deployer = Deployer(
             client or Client({}), self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor or Monitor(),
-            power_cycle_prompt=prompt,
+            power_cycle_prompt=prompt or (lambda: True),
             event_sink=(events if events is not None else []).append,
             firmware_already_copied=True,
         )
@@ -121,7 +122,10 @@ class InstallationWorkflowTests(unittest.TestCase):
     def test_quick_disconnect_is_not_lost_and_monitor_is_armed_before_prompt(self):
         monitor = Monitor()
         observed = []
-        result = self.make(monitor=monitor, prompt=lambda: observed.append(list(monitor.calls))).run()
+        result = self.make(
+            monitor=monitor,
+            prompt=lambda: observed.append(list(monitor.calls)) or True,
+        ).run()
         self.assertEqual(result.state, DeployState.DONE)
         self.assertEqual(observed, [["arm"]])
         self.assertIn(("absent", None), monitor.calls)
@@ -140,6 +144,8 @@ class InstallationWorkflowTests(unittest.TestCase):
         deployer = Deployer(
             Client({}), self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor,
+            power_cycle_prompt=lambda: order.append("confirmed") or True,
+            media_installation_prompt=lambda: order.append("media_installed") or True,
             power_off=lambda: order.append("off"),
             power_on=lambda: order.append("on"),
             event_sink=lambda _event: None,
@@ -149,7 +155,113 @@ class InstallationWorkflowTests(unittest.TestCase):
         deployer.POLL_BACKOFF_MAX_S = 0.002
 
         self.assertEqual(deployer.run().state, DeployState.DONE)
-        self.assertEqual(order, ["off", "mcu_absent", "on", "mcu_present"])
+        self.assertEqual(
+            order,
+            [
+                "confirmed",
+                "off",
+                "mcu_absent",
+                "media_installed",
+                "on",
+                "mcu_present",
+            ],
+        )
+
+    def test_relay_cannot_cycle_before_media_installation_confirmation(self):
+        order = []
+        monitor = Monitor()
+        events = []
+        deployer = Deployer(
+            Client({}),
+            self.manifest,
+            snapshot=self.snapshot,
+            mcu_monitor=monitor,
+            power_cycle_prompt=lambda: order.append("confirmation") or False,
+            power_off=lambda: order.append("off"),
+            power_on=lambda: order.append("on"),
+            event_sink=events.append,
+            firmware_already_copied=True,
+        )
+
+        result = deployer.run()
+
+        self.assertEqual(result.state, DeployState.CANCELLED)
+        self.assertEqual(order, ["confirmation"])
+        self.assertNotIn(("absent", None), monitor.calls)
+        self.assertEqual(events[-1]["state"], "CANCELLED")
+
+    def test_cancel_while_relay_is_off_never_powers_back_on(self):
+        order = []
+        deployer = Deployer(
+            Client({}),
+            self.manifest,
+            snapshot=self.snapshot,
+            mcu_monitor=Monitor(),
+            power_cycle_prompt=lambda: True,
+            media_installation_prompt=lambda: order.append("media_prompt") or False,
+            power_off=lambda: order.append("off"),
+            power_on=lambda: order.append("on"),
+            event_sink=lambda _event: None,
+            firmware_already_copied=True,
+        )
+
+        result = deployer.run()
+
+        self.assertEqual(result.state, DeployState.CANCELLED)
+        self.assertEqual(order, ["off", "media_prompt"])
+
+    def test_manual_relay_emits_physical_states_in_safe_order(self):
+        events = []
+        deployer = Deployer(
+            Client({}),
+            self.manifest,
+            snapshot=self.snapshot,
+            mcu_monitor=Monitor(),
+            power_cycle_prompt=lambda: True,
+            media_installation_prompt=lambda: True,
+            power_off=lambda: None,
+            power_on=lambda: None,
+            event_sink=events.append,
+            firmware_already_copied=True,
+        )
+        deployer.POLL_INTERVAL_S = 0.001
+        deployer.POLL_BACKOFF_MAX_S = 0.002
+
+        self.assertEqual(deployer.run().state, DeployState.DONE)
+        states = [event["state"] for event in events]
+        expected = [
+            "MEDIA_PREPARED",
+            "AWAITING_POWER_CYCLE",
+            "AWAITING_MEDIA_INSTALLATION",
+            "AWAITING_BOOTLOADER",
+            "FLASHING",
+            "AWAITING_REENUMERATION",
+            "VERIFYING_FIRMWARE",
+        ]
+        self.assertEqual(
+            [state for state in states if state in expected],
+            expected,
+        )
+
+    def test_action_required_strategy_result_cannot_continue_as_success(self):
+        monitor = Monitor()
+        outcome = SimpleNamespace(
+            status=SimpleNamespace(value="ACTION_REQUIRED"),
+            detail="operator action is unresolved",
+        )
+        deployer = Deployer(
+            Client({}),
+            self.manifest,
+            snapshot=self.snapshot,
+            mcu_monitor=monitor,
+            firmware_deploy=lambda: outcome,
+            event_sink=lambda _event: None,
+        )
+
+        result = deployer.run()
+
+        self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
+        self.assertNotIn("arm", monitor.calls)
 
     def test_copy_is_inside_transaction_and_precedes_monitor(self):
         order = []
@@ -160,6 +272,7 @@ class InstallationWorkflowTests(unittest.TestCase):
             Client({}), self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor,
             firmware_copy=lambda: order.append("copy") or True,
+            power_cycle_prompt=lambda: True,
             event_sink=lambda _event: None,
         )
         deployer.POLL_INTERVAL_S = 0.001
@@ -198,7 +311,6 @@ class InstallationWorkflowTests(unittest.TestCase):
             manifest,
             snapshot=self.snapshot,
             event_sink=lambda _event: None,
-            firmware_already_copied=True,
         )
         deployer.POLL_INTERVAL_S = 0.001
         deployer.POLL_BACKOFF_MAX_S = 0.002
@@ -213,7 +325,9 @@ class InstallationWorkflowTests(unittest.TestCase):
         deployer = Deployer(
             Client({}), self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor,
-            firmware_deploy=lambda: order.append("flash") or True,
+            firmware_deploy=lambda: order.append("flash") or SimpleNamespace(
+                status=SimpleNamespace(value="FLASHED"), detail="flashed"
+            ),
             monitor_before_firmware=True,
             event_sink=lambda _event: None,
         )
@@ -230,7 +344,7 @@ class InstallationWorkflowTests(unittest.TestCase):
             firmware_copy=lambda: False, event_sink=lambda _event: None,
         )
         result = deployer.run()
-        self.assertEqual(result.state, DeployState.FAILED_UPLOAD)
+        self.assertEqual(result.state, DeployState.FAILED_FLASH)
         self.assertNotIn("arm", monitor.calls)
 
     def test_wait_is_indefinite_by_default(self):
@@ -244,7 +358,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         monitor = Monitor(cancel=True)
         client = Client({})
         result = self.make(client, monitor).run()
-        self.assertEqual(result.state, DeployState.ABORTED)
+        self.assertEqual(result.state, DeployState.CANCELLED)
         self.assertFalse(any(isinstance(c, tuple) and c[0] == "upload" for c in client.calls))
 
     def test_keyboard_interrupt_emits_terminal_aborted_event(self):
@@ -256,8 +370,8 @@ class InstallationWorkflowTests(unittest.TestCase):
 
         result = self.make(monitor=monitor, events=events).run()
 
-        self.assertEqual(result.state, DeployState.ABORTED)
-        self.assertEqual(events[-1]["state"], "ABORTED")
+        self.assertEqual(result.state, DeployState.CANCELLED)
+        self.assertEqual(events[-1]["state"], "CANCELLED")
         self.assertEqual(events[-1]["detail"], "cancelled by user")
 
     def test_renderer_failure_does_not_change_workflow_result(self):
@@ -337,6 +451,7 @@ class InstallationWorkflowTests(unittest.TestCase):
             manifest,
             snapshot=self.snapshot,
             mcu_monitor=Monitor(),
+            power_cycle_prompt=lambda: True,
             event_sink=lambda _event: None,
             firmware_already_copied=True,
         )

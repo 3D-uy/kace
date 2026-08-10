@@ -2,21 +2,32 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 
 from .models import (
+    DeploymentArtifactError,
     DeploymentExecutionContext,
     DeploymentInstruction,
     DeploymentPlan,
     DeploymentResult,
     DeploymentStatus,
     PreparedDeployment,
+    require_deployable_artifact,
 )
 
 
 class UsbDeploymentMethod:
     _SUPPORTED_BACKENDS = frozenset({"avrdude"})
+
+    @staticmethod
+    def _sha256(path: str) -> str:
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @staticmethod
     def _automation_blockers(artifact, target, profile) -> tuple[str, ...]:
@@ -35,6 +46,7 @@ class UsbDeploymentMethod:
         return tuple(blockers)
 
     def plan(self, *, deployment_id, artifact, target, profile, translate) -> DeploymentPlan:
+        require_deployable_artifact(artifact)
         blockers = self._automation_blockers(artifact, target, profile)
         instructions = tuple(
             DeploymentInstruction(
@@ -80,6 +92,20 @@ class UsbDeploymentMethod:
         context: DeploymentExecutionContext,
     ) -> DeploymentResult:
         plan = prepared.plan
+        try:
+            require_deployable_artifact(plan.artifact)
+            staged_digest = self._sha256(prepared.staged_path)
+            if staged_digest != prepared.sha256 or staged_digest != plan.artifact.sha256:
+                raise DeploymentArtifactError(
+                    "prepared firmware checksum no longer matches the immutable artifact"
+                )
+        except (DeploymentArtifactError, OSError) as exc:
+            return DeploymentResult(
+                DeploymentStatus.FAILED,
+                f"USB deployment rejected unsafe artifact: {exc}",
+                prepared,
+                error_code="ARTIFACT_UNSAFE",
+            )
         if not plan.automation_eligible:
             return DeploymentResult(
                 DeploymentStatus.ACTION_REQUIRED,

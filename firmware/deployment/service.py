@@ -14,12 +14,14 @@ from typing import Callable, Optional
 from core.translations import t
 
 from .models import (
+    DeploymentArtifactError,
     DeploymentExecutionContext,
     DeploymentMethodId,
     DeploymentResult,
     DeploymentStatus,
     DeploymentTarget,
     PreparedDeployment,
+    require_deployable_artifact,
 )
 from .profiles import DeploymentProfileResolver
 from .registry import DeploymentMethodRegistry
@@ -73,10 +75,15 @@ class FirmwareDeploymentService:
         self.event_sink(event)
 
     def available_methods(self, target: DeploymentTarget, artifact) -> tuple[DeploymentMethodId, ...]:
+        try:
+            require_deployable_artifact(artifact)
+        except DeploymentArtifactError:
+            return ()
         profiles = self.resolver.available(target, artifact.format)
         return tuple(dict.fromkeys(profile.method for profile in profiles))
 
     def plan(self, artifact, target: DeploymentTarget, method: DeploymentMethodId):
+        require_deployable_artifact(artifact)
         method = DeploymentMethodId(method)
         profile = self.resolver.resolve(target, artifact.format, method)
         deployment_id = str(uuid.uuid4())
@@ -99,6 +106,7 @@ class FirmwareDeploymentService:
         return plan
 
     def prepare(self, plan) -> PreparedDeployment:
+        require_deployable_artifact(plan.artifact)
         self._emit(plan.deployment_id, "PREPARING_ARTIFACT", "preparing deployment artifact")
         deployment_dir = os.path.join(self.output_dir, "deploy", plan.deployment_id)
         os.makedirs(deployment_dir, exist_ok=True)
@@ -143,6 +151,29 @@ class FirmwareDeploymentService:
     ) -> DeploymentResult:
         context = context or DeploymentExecutionContext()
         plan = prepared.plan
+        try:
+            require_deployable_artifact(plan.artifact)
+            staged_digest = _sha256(prepared.staged_path)
+            if staged_digest != prepared.sha256 or staged_digest != plan.artifact.sha256:
+                raise DeploymentArtifactError(
+                    "prepared firmware checksum no longer matches the immutable artifact"
+                )
+        except (DeploymentArtifactError, OSError) as exc:
+            result = DeploymentResult(
+                DeploymentStatus.FAILED,
+                f"firmware deployment rejected unsafe artifact: {exc}",
+                prepared,
+                error_code="ARTIFACT_UNSAFE",
+            )
+            self._emit(
+                plan.deployment_id,
+                "FAILED_FLASH",
+                result.detail,
+                method=plan.method.value,
+                error_code=result.error_code,
+            )
+            self._write_manifest(prepared, "FAILED_FLASH", result=result)
+            return result
         state = "FLASHING" if plan.automation_eligible else "AWAITING_USER_ACTION"
         self._emit(
             plan.deployment_id,
@@ -153,6 +184,7 @@ class FirmwareDeploymentService:
         )
         result = self.registry.get(plan.method).execute(prepared, context)
         terminal_state = {
+            DeploymentStatus.MEDIA_PREPARED: "MEDIA_PREPARED",
             DeploymentStatus.ACTION_REQUIRED: "ACTION_REQUIRED",
             DeploymentStatus.FLASHED: "FLASHED",
             DeploymentStatus.CANCELLED: "CANCELLED",

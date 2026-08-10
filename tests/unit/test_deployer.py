@@ -21,6 +21,7 @@ from core.deployer import (
 )
 from core.moonraker_deployer import DeployState
 from core.workflow_outcome import WorkflowOutcome, success
+from firmware.artifacts import BuildProvenance
 from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 
@@ -178,7 +179,12 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
             artifact_size=4096,
             artifact_format="bin",
         )
-        artifact = SimpleNamespace(firmware_identity=identity, sha256=digest)
+        artifact = SimpleNamespace(
+            firmware_identity=identity,
+            sha256=digest,
+            provenance=BuildProvenance.REAL,
+            flashable=True,
+        )
         prepared = SimpleNamespace(
             plan=SimpleNamespace(
                 method=SimpleNamespace(value="MANUAL"), artifact=artifact

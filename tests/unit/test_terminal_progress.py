@@ -41,8 +41,8 @@ class TerminalProgressRendererTests(unittest.TestCase):
         self.assertIn(renderer.ENTER_ALTERNATE, rendered)
         self.assertGreaterEqual(rendered.count(renderer.CLEAR_HOME), 2)
         self.assertIn("KACE installation [workflow]", rendered)
-        self.assertIn("[x] MCU disconnected", rendered)
-        self.assertIn("[>] Waiting for MCU to return", rendered)
+        self.assertIn("[x] Firmware media prepared", rendered)
+        self.assertIn("[>] Safe media installation", rendered)
         self.assertIn("[ ] Installation completed", rendered)
         self.assertIn("Press Ctrl+C to cancel safely.", rendered)
 
@@ -100,13 +100,13 @@ class TerminalProgressRendererTests(unittest.TestCase):
                 self.assertIn(state, output.getvalue())
                 self.assertNotIn("[DONE", output.getvalue())
 
-    def test_ctrl_c_cancellation_event_is_rendered_as_aborted(self):
+    def test_ctrl_c_cancellation_event_is_rendered_as_cancelled(self):
         output = io.StringIO()
         renderer = TerminalProgressRenderer(output, interactive=False)
-        renderer(event(state="ABORTED", detail="cancelled by user"))
+        renderer(event(state="CANCELLED", detail="cancelled by user"))
 
         self.assertIn("[ERROR", output.getvalue())
-        self.assertIn("ABORTED: cancelled by user", output.getvalue())
+        self.assertIn("CANCELLED: cancelled by user", output.getvalue())
 
     def test_renderer_failure_does_not_block_structured_event_sink(self):
         protocol = io.StringIO()

@@ -23,6 +23,7 @@ from firmware.deployment import (
     DeploymentMethodId,
     DeploymentTarget,
     FirmwareDeploymentService,
+    deployment_artifact_blockers,
 )
 
 
@@ -331,6 +332,11 @@ def run_firmware_wizard(user_data: dict):
             mcu_name=user_data.get('mcu_name', 'mcu'),
         )
         available = service.available_methods(target, artifact)
+        artifact_blockers = deployment_artifact_blockers(artifact)
+        if artifact_blockers:
+            print("\n\033[93m[!] Firmware deployment is disabled for this artifact:\033[0m")
+            for blocker in artifact_blockers:
+                print(f"    - {blocker}")
         deploy_options = [
             {"name": f"✅  {t('kace.deploy_none')}", "value": "none"},
         ]
