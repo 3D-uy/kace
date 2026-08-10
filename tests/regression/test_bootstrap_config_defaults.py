@@ -152,10 +152,13 @@ SUDO=""
             self.assertEqual(moonraker.count("enable_object_processing: True"), 1)
             self.assertIn("queue_gcode_uploads: True", moonraker)
 
-    def test_bootstrap_applies_all_three_defaults(self):
+    def test_bootstrap_only_reconciles_the_moonraker_default(self):
         script = BOOTSTRAP.read_text(encoding="utf-8")
-        self.assertIn('"exclude_object"', script)
-        self.assertIn('"force_move" "enable_force_move" "True"', script)
+        config_block = script.split('# ── 5. Printer Data Directories & Config Files', 1)[1].split(
+            '# ── 6. Dashboard UI', 1
+        )[0]
+        self.assertNotIn('"exclude_object"', config_block)
+        self.assertNotIn('"force_move" "enable_force_move" "True"', config_block)
         self.assertIn('"file_manager" "enable_object_processing" "True"', script)
 
     def test_requested_relay_replaces_existing_values_and_verifies(self):
