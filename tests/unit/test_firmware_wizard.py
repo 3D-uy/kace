@@ -7,13 +7,48 @@ from unittest.mock import patch, MagicMock
 import io
 import sys
 
-from core.firmware_wizard import _processor_validator_for_architecture, run_firmware_wizard
+from core.firmware_wizard import (
+    _processor_validator_for_architecture,
+    _read_deployment_usb_identity,
+    run_firmware_wizard,
+)
 from core.exceptions import DerivationAmbiguityError
+from core.mcu_monitor import McuIdentity, McuMonitorUnavailable
 from core.moonraker_deployer import DeployResult, DeployState
 from core.translations import t
 from firmware.deployment import DeploymentMethodId
 
 class TestFirmwareWizard(unittest.TestCase):
+
+    @patch("core.mcu_monitor.McuIdentityReader.read")
+    def test_deployment_usb_identity_uses_observed_udev_facts(self, mock_read):
+        mock_read.return_value = McuIdentity(
+            configured_path="/dev/serial/by-id/mega",
+            device_node="/dev/ttyACM0",
+            physical_path="pci-0000:00:14.0-usb-0:2:1.0",
+            vendor_id="2341",
+            model_id="0042",
+        )
+
+        result = _read_deployment_usb_identity("/dev/serial/by-id/mega")
+
+        self.assertEqual(
+            result,
+            {
+                "usb_vid": "2341",
+                "usb_pid": "0042",
+                "usb_path": "pci-0000:00:14.0-usb-0:2:1.0",
+            },
+        )
+
+    @patch("core.mcu_monitor.McuIdentityReader.read")
+    def test_deployment_usb_identity_fails_closed_when_udev_is_unavailable(self, mock_read):
+        mock_read.side_effect = McuMonitorUnavailable("udevadm unavailable")
+
+        self.assertEqual(
+            _read_deployment_usb_identity("/dev/serial/by-id/mega"),
+            {},
+        )
 
     def test_architecture_processor_validator_returns_error_instead_of_raising(self):
         result = _processor_validator_for_architecture("stm32")("not-a-processor")

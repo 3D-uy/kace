@@ -22,6 +22,7 @@ from core.deployer import (
 from core.moonraker_deployer import DeployState
 from core.workflow_outcome import WorkflowOutcome, success
 from firmware.artifacts import BuildProvenance
+from firmware.deployment import DeploymentStrategyId
 from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 
@@ -216,6 +217,18 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
 
         self.assertEqual(result.state, DeployState.FAILED_FLASH)
         self.assertIn("does not match", result.detail)
+        user["firmware_deployment_service"].execute.assert_not_called()
+
+    def test_prepare_only_strategy_cannot_enter_integrated_physical_workflow(self):
+        user = self._user()
+        user["prepared_firmware_deployment"].plan.profile = SimpleNamespace(
+            strategy=DeploymentStrategyId.PREPARE_ONLY
+        )
+
+        result = deploy_firmware_installation(user)
+
+        self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
+        self.assertIn("only prepares", result.detail)
         user["firmware_deployment_service"].execute.assert_not_called()
 
     @patch("core.deployer._preflight_check", return_value=True)

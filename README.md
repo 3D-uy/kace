@@ -111,7 +111,7 @@ Machine-readable stage and error markers in `scripts/bootstrap.sh` are consumed 
 | 🖨️ Motion and probing | Configuration generation for implemented Cartesian and CoreXY flows; no probe, BLTouch, CR Touch, inductive, and custom probe flows. |
 | 🖥️ Displays | Compatibility checks and generated display configuration where supported. |
 | 📄 Generated artifacts | Klipper configuration and macro generation from project templates, stored under `~/kace/` on the printer host. |
-| ⚙️ Firmware | Optional Klipper MCU firmware derivation and build; deployment-agnostic firmware artifacts plus MANUAL and safety-gated USB strategies. |
+| ⚙️ Firmware | Optional Klipper MCU firmware derivation and build; exact board strategies for validated AVRDUDE, SD-card, and UF2 preparation workflows, with unsupported boards limited to prepare-only. |
 | 📦 Deployment | Local/removable-media, SSH/SFTP, and Moonraker configuration deployment paths; backup, validation, and rollback support around deployment. |
 
 Unsupported or contradictory selections are expected to fail safely rather than produce a configuration that is known to be invalid.
@@ -193,8 +193,8 @@ For an integrated firmware path, KACE displays transactional installation progre
 | `core/wizard/` | Interactive workflow and normalized user selections. |
 | `core/scraper.py`, `core/hardware_detector.py` | Upstream configuration retrieval and hardware discovery. |
 | `core/generator.py`, `core/templates.py` | Klipper configuration and macro generation. |
-| `firmware/` | Firmware derivation/build plus typed artifacts and MANUAL/USB deployment strategies. |
-| `data/firmware_deployments.yaml` | Final filenames, instructions, and allow-listed USB safety profiles. |
+| `firmware/` | Firmware derivation/build plus typed artifacts and exact board-specific deployment strategies. |
+| `data/firmware_deployments.yaml` | Exact board IDs, native/final artifact names, bootloader offsets, entry instructions, USB identity expectations, physical methods, and post-flash verification contracts. |
 | `core/deployer.py`, `core/moonraker.py`, `core/moonraker_deployer.py` | Deployment, transactional installation, remote transfer, backup, and rollback paths. |
 | `core/terminal_progress.py` | Native TTY and line-oriented views of canonical installation events. |
 | `data/`, `templates/`, `config/` | Board contracts, translations, generated-content templates, and configuration data. |

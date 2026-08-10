@@ -111,7 +111,7 @@ Los marcadores legibles por máquina de etapas y errores en `scripts/bootstrap.s
 | 🖨️ Movimiento y sondas | Generación de configuración para flujos Cartesian y CoreXY implementados; sin sonda, BLTouch, CR Touch, inductiva y sonda personalizada. |
 | 🖥️ Pantallas | Comprobaciones de compatibilidad y configuración de pantalla generada donde se admite. |
 | 📄 Artefactos generados | Generación de configuración y macros de Klipper desde plantillas del proyecto, almacenadas bajo `~/kace/` en el host de impresora. |
-| ⚙️ Firmware | Derivación y compilación opcionales de firmware Klipper para MCU; artefactos de firmware agnósticos al despliegue más estrategias MANUAL y USB protegida. |
+| ⚙️ Firmware | Derivación y compilación opcionales de firmware Klipper para MCU; estrategias exactas por placa para AVRDUDE, tarjeta SD y preparación UF2 validadas, con placas desconocidas limitadas a solo preparar. |
 | 📦 Despliegue | Rutas de despliegue de configuración por medio local/extraíble, SSH/SFTP y Moonraker; soporte de respaldo, validación y rollback alrededor del despliegue. |
 
 Se espera que las selecciones incompatibles o contradictorias fallen de forma segura, en lugar de producir una configuración que se sabe inválida.
@@ -193,8 +193,8 @@ Para una ruta de firmware integrada, KACE muestra el progreso transaccional de i
 | `core/wizard/` | Flujo interactivo y selecciones normalizadas de la persona usuaria. |
 | `core/scraper.py`, `core/hardware_detector.py` | Obtención de configuración upstream y descubrimiento de hardware. |
 | `core/generator.py`, `core/templates.py` | Generación de configuración y macros de Klipper. |
-| `firmware/` | Derivación/compilación de firmware más artefactos tipados y estrategias de despliegue MANUAL/USB. |
-| `data/firmware_deployments.yaml` | Nombres finales, instrucciones y perfiles de seguridad USB permitidos. |
+| `firmware/` | Derivación/compilación de firmware más artefactos tipados y estrategias exactas de despliegue por placa. |
+| `data/firmware_deployments.yaml` | IDs exactos de placa, nombres nativos/finales, offsets de bootloader, instrucciones de entrada, identidad USB esperada, método físico y contrato de verificación posterior. |
 | `core/deployer.py`, `core/moonraker.py`, `core/moonraker_deployer.py` | Rutas de despliegue, instalación transaccional, transferencia remota, respaldo y rollback. |
 | `core/terminal_progress.py` | Vistas TTY nativas y orientadas a líneas de los eventos canónicos de instalación. |
 | `data/`, `templates/`, `config/` | Contratos de placa, traducciones, plantillas de contenido generado y datos de configuración. |

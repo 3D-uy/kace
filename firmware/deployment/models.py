@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Callable, Optional
 
 from firmware.artifacts import BuildArtifact, BuildProvenance, FirmwareFormat
+from firmware.configuration import BootloaderOffset
 
 
 class DeploymentMethodId(str, Enum):
@@ -20,6 +21,26 @@ class DeploymentStatus(str, Enum):
     FLASHED = "FLASHED"
     CANCELLED = "CANCELLED"
     FAILED = "FAILED"
+
+
+class DeploymentStrategyId(str, Enum):
+    """Physical delivery mechanism selected by an exact board profile."""
+
+    PREPARE_ONLY = "PREPARE_ONLY"
+    SD_CARD = "SD_CARD"
+    AVRDUDE = "AVRDUDE"
+
+
+class UsbTopology(str, Enum):
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    USB_SERIAL_BRIDGE = "USB_SERIAL_BRIDGE"
+    NATIVE_USB_CDC = "NATIVE_USB_CDC"
+    RP2040_BOOTSEL_MASS_STORAGE = "RP2040_BOOTSEL_MASS_STORAGE"
+
+
+class PostFlashVerification(str, Enum):
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    KLIPPER_BUILD_ID = "KLIPPER_BUILD_ID"
 
 
 class DeploymentArtifactError(ValueError):
@@ -63,6 +84,29 @@ class DeploymentTarget:
     mcu: str
     device_path: str = ""
     mcu_name: str = "mcu"
+    usb_vid: str = ""
+    usb_pid: str = ""
+    usb_path: str = ""
+
+    @property
+    def usb_vid_pid(self) -> str:
+        if not self.usb_vid or not self.usb_pid:
+            return ""
+        return f"{self.usb_vid.lower()}:{self.usb_pid.lower()}"
+
+
+@dataclass(frozen=True)
+class UsbIdentityExpectation:
+    topology: UsbTopology
+    application_vid_pids: tuple[str, ...] = ()
+    bootloader_vid_pids: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {
+            "topology": self.topology.value,
+            "application_vid_pids": list(self.application_vid_pids),
+            "bootloader_vid_pids": list(self.bootloader_vid_pids),
+        }
 
 
 @dataclass(frozen=True)
@@ -71,13 +115,51 @@ class DeploymentProfile:
     method: DeploymentMethodId
     board_patterns: tuple[str, ...]
     formats: tuple[FirmwareFormat, ...]
+    config_mcu: str
+    native_filenames: tuple[str, ...]
     final_filename: str
     instruction_keys: tuple[str, ...]
+    strategy: DeploymentStrategyId
+    bootloader_offset: Optional[BootloaderOffset]
+    usb: UsbIdentityExpectation
+    post_flash_verification: PostFlashVerification
     mcu_patterns: tuple[str, ...] = ()
     exact_match_required: bool = False
     auto_flash: bool = False
     backend: str = ""
     backend_options: dict = field(default_factory=dict)
+    fallback: bool = False
+
+    def to_dict(self) -> dict:
+        offset = self.bootloader_offset
+        return {
+            "id": self.id,
+            "method": self.method.value,
+            "board_ids": list(self.board_patterns),
+            "formats": [item.value for item in self.formats],
+            "config_mcu": self.config_mcu,
+            "native_filenames": list(self.native_filenames),
+            "final_filename": self.final_filename,
+            "instructions": list(self.instruction_keys),
+            "strategy": self.strategy.value,
+            "bootloader_offset": (
+                None
+                if offset is None
+                else {
+                    "kind": offset.kind.value,
+                    "address": offset.address,
+                    "kconfig_value": offset.kconfig_value,
+                }
+            ),
+            "usb": self.usb.to_dict(),
+            "post_flash_verification": self.post_flash_verification.value,
+            "mcu_patterns": list(self.mcu_patterns),
+            "exact_match_required": self.exact_match_required,
+            "auto_flash": self.auto_flash,
+            "backend": self.backend,
+            "backend_options": dict(self.backend_options),
+            "fallback": self.fallback,
+        }
 
 
 @dataclass(frozen=True)
@@ -98,6 +180,7 @@ class DeploymentPlan:
             "deployment_id": self.deployment_id,
             "method": self.method.value,
             "profile_id": self.profile.id,
+            "profile": self.profile.to_dict(),
             "target": asdict(self.target),
             "artifact": self.artifact.to_dict(),
             "final_filename": self.final_filename,

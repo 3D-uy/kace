@@ -79,13 +79,20 @@ class FirmwareDeploymentService:
             require_deployable_artifact(artifact)
         except DeploymentArtifactError:
             return ()
-        profiles = self.resolver.available(target, artifact.format)
+        profiles = self.resolver.available(target, artifact)
         return tuple(dict.fromkeys(profile.method for profile in profiles))
+
+    def profile_blockers(self, target: DeploymentTarget, artifact) -> tuple[str, ...]:
+        try:
+            require_deployable_artifact(artifact)
+        except DeploymentArtifactError as exc:
+            return (str(exc),)
+        return self.resolver.blockers(target, artifact)
 
     def plan(self, artifact, target: DeploymentTarget, method: DeploymentMethodId):
         require_deployable_artifact(artifact)
         method = DeploymentMethodId(method)
-        profile = self.resolver.resolve(target, artifact.format, method)
+        profile = self.resolver.resolve(target, artifact, method)
         deployment_id = str(uuid.uuid4())
         strategy = self.registry.get(method)
         plan = strategy.plan(

@@ -27,6 +27,25 @@ from firmware.deployment import (
 )
 
 
+def _read_deployment_usb_identity(device_path):
+    """Best-effort current USB facts; absence disables automatic flashing."""
+    if not device_path:
+        return {}
+    from core.mcu_monitor import McuIdentityReader, McuMonitorError
+
+    try:
+        identity = McuIdentityReader().read(device_path)
+    except (McuMonitorError, OSError):
+        return {}
+    if identity is None:
+        return {}
+    return {
+        "usb_vid": identity.vendor_id,
+        "usb_pid": identity.model_id,
+        "usb_path": identity.physical_path,
+    }
+
+
 def _cancel_firmware_configuration():
     print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
     sys.exit(0)
@@ -325,17 +344,23 @@ def run_firmware_wizard(user_data: dict):
             )
 
         service = FirmwareDeploymentService(output_dir="~/kace")
+        mcu_path = user_data.get('mcu_path') or ""
         target = DeploymentTarget(
             board=user_data.get('board') or "",
             mcu=result.get('mcu') or current_mcu or "",
-            device_path=user_data.get('mcu_path') or "",
+            device_path=mcu_path,
             mcu_name=user_data.get('mcu_name', 'mcu'),
+            **_read_deployment_usb_identity(mcu_path),
         )
         available = service.available_methods(target, artifact)
         artifact_blockers = deployment_artifact_blockers(artifact)
         if artifact_blockers:
             print("\n\033[93m[!] Firmware deployment is disabled for this artifact:\033[0m")
             for blocker in artifact_blockers:
+                print(f"    - {blocker}")
+        elif not available:
+            print("\n\033[93m[!] The exact board strategy rejected this build:\033[0m")
+            for blocker in service.profile_blockers(target, artifact):
                 print(f"    - {blocker}")
         deploy_options = [
             {"name": f"✅  {t('kace.deploy_none')}", "value": "none"},

@@ -942,7 +942,11 @@ def deploy_firmware_installation(user_data):
         ConfigArtifact, Deployer, DeploymentManifest, DeployResult, DeployState, McuTarget,
     )
     from core.snapshot import create_snapshot
-    from firmware.deployment import DeploymentArtifactError, require_deployable_artifact
+    from firmware.deployment import (
+        DeploymentArtifactError,
+        DeploymentStrategyId,
+        require_deployable_artifact,
+    )
     from firmware.identity import FirmwareBuildIdentity
 
     mcu_path = user_data.get("mcu_path", "")
@@ -957,6 +961,15 @@ def deploy_firmware_installation(user_data):
         return DeployResult(
             DeployState.FAILED_FLASH,
             f"firmware artifact is not deployable: {exc}",
+        )
+    profile = getattr(getattr(prepared, "plan", None), "profile", None)
+    if getattr(profile, "strategy", None) is DeploymentStrategyId.PREPARE_ONLY:
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            (
+                "the selected board strategy only prepares a firmware artifact; "
+                "complete its explicit manual procedure before deploying configuration"
+            ),
         )
     identity = getattr(artifact, "firmware_identity", None)
     if not isinstance(identity, FirmwareBuildIdentity):

@@ -13,6 +13,7 @@ from .models import (
     DeploymentPlan,
     DeploymentResult,
     DeploymentStatus,
+    DeploymentStrategyId,
     PreparedDeployment,
     require_deployable_artifact,
 )
@@ -32,6 +33,8 @@ class UsbDeploymentMethod:
     @staticmethod
     def _automation_blockers(artifact, target, profile) -> tuple[str, ...]:
         blockers = []
+        if profile.strategy is not DeploymentStrategyId.AVRDUDE:
+            blockers.append("board profile is not an AVRDUDE strategy")
         if not profile.auto_flash:
             blockers.append("board profile does not allow automatic USB flashing")
         if profile.backend not in UsbDeploymentMethod._SUPPORTED_BACKENDS:
@@ -43,6 +46,14 @@ class UsbDeploymentMethod:
         device = target.device_path or ""
         if not device.startswith("/dev/serial/by-id/"):
             blockers.append("a unique /dev/serial/by-id device is required")
+        expected_vid_pids = profile.usb.application_vid_pids
+        observed_vid_pid = target.usb_vid_pid
+        if expected_vid_pids and not observed_vid_pid:
+            blockers.append("USB VID:PID could not be verified")
+        elif expected_vid_pids and observed_vid_pid not in expected_vid_pids:
+            blockers.append(
+                f"USB VID:PID {observed_vid_pid} is not allowed by the exact board profile"
+            )
         return tuple(blockers)
 
     def plan(self, *, deployment_id, artifact, target, profile, translate) -> DeploymentPlan:
@@ -51,7 +62,12 @@ class UsbDeploymentMethod:
         instructions = tuple(
             DeploymentInstruction(
                 key,
-                translate(key, filename=profile.final_filename, device=target.device_path or "USB"),
+                translate(
+                    key,
+                    filename=profile.final_filename,
+                    device=target.device_path or "USB",
+                    board=target.board or "unknown board",
+                ),
             )
             for key in profile.instruction_keys
         )
@@ -71,6 +87,8 @@ class UsbDeploymentMethod:
     @staticmethod
     def _avrdude_command(prepared: PreparedDeployment) -> list[str]:
         profile = prepared.plan.profile
+        if profile.strategy is not DeploymentStrategyId.AVRDUDE:
+            raise ValueError("USB profile is not an AVRDUDE strategy")
         options = profile.backend_options
         part = str(options.get("part", "")).strip()
         programmer = str(options.get("programmer", "")).strip()

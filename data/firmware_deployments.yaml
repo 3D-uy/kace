@@ -1,49 +1,78 @@
 {
   "profiles": [
     {
-      "id": "manual-bin",
+      "id": "ramps-atmega2560-prepare",
       "method": "MANUAL",
-      "formats": ["BIN"],
-      "final_filename": "firmware.bin",
-      "instructions": [
-        "deployment.manual.copy",
-        "deployment.manual.eject",
-        "deployment.manual.power_cycle"
-      ]
-    },
-    {
-      "id": "manual-uf2",
-      "method": "MANUAL",
-      "formats": ["UF2"],
-      "final_filename": "firmware.uf2",
-      "instructions": [
-        "deployment.manual.copy",
-        "deployment.manual.eject",
-        "deployment.manual.power_cycle"
-      ]
-    },
-    {
-      "id": "manual-ihex",
-      "method": "MANUAL",
-      "formats": ["IHEX"],
-      "final_filename": "firmware.hex",
-      "instructions": [
-        "deployment.manual.copy",
-        "deployment.manual.power_cycle"
-      ]
-    },
-    {
-      "id": "usb-ramps-atmega2560",
-      "method": "USB",
-      "board_patterns": ["generic-ramps.cfg"],
+      "strategy": "PREPARE_ONLY",
+      "board_ids": ["generic-ramps.cfg"],
       "mcu_patterns": ["atmega2560"],
       "exact_match_required": true,
       "formats": ["IHEX"],
-      "final_filename": "firmware.hex",
+      "config_mcu": "avr",
+      "native_filenames": ["klipper.elf.hex"],
+      "final_filename": "klipper.elf.hex",
+      "bootloader_offset": "NOT_APPLICABLE",
+      "instructions": [
+        "deployment.ramps.prepare",
+        "deployment.ramps.avrdude_manual"
+      ],
+      "usb": {
+        "topology": "USB_SERIAL_BRIDGE",
+        "application_vid_pids": [
+          "2341:0010",
+          "2341:0042",
+          "2a03:0010",
+          "2a03:0042",
+          "2341:0210",
+          "2341:0242"
+        ],
+        "bootloader_vid_pids": [
+          "2341:0010",
+          "2341:0042",
+          "2a03:0010",
+          "2a03:0042",
+          "2341:0210",
+          "2341:0242"
+        ]
+      },
+      "post_flash_verification": "KLIPPER_BUILD_ID"
+    },
+    {
+      "id": "ramps-atmega2560-avrdude",
+      "method": "USB",
+      "strategy": "AVRDUDE",
+      "board_ids": ["generic-ramps.cfg"],
+      "mcu_patterns": ["atmega2560"],
+      "exact_match_required": true,
+      "formats": ["IHEX"],
+      "config_mcu": "avr",
+      "native_filenames": ["klipper.elf.hex"],
+      "final_filename": "klipper.elf.hex",
+      "bootloader_offset": "NOT_APPLICABLE",
       "instructions": [
         "deployment.usb.connect",
         "deployment.usb.keep_power"
       ],
+      "usb": {
+        "topology": "USB_SERIAL_BRIDGE",
+        "application_vid_pids": [
+          "2341:0010",
+          "2341:0042",
+          "2a03:0010",
+          "2a03:0042",
+          "2341:0210",
+          "2341:0242"
+        ],
+        "bootloader_vid_pids": [
+          "2341:0010",
+          "2341:0042",
+          "2a03:0010",
+          "2a03:0042",
+          "2341:0210",
+          "2341:0242"
+        ]
+      },
+      "post_flash_verification": "KLIPPER_BUILD_ID",
       "auto_flash": true,
       "backend": "avrdude",
       "backend_options": {
@@ -51,6 +80,56 @@
         "programmer": "wiring",
         "baud": 115200
       }
+    },
+    {
+      "id": "skr-mini-e3-v3-sd-card",
+      "method": "MANUAL",
+      "strategy": "SD_CARD",
+      "board_ids": ["generic-bigtreetech-skr-mini-e3-v3.0.cfg"],
+      "mcu_patterns": ["stm32g0b1"],
+      "exact_match_required": true,
+      "formats": ["BIN"],
+      "config_mcu": "stm32",
+      "native_filenames": ["klipper.bin"],
+      "final_filename": "firmware.bin",
+      "bootloader_offset": "0x2000",
+      "instructions": [
+        "deployment.skr_mini_e3_v3.copy",
+        "deployment.manual.eject",
+        "deployment.skr_mini_e3_v3.power_cycle"
+      ],
+      "usb": {
+        "topology": "NATIVE_USB_CDC",
+        "application_vid_pids": ["1d50:614e"],
+        "bootloader_vid_pids": []
+      },
+      "post_flash_verification": "KLIPPER_BUILD_ID"
+    },
+    {
+      "id": "skr-pico-v1-bootsel",
+      "method": "MANUAL",
+      "strategy": "PREPARE_ONLY",
+      "board_ids": [
+        "generic-bigtreetech-skr-pico-v1.0.cfg",
+        "generic-bigtreetech-skr-pico.cfg"
+      ],
+      "mcu_patterns": ["rp2040"],
+      "exact_match_required": true,
+      "formats": ["UF2"],
+      "config_mcu": "rp2040",
+      "native_filenames": ["klipper.uf2"],
+      "final_filename": "klipper.uf2",
+      "bootloader_offset": "NOT_APPLICABLE",
+      "instructions": [
+        "deployment.skr_pico.bootsel",
+        "deployment.skr_pico.copy"
+      ],
+      "usb": {
+        "topology": "RP2040_BOOTSEL_MASS_STORAGE",
+        "application_vid_pids": ["1d50:614e"],
+        "bootloader_vid_pids": ["2e8a:0003"]
+      },
+      "post_flash_verification": "KLIPPER_BUILD_ID"
     }
   ]
 }
