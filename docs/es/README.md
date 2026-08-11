@@ -146,7 +146,7 @@ El comando de conveniencia instala desde la rama mutable `main`:
 bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
 ```
 
-Esto transmite contenido de red directamente a Bash. Para una instalación auditable, descarga `install.sh` desde un commit o tag inmutable, verifica su SHA-256 con un valor confiable por separado, inspecciónalo y después ejecútalo. `install.sh` respeta `KACE_SOURCE_REF`, de modo que un integrador puede instalar el contenido del repositorio desde la misma revisión inmutable que el instalador.
+Esto transmite contenido de red directamente a Bash. Para una instalación auditable, descarga `install.sh` desde un commit completo e inmutable, verifica su SHA-256 con un valor confiable por separado, inspecciónalo y ejecútalo con `KACE_SOURCE_REF` y `KACE_EXPECTED_COMMIT` fijados a ese commit. El instalador verifica el commit obtenido y el checkout, crea un entorno virtual nuevo en staging y publica únicamente los paths de runtime que controla, con rollback. Los artefactos generados existentes bajo `~/kace/` permanecen intactos.
 
 ### Ejecutar desde un clon del código fuente
 

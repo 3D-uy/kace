@@ -146,7 +146,7 @@ O comando de conveniência instala a partir da branch mutável `main`:
 bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
 ```
 
-Isso transmite conteúdo de rede diretamente para o Bash. Para uma instalação auditável, baixe `install.sh` de um commit ou tag imutável, verifique seu SHA-256 por meio de um valor confiável separado, inspecione-o e então execute-o. `install.sh` respeita `KACE_SOURCE_REF`, de modo que um integrador pode instalar o conteúdo do repositório da mesma revisão imutável que o instalador.
+Isso transmite conteúdo de rede diretamente para o Bash. Para uma instalação auditável, baixe `install.sh` de um commit completo e imutável, verifique seu SHA-256 por meio de um valor confiável separado, inspecione-o e execute-o com `KACE_SOURCE_REF` e `KACE_EXPECTED_COMMIT` fixados nesse commit. O instalador verifica o commit obtido e o checkout, cria um ambiente virtual novo em staging e publica somente os caminhos de runtime que controla, com rollback. Os artefatos gerados existentes em `~/kace/` permanecem intactos.
 
 ### Executar a partir de um checkout do código-fonte
 
