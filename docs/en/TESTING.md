@@ -129,7 +129,7 @@ Mock firmware created by the interactive development container is not flashable.
 
 | Job | Trigger | Validation |
 | --- | --- | --- |
-| `lint` | Push and pull request | Compile every Python file |
+| `lint` | Push, pull request, and manual dispatch | Compile every Python file; run `bash -n` and pinned ShellCheck over critical scripts |
 | `unit-tests` | Push and pull request | Full default test discovery |
 | `simulated-hardware-integration` | Push and pull request | Stateful Moonraker/power/udev firmware workflow without physical devices |
 | `yaml-integrity` | Push and pull request | Board schema and precedence |

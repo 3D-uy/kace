@@ -43,6 +43,26 @@ jobs:
       - name: Reject developer-local paths
         run: python3 scripts/check_portability.py
 
+      - name: Install pinned ShellCheck
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          archive="shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/${archive}" \
+            --output "${RUNNER_TEMP}/${archive}"
+          echo "${SHELLCHECK_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          tar -xJf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/shellcheck-${SHELLCHECK_VERSION}" >> "${GITHUB_PATH}"
+
+      - name: Validate critical shell scripts
+        run: |
+          bash -n install.sh
+          bash -n scripts/bootstrap.sh
+          bash -n docker/ci/entrypoint.sh
+          shellcheck --severity=warning install.sh scripts/bootstrap.sh docker/ci/entrypoint.sh
+
   # ── Stage 2: Unit tests ──────────────────────────────────────────────────────
   unit-tests:
     name: Unit Tests

@@ -26,6 +26,19 @@ class ReproducibleCiContractTests(unittest.TestCase):
         self.assertIn("--require-hashes -r requirements-ssh.txt", dockerfile)
         self.assertNotIn("pip install --no-cache-dir paramiko==", dockerfile)
 
+    def test_critical_shell_scripts_have_pinned_syntax_and_shellcheck_gates(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("SHELLCHECK_VERSION: v0.11.0", workflow)
+        self.assertRegex(workflow, r"SHELLCHECK_SHA256: [0-9a-f]{64}")
+        for script in ("install.sh", "scripts/bootstrap.sh", "docker/ci/entrypoint.sh"):
+            self.assertIn(f"bash -n {script}", workflow)
+        self.assertIn(
+            "shellcheck --severity=warning install.sh scripts/bootstrap.sh docker/ci/entrypoint.sh",
+            workflow,
+        )
+
     def test_simulated_hardware_lab_is_an_explicit_merge_gate(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
