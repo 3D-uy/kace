@@ -64,15 +64,23 @@ class SshBoundaryTests(unittest.TestCase):
 
     @patch("core.deployer._run_config_transaction", return_value=success("done"))
     @patch("core.menu.numbered_select", return_value="service")
+    @patch("core.deployer._connect_ssh_client")
     @patch("core.deployer._require_paramiko")
-    def test_ssh_builds_shared_transport_and_closes_resources(self, require, _select, run):
+    def test_ssh_builds_shared_transport_and_closes_resources(
+        self, require, connect, _select, run
+    ):
         require.return_value = self.paramiko
+        connect.return_value = self.ssh
         result = deploy_config(self.user)
 
         self.assertTrue(result.ok)
         self.assertNotIn("password", self.user)
-        self.ssh.connect.assert_called_once_with(
-            "pi.local", username="kace", password="secret", timeout=10
+        connect.assert_called_once_with(
+            self.paramiko,
+            "pi.local",
+            username="kace",
+            password="secret",
+            timeout=10,
         )
         transport, passed_user, activation, generated = run.call_args.args
         self.assertEqual(transport.config_dir, "/home/kace/printer_data/config")
@@ -83,14 +91,14 @@ class SshBoundaryTests(unittest.TestCase):
         self.sftp.close.assert_called_once()
         self.ssh.close.assert_called_once()
 
+    @patch("core.deployer._connect_ssh_client")
     @patch("core.deployer._require_paramiko")
-    def test_authentication_failure_is_terminal_and_resources_close(self, require):
+    def test_authentication_failure_is_terminal_and_resources_close(self, require, connect):
         require.return_value = self.paramiko
-        self.ssh.connect.side_effect = FakeParamiko.AuthenticationException("bad credentials")
+        connect.side_effect = FakeParamiko.AuthenticationException("bad credentials")
         result = deploy_config(self.user)
         self.assertEqual(result.outcome, WorkflowOutcome.DEPLOYMENT_FAILED)
         self.assertIn("authentication", result.detail.lower())
-        self.ssh.close.assert_called_once()
 
     @patch("core.deployer._require_paramiko", return_value=None)
     def test_missing_paramiko_is_precondition_failure(self, _require):

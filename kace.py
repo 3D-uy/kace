@@ -16,16 +16,14 @@ except (AttributeError, OSError):
     pass
 
 # ── Early argument handling (no heavy imports needed) ─────────
-# Q-03: Migrated from manual sys.argv loop to argparse so the CLI surface
-# scales cleanly as new flags are added. parse_known_args() is used here
-# so unrecognised args are silently ignored rather than causing a hard error
-# before the main import block runs.
+# Parse the complete public CLI surface before loading heavier modules. Normal
+# execution is strict; importing kace for its version/API does not consume the
+# embedding process's arguments.
 import argparse as _argparse
 import json as _json
 _ap = _argparse.ArgumentParser(
     prog="kace",
     description="Klipper Automated Configuration Ecosystem",
-    add_help=False,  # defer --help to after full imports load
 )
 _ap.add_argument("--version", "-v", action="store_true", help="Print version and exit")
 _ap.add_argument("--auto", action="store_true", help="Non-interactive mode (CI/auto deploy)")
@@ -37,7 +35,7 @@ _ap.add_argument(
     choices=("status", "on", "off", "wait"),
     help="Run one non-interactive Moonraker power operation and return JSON",
 )
-_known, _ = _ap.parse_known_args()
+_known = _ap.parse_args() if __name__ == "__main__" else _ap.parse_args([])
 
 if _known.version:
     print(f"KACE {__version__}")

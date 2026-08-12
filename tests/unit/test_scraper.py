@@ -3,16 +3,16 @@ from core.scraper import parse_config
 
 class TestScraper(unittest.TestCase):
 
-    def test_bltouch_fallback_matches_boards_yaml(self):
-        """The emergency fallback must stay identical to the canonical YAML data."""
+    def test_bltouch_loader_reads_authoritative_boards_yaml(self):
+        """BLTouch data must come directly from the canonical YAML database."""
         from core.loader import load_boards_yaml
-        from core.scraper import _BLTOUCH_FALLBACK
+        from core.scraper import _load_bltouch_db
 
         expected = {}
         for board in load_boards_yaml().get("boards", []):
             expected.update(board.get("bltouch", {}))
 
-        self.assertEqual(_BLTOUCH_FALLBACK, expected)
+        self.assertEqual(_load_bltouch_db(), expected)
 
     def test_bltouch_injection(self):
         """Ensure BLTouch pins are correctly injected based on filename matching."""

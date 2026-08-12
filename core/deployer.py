@@ -5,6 +5,11 @@ import shutil
 import sys
 import tempfile
 
+from core.known_hosts import (
+    get_known_hosts_path,
+    known_hosts_lock,
+    persist_host_keys_atomically,
+)
 from core.workflow_outcome import (
     WorkflowOutcome,
     cancelled,
@@ -140,8 +145,8 @@ class _InteractiveHostKeyPolicy:
     chance to abort. This policy shows the key fingerprint and requires an
     explicit yes before the connection is made.
 
-    On acceptance the key is saved to ~/.ssh/known_hosts so the prompt
-    only appears once per host (standard SSH behaviour).
+    Acceptance is staged in the client. The surrounding trust transaction
+    persists it atomically before the connection is returned to a caller.
     """
 
     def missing_host_key(self, client, hostname, key):
@@ -169,13 +174,31 @@ class _InteractiveHostKeyPolicy:
                 f"Connection to {hostname} rejected — unknown host key not trusted."
             )
 
-        # Save to known_hosts so the prompt doesn't repeat next time
+        # Stage the accepted key in memory. Durable publication is owned by
+        # _connect_ssh_client while it still holds the trust-store lock.
         client.get_host_keys().add(hostname, algo, key)
-        try:
-            known_hosts = os.path.expanduser("~/.ssh/known_hosts")
-            client.save_host_keys(known_hosts)
-        except Exception:
-            pass  # Non-fatal — key is still trusted for this session
+
+
+def _connect_ssh_client(paramiko, hostname, **connect_kwargs):
+    """Connect under one serialized, fail-closed host-trust transaction."""
+    known_hosts_path = get_known_hosts_path()
+    client = paramiko.SSHClient()
+    try:
+        with known_hosts_lock(known_hosts_path):
+            client.load_system_host_keys()
+            client.load_host_keys(known_hosts_path)
+            client.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
+            client.connect(hostname, **connect_kwargs)
+            persist_host_keys_atomically(
+                paramiko,
+                client,
+                known_hosts_path,
+                lock_held=True,
+            )
+        return client
+    except Exception:
+        client.close()
+        raise
 
 
 def _legacy_deploy_config(user_data):
@@ -238,15 +261,9 @@ def _legacy_deploy_config(user_data):
     )
 
     try:
-        ssh = paramiko.SSHClient()
-        # UNSAFE-002: WarningPolicy warns the user on unknown host keys instead
-        # of silently accepting them (AutoAddPolicy is MITM-vulnerable).
-        # Known hosts are still loaded from ~/.ssh/known_hosts for verification.
-        ssh.load_system_host_keys()
-        ssh.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
-
         print(f"Connecting to {user_data['host']}...")
-        ssh.connect(
+        ssh = _connect_ssh_client(
+            paramiko,
             user_data['host'],
             username=user_data['user'],
             password=password
@@ -393,10 +410,8 @@ def _legacy_deploy_config(user_data):
                         except Exception:
                             pass
                     
-                    ssh = paramiko.SSHClient()
-                    ssh.load_system_host_keys()
-                    ssh.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
-                    ssh.connect(
+                    ssh = _connect_ssh_client(
+                        paramiko,
                         user_data['host'],
                         username=user_data['user'],
                         password=password_for_reconnect,
@@ -564,10 +579,8 @@ def deploy_config(user_data):
     ssh = None
     sftp = None
     try:
-        ssh = paramiko.SSHClient()
-        ssh.load_system_host_keys()
-        ssh.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
-        ssh.connect(
+        ssh = _connect_ssh_client(
+            paramiko,
             user_data["host"],
             username=user_data["user"],
             password=password,

@@ -3,18 +3,14 @@
 #  KACE — Klipper Automated Configuration Ecosystem
 #  Install Script
 #
-#  Quick start (recommended for convenience):
-#    bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
-#
-#  Security tradeoff: the quick-start command streams network content directly
-#  to Bash, so it cannot be inspected or verified before execution.
-#
-#  Verified installation (recommended when integrity verification matters):
+#  Verified standalone installation:
 #    INSTALL_COMMIT='paste-the-full-40-character-commit-here'
 #    EXPECTED_SHA256='paste-the-trusted-sha256-here'  # obtain separately
-#    curl -fsSLo install.sh "https://raw.githubusercontent.com/3D-uy/KACE/${INSTALL_COMMIT}/install.sh"
-#    printf '%s  %s\n' "$EXPECTED_SHA256" install.sh | sha256sum -c -
-#    KACE_SOURCE_REF="$INSTALL_COMMIT" KACE_EXPECTED_COMMIT="$INSTALL_COMMIT" bash install.sh
+#    installer=$(mktemp)
+#    curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${INSTALL_COMMIT}/install.sh"
+#    printf '%s  %s\n' "$EXPECTED_SHA256" "$installer" | sha256sum -c -
+#    KACE_SOURCE_REF="$INSTALL_COMMIT" KACE_EXPECTED_COMMIT="$INSTALL_COMMIT" bash "$installer"
+#    status=$?; rm -f "$installer"; exit "$status"
 #
 #  Do not fetch the expected checksum from the same mutable branch as the
 #  installer. Obtain it from a matching release or another trusted channel.
@@ -35,7 +31,7 @@ E="\033[91m"   # Red (error)
 REPO_URL="https://github.com/3D-uy/kace.git"
 INSTALL_DIR="$HOME/kace"
 KACE_BIN="${KACE_INSTALL_BIN:-/usr/local/bin/kace}"
-INSTALL_REF="${KACE_SOURCE_REF:-main}"
+INSTALL_REF="${KACE_SOURCE_REF:-}"
 EXPECTED_COMMIT="${KACE_EXPECTED_COMMIT:-}"
 INSTALL_PARENT=$(dirname "$INSTALL_DIR")
 STAGING_DIR=""
@@ -53,13 +49,13 @@ _run_root() {
     fi
 }
 
-# Prevent an environment-provided ref from being interpreted as a Git option or
-# revision expression. Release tags, branches, and full commit hashes remain valid.
-if [[ "$INSTALL_REF" == -* ]] || [[ ! "$INSTALL_REF" =~ ^[A-Za-z0-9._/-]+$ ]] \
-        || [[ "$INSTALL_REF" == *..* ]]; then
-    echo "Error: invalid KACE source reference: $INSTALL_REF" >&2
+# Standalone installation accepts only an exact Git object identity. Branches
+# and tags can move and therefore cannot be installation trust anchors.
+if [[ ! "$INSTALL_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "Error: KACE_SOURCE_REF must be a full 40-character commit SHA." >&2
     exit 1
 fi
+INSTALL_REF=$(printf '%s' "$INSTALL_REF" | tr '[:upper:]' '[:lower:]')
 
 case "$KACE_BIN" in
     /*) ;;
@@ -69,14 +65,18 @@ case "$KACE_BIN" in
         ;;
 esac
 
-if [ -z "$EXPECTED_COMMIT" ] && [[ "$INSTALL_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    EXPECTED_COMMIT=$(printf '%s' "$INSTALL_REF" | tr '[:upper:]' '[:lower:]')
+if [ -z "$EXPECTED_COMMIT" ]; then
+    EXPECTED_COMMIT="$INSTALL_REF"
 elif [ -n "$EXPECTED_COMMIT" ]; then
     if [[ ! "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
         echo "Error: KACE_EXPECTED_COMMIT must be a full 40-character commit SHA." >&2
         exit 1
     fi
     EXPECTED_COMMIT=$(printf '%s' "$EXPECTED_COMMIT" | tr '[:upper:]' '[:lower:]')
+fi
+if [ "$EXPECTED_COMMIT" != "$INSTALL_REF" ]; then
+    echo "Error: KACE_EXPECTED_COMMIT must match KACE_SOURCE_REF." >&2
+    exit 1
 fi
 
 _safe_remove_transaction_dir() {

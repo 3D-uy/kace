@@ -63,11 +63,11 @@ KACE é a CLI interativa executada no lado Raspberry Pi do ecossistema KACE. Ela
 | Checkout do código-fonte ou configuração de contribuição | Clone o repositório, instale as dependências bloqueadas e execute `python kace.py`. |
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='e3589216ac8eb4707921dd8ad7ba4a7c8e510e3f'; KACE_INSTALL_SHA256='9b8dfb1d5121eaaf6a8d9641da06aba5a6392dafcf218b431b3a23bc9f66dcdb'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 > [!WARNING]
-> Este comando de conveniência transmite conteúdo remoto da branch mutável `main` diretamente para o Bash. Para uma instalação auditável, baixe `install.sh` de um commit ou tag imutável, verifique seu SHA-256 por meio de um valor confiável separado, inspecione-o e então execute-o.
+> O comando fixa um commit exato, verifica o instalador antes da execução e fornece a mesma identidade imutável ao instalador transacional. Atualize commit e checksum somente como um par revisado por um canal confiável.
 
 ## Como o ecossistema flui
 
@@ -140,13 +140,13 @@ Para um novo Raspberry Pi, use o [KACE Studio](https://github.com/3D-uy/KACE-stu
 
 ### Instalar diretamente em um host Linux existente
 
-O comando de conveniência instala a partir da branch mutável `main`:
+O comando standalone instala a partir de um commit imutável revisado:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='e3589216ac8eb4707921dd8ad7ba4a7c8e510e3f'; KACE_INSTALL_SHA256='9b8dfb1d5121eaaf6a8d9641da06aba5a6392dafcf218b431b3a23bc9f66dcdb'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
-Isso transmite conteúdo de rede diretamente para o Bash. Para uma instalação auditável, baixe `install.sh` de um commit completo e imutável, verifique seu SHA-256 por meio de um valor confiável separado, inspecione-o e execute-o com `KACE_SOURCE_REF` e `KACE_EXPECTED_COMMIT` fixados nesse commit. O instalador verifica o commit obtido e o checkout, cria um ambiente virtual novo em staging e publica somente os caminhos de runtime que controla, com rollback. Os artefatos gerados existentes em `~/kace/` permanecem intactos.
+O instalador é baixado para um arquivo temporário, verificado antes da execução e vinculado ao mesmo commit completo por `KACE_SOURCE_REF` e `KACE_EXPECTED_COMMIT`. O instalador verifica o commit obtido e o checkout, cria um ambiente virtual novo em staging e publica somente os caminhos de runtime que controla, com rollback. Os artefatos gerados existentes em `~/kace/` permanecem intactos.
 
 ### Executar a partir de um checkout do código-fonte
 

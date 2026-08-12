@@ -33,9 +33,14 @@ class TestInstallRuntimeContract(unittest.TestCase):
         self.assertIn("/scripts/cc_wrapper.py", self.script)
 
     def test_source_revision_can_be_pinned_to_a_commit(self):
-        self.assertIn('INSTALL_REF="${KACE_SOURCE_REF:-main}"', self.script)
+        self.assertIn('INSTALL_REF="${KACE_SOURCE_REF:-}"', self.script)
         self.assertIn('fetch origin "$INSTALL_REF" --depth=1', self.script)
         self.assertNotIn('--branch "$INSTALL_REF"', self.script)
+
+    def test_standalone_install_requires_an_immutable_commit(self):
+        self.assertNotIn('KACE_SOURCE_REF:-main', self.script)
+        self.assertIn('[[ ! "$INSTALL_REF" =~ ^[0-9a-fA-F]{40}$ ]]', self.script)
+        self.assertIn("KACE_SOURCE_REF must be a full 40-character commit SHA", self.script)
 
     def test_pinned_source_revision_is_verified_after_checkout(self):
         self.assertIn("KACE_EXPECTED_COMMIT", self.script)

@@ -63,11 +63,11 @@ KACE is the Raspberry Pi-side interactive CLI in the KACE ecosystem. It guides a
 | Source checkout or contributor setup | Clone the repository, install the locked dependencies, and run `python kace.py`. |
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='e3589216ac8eb4707921dd8ad7ba4a7c8e510e3f'; KACE_INSTALL_SHA256='9b8dfb1d5121eaaf6a8d9641da06aba5a6392dafcf218b431b3a23bc9f66dcdb'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 > [!WARNING]
-> This convenience command streams remote content from the mutable `main` branch directly to Bash. For an auditable installation, download `install.sh` from an immutable commit or tag, verify its SHA-256 through a separately trusted value, inspect it, and then execute it.
+> The command pins one exact commit, verifies the downloaded installer before execution, and passes that same immutable identity to the transactional installer. Update the commit and checksum only as a reviewed pair from a trusted release channel.
 
 ## How the ecosystem flows
 
@@ -140,13 +140,13 @@ For a new Raspberry Pi, use [KACE Studio](https://github.com/3D-uy/KACE-studio).
 
 ### Install directly on an existing Linux host
 
-The convenience command installs from the mutable `main` branch:
+The standalone command installs from a reviewed immutable commit:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='e3589216ac8eb4707921dd8ad7ba4a7c8e510e3f'; KACE_INSTALL_SHA256='9b8dfb1d5121eaaf6a8d9641da06aba5a6392dafcf218b431b3a23bc9f66dcdb'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
-This streams network content directly to Bash. For an auditable installation, download `install.sh` from a full immutable commit, verify its SHA-256 through a separately trusted value, inspect it, and execute it with both `KACE_SOURCE_REF` and `KACE_EXPECTED_COMMIT` set to that commit. The installer verifies the fetched and checked-out commit, builds a fresh staged virtual environment, and publishes only installer-owned runtime paths with rollback. Generated artifacts already stored under `~/kace/` remain untouched.
+The installer is downloaded to a temporary file, verified before execution, and bound to the same full commit through `KACE_SOURCE_REF` and `KACE_EXPECTED_COMMIT`. It verifies the fetched and checked-out commit, builds a fresh staged virtual environment, and publishes only installer-owned runtime paths with rollback. Generated artifacts already stored under `~/kace/` remain untouched.
 
 ### Run from a source checkout
 

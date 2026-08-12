@@ -2,9 +2,9 @@
 from firmware.configuration import BootloaderOffset, BootloaderOffsetKind
 
 # ── Firmware configuration database ───────────────────────────────────────────
-# Loaded from data/boards.yaml (mcu_firmware section).
-# The hardcoded list below is the fallback used when the YAML file is missing
-# or cannot be parsed — guarantees zero regression risk on existing installs.
+# Loaded exclusively from data/boards.yaml (mcu_firmware section).
+# Missing or malformed data is a hard failure because guessing firmware
+# parameters is unsafe.
 #
 # Field reference:
 #   pattern      : substring matched against the detected MCU string (lowercase)
@@ -17,37 +17,10 @@ from firmware.configuration import BootloaderOffset, BootloaderOffsetKind
 #   extra_flag   : additional CONFIG_* key to set to "y" (optional)
 #   early_return : if True, return immediately after arch (no interface config)
 
-_FW_DB_FALLBACK = [
-    # STM32 — most specific first
-    {"pattern": "stm32f103",  "arch": "stm32",   "mach": "STM32",   "flash_start": "0x7000", "set_mcu_flag": True},
-    {"pattern": "stm32f1",    "arch": "stm32",   "mach": "STM32",   "flash_start": "0x0",    "set_mcu_flag": True},
-    {"pattern": "stm32f4",    "arch": "stm32",   "mach": "STM32",   "flash_start": "0x8000", "set_mcu_flag": True},
-    {"pattern": "stm32h7",    "arch": "stm32",   "mach": "STM32",   "flash_start": "0x20000","set_mcu_flag": True},
-    {"pattern": "stm32g0b",   "arch": "stm32",   "mach": "STM32",   "flash_start": "0x2000", "set_mcu_flag": True},
-    {"pattern": "stm32",      "arch": "stm32",   "mach": "STM32",   "flash_start": None,     "set_mcu_flag": True},
-    # LPC176x — most specific first
-    {"pattern": "lpc1769",    "arch": "lpc176x", "mach": "LPC176X", "flash_start": "0x4000", "clock_freq": 120000000, "set_mcu_flag": True},
-    {"pattern": "lpc1768",    "arch": "lpc176x", "mach": "LPC176X", "flash_start": "0x4000", "clock_freq": 100000000, "set_mcu_flag": True},
-    {"pattern": "lpc176",     "arch": "lpc176x", "mach": "LPC176X", "flash_start": "0x4000", "set_mcu_flag": True},
-    # RP2040
-    {"pattern": "rp2040",     "arch": "rp2040",  "mach": "RPXXXX"},
-    # ESP32
-    {"pattern": "esp32",      "arch": "esp32",   "mach": "ESP32"},
-    # AVR — most specific first
-    {"pattern": "atmega2560", "arch": "avr",     "mach": "AVR",     "extra_flag": "CONFIG_MCU_ATMEGA2560"},
-    {"pattern": "atmega",     "arch": "avr",     "mach": "AVR"},
-    {"pattern": "avr",        "arch": "avr",     "mach": "AVR"},
-    # Linux host MCU
-    {"pattern": "linux",      "arch": "linux",   "early_return": True},
-    {"pattern": "host",       "arch": "linux",   "early_return": True},
-]
-
-
 def _load_firmware_db() -> list:
     """Load MCU firmware config entries from data/boards.yaml.
 
-    Falls back to _FW_DB_FALLBACK if the file is missing, unreadable,
-    or fails the strict precedence validation.
+    Missing, empty, or invalid authoritative data is a hard error.
     The order of entries in the YAML is preserved — most specific patterns
     must appear before generic ones (e.g. stm32f103 before stm32f1).
     """
@@ -57,7 +30,7 @@ def _load_firmware_db() -> list:
             
         entries = db.get('mcu_firmware', [])
         if not entries:
-            return _FW_DB_FALLBACK
+            raise RuntimeError("[KACE] boards.yaml has no mcu_firmware entries")
             
         # ── Precedence Validation ─────────────────────────────────────────────
         # Ensure that no pattern is shadowed by a more generic pattern that
@@ -67,19 +40,16 @@ def _load_firmware_db() -> list:
             for j in range(i + 1, len(entries)):
                 subsequent_pattern = entries[j].get("pattern", "")
                 if current_pattern in subsequent_pattern:
-                    print(f"\n\033[93m[!] WARNING: Invalid pattern precedence in boards.yaml\033[0m")
-                    print(f"    Generic pattern '{current_pattern}' at index {i} shadows more")
-                    print(f"    specific pattern '{subsequent_pattern}' at index {j}.")
-                    print(f"    \033[96mFalling back to built-in hardware defaults.\033[0m\n")
-                    return _FW_DB_FALLBACK
+                    raise RuntimeError(
+                        "[KACE] invalid boards.yaml firmware pattern precedence: "
+                        f"'{current_pattern}' at index {i} shadows "
+                        f"'{subsequent_pattern}' at index {j}"
+                    )
                     
         return entries
         
     except Exception as e:
-        print(f"\n\033[93m[!] WARNING: Failed to load modular hardware database.\033[0m")
-        print(f"    Error: {e}")
-        print(f"    \033[96mFalling back to built-in hardware defaults.\033[0m\n")
-        return _FW_DB_FALLBACK
+        raise RuntimeError(f"[KACE] failed to load authoritative boards.yaml: {e}") from e
 
 # Module-level cache — loaded once per process
 _FW_DB = None
@@ -94,8 +64,7 @@ def _get_fw_db() -> list:
 def derive_config(mcu, hint=None, flash_start=None):
     """Intelligently build Kconfig parameters for the given MCU string.
 
-    Uses the modular hardware database (data/boards.yaml) with a hardcoded
-    fallback dict to ensure reliability on all installs.
+    Uses the authoritative modular hardware database (data/boards.yaml).
 
     Pattern matching uses first-match-wins substring search, so the database
     must list more-specific patterns before generic ones.

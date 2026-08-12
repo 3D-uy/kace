@@ -108,6 +108,7 @@ class DeployConfigPathTests(unittest.TestCase):
         paramiko.AuthenticationException = type("AuthenticationException", (Exception,), {})
         with (
             patch("core.deployer._require_paramiko", return_value=paramiko),
+            patch("core.deployer._connect_ssh_client", return_value=ssh),
             patch(
                 "core.deployer._generated_config_bytes",
                 return_value=("generated.cfg", b"[mcu]\n[printer]\n", None),

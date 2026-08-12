@@ -17,326 +17,22 @@
 #     "compatibility_class":     str   — "fully_compatible" | "compatible_with_adapter" | "experimental" | "unsafe"
 #     "recommendation":          str   — "disconnect" | "optional" | "none" | ""
 #     "notes":                   list  — human-readable bullet points
-#     "source":                  str   — "printer_profile" | "display_config" | "fallback"
+#     "source":                  str   — "printer_profile" | "display_config"
 #     "damage_risks":            list  — list of potential risks
 #     "required_modifications":  list  — list of steps to make safe
 #   }
 #
 # Design contract:
-#   - Works without data/displays.yaml / data/boards.yaml (hardcoded fallbacks)
+#   - data/displays.yaml and data/boards.yaml are authoritative
+#   - Missing or invalid hardware data fails closed
 #   - Never modifies the parsed config
-#   - Never raises exceptions to the caller
 
-# ── Known display section names ────────────────────────────────────────────────
-# All Klipper config section names that indicate a display-related component.
-# Used to filter parsed config keys before database lookup.
-_DISPLAY_SECTION_NAMES = {
-    # Native Klipper display sections
-    "display", "lcd_menu", "display_status", "display_template", "display_data",
-    "hd44780", "ssd1306", "uc1701", "st7920",
-    # OEM / proprietary protocols
-    "t5uid1", "dwin_set", "tft_serial",
-    # LED / exotic
-    "neopixel", "dotstar", "sx1509",
-}
-
-# ── Hardcoded fallback ────────────────────────────────────────────────────────
-# Used when data/displays.yaml is missing.
-_DISPLAY_CONFIGS_FALLBACK = {
-    "display": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "EXP1_EXP2",
-        "voltage_logic": "3.3V_tolerant",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["Standard LCD displays are natively supported by Klipper"],
-    },
-    "lcd_menu": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "none",
-        "voltage_logic": "any",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["lcd_menu is a native Klipper feature — fully supported"],
-    },
-    "display_status": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "none",
-        "voltage_logic": "any",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["display_status is a standard Klipper object — no compatibility concerns"],
-    },
-    "display_template": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "none",
-        "voltage_logic": "any",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["display_template is a native Klipper feature — fully supported"],
-    },
-    "display_data": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "none",
-        "voltage_logic": "any",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["display_data is a native Klipper feature — fully supported"],
-    },
-    "t5uid1": {
-        "status": "unsupported",
-        "compatibility_class": "unsafe",
-        "recommendation": "disconnect",
-        "interface_required": "UART",
-        "voltage_logic": "3.3V_tolerant",
-        "damage_risks": [
-            "Sending Klipper UART traffic to t5uid1 controller can corrupt display EEPROM",
-            "Boot loop caused by incompatible protocol can stress MCU power delivery"
-        ],
-        "required_modifications": [
-            "DISCONNECT the display before running Klipper for the first time",
-            "Use Mainsail or Fluidd web interface for all printer control"
-        ],
-        "notes": [
-            "OEM DGUS touchscreen protocol — designed for Creality Marlin firmware",
-            "No built-in Klipper support without community plugins",
-            "Expected outcome: black screen or boot loop",
-        ],
-    },
-    "dwin_set": {
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "disconnect",
-        "interface_required": "UART",
-        "voltage_logic": "5V",
-        "damage_risks": [
-            "Firmware version mismatch can cause non-recoverable display brick"
-        ],
-        "required_modifications": [
-            "Install community 'klipper-dgus' plugin (NOT installed by KACE)",
-            "Flash matching DGUS firmware to the display",
-            "Alternatively: disconnect display and use web UI"
-        ],
-        "notes": [
-            "DWIN displays require firmware matching the display version",
-            "Community plugins exist but are not installed by KACE",
-            "Mismatch causes: frozen UI, missing menus, or black screen",
-        ],
-    },
-    "tft_serial": {
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "optional",
-        "interface_required": "UART",
-        "voltage_logic": "3.3V_tolerant",
-        "damage_risks": [
-            "UART serial conflicts may corrupt communication with other serial devices"
-        ],
-        "required_modifications": [
-            "Set BTT TFT firmware to 'Marlin emulation' mode (not touch mode)",
-            "Connect via UART TX/RX pins — not USB",
-            "Configure [display] with lcd_type: hd44780 or st7920 for emulation"
-        ],
-        "notes": [
-            "Serial TFT displays use a bridge protocol designed for Marlin",
-            "Menu functionality is typically limited or absent under Klipper",
-            "Web UI (Mainsail/Fluidd) provides full feature parity",
-        ],
-    },
-    "neopixel": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "SPI",
-        "voltage_logic": "5V",
-        "damage_risks": [
-            "WS2812/WS2812B data lines expect 5V logic — connecting 3.3V MCU directly can cause unreliable operation"
-        ],
-        "required_modifications": [
-            "For 3.3V MCUs (STM32, RP2040): use a 74AHCT125 level shifter on the data line"
-        ],
-        "notes": ["Neopixel/WS2812 LED sections are natively supported by Klipper"],
-    },
-    "dotstar": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "SPI",
-        "voltage_logic": "5V",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["Dotstar/APA102 LED sections are natively supported by Klipper"],
-    },
-    "sx1509": {
-        "status": "supported",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "none",
-        "interface_required": "I2C",
-        "voltage_logic": "3.3V_tolerant",
-        "damage_risks": [],
-        "required_modifications": [
-            "Ensure I2C address is correctly configured (0x3E default)"
-        ],
-        "notes": ["SX1509 GPIO expander is natively supported by Klipper"],
-    },
-    "hd44780": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "EXP1_EXP2",
-        "voltage_logic": "3.3V_tolerant",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["HD44780 character displays are natively supported by Klipper"],
-    },
-    "ssd1306": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "I2C",
-        "voltage_logic": "3.3V_tolerant",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["SSD1306 OLED displays are natively supported by Klipper"],
-    },
-    "uc1701": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "SPI",
-        "voltage_logic": "3.3V",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["UC1701 displays (e.g., mini12864) are natively supported by Klipper"],
-    },
-    "st7920": {
-        "status": "supported",
-        "compatibility_class": "fully_compatible",
-        "recommendation": "none",
-        "interface_required": "EXP1_EXP2",
-        "voltage_logic": "3.3V_tolerant",
-        "damage_risks": [],
-        "required_modifications": [],
-        "notes": ["ST7920 displays are natively supported by Klipper"],
-    },
-}
-
-_PRINTER_PROFILES_FALLBACK = {
-    "cr6-se": {
-        "display_type": "t5uid1",
-        "status": "unsupported",
-        "compatibility_class": "unsafe",
-        "recommendation": "disconnect",
-        "notes": [
-            "The CR-6 SE uses a proprietary DGUS/t5uid1 touchscreen with Creality OEM firmware",
-            "Not compatible with Klipper without a community firmware patch",
-            "Recommended: disconnect display and use Mainsail or Fluidd web interface",
-        ],
-        "damage_risks": [
-            "Incompatible UART traffic from Klipper MCU may corrupt display EEPROM",
-            "Persistent boot loop stresses MCU power delivery (VReg thermal cycling)"
-        ],
-        "required_modifications": [
-            "Step 1: Physically disconnect the display ribbon cable from the board",
-            "Step 2: Boot Klipper — all control via web interface"
-        ],
-    },
-    "artillery-sidewinder": {
-        "display_type": "tft_serial",
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "optional",
-        "notes": [
-            "Artillery Sidewinder uses a serial TFT display designed for Marlin",
-            "Serial TFT menus are typically non-functional under Klipper",
-            "Web UI (Mainsail/Fluidd) provides full printer control",
-        ],
-        "damage_risks": [],
-        "required_modifications": [
-            "Set TFT firmware to 12864 emulation mode",
-            "Use web UI for primary printer control"
-        ],
-    },
-    "artillery-genius": {
-        "display_type": "tft_serial",
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "optional",
-        "notes": [
-            "Artillery Genius uses a serial TFT display designed for Marlin",
-            "Serial TFT menus are typically non-functional under Klipper",
-        ],
-        "damage_risks": [],
-        "required_modifications": [
-            "Use web UI (Mainsail/Fluidd) for all printer control"
-        ],
-    },
-    "artillery-hornet": {
-        "display_type": "tft_serial",
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "optional",
-        "notes": [
-            "Artillery Hornet uses a serial TFT display designed for Marlin",
-            "Serial TFT menus are typically non-functional under Klipper",
-        ],
-        "damage_risks": [],
-        "required_modifications": [
-            "Use web UI (Mainsail/Fluidd) for all printer control"
-        ],
-    },
-    "cr10-smart": {
-        "display_type": "tft_serial",
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "optional",
-        "notes": ["CR-10 Smart TFT display has limited functionality under Klipper"],
-        "damage_risks": [],
-        "required_modifications": [
-            "Use web UI (Mainsail/Fluidd) for all printer control"
-        ],
-    },
-    "ender-6": {
-        "display_type": "tft_serial",
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "optional",
-        "notes": ["Ender 6 TFT display has limited compatibility with Klipper"],
-        "damage_risks": [],
-        "required_modifications": [
-            "Use web UI (Mainsail/Fluidd) for all printer control"
-        ],
-    },
-    "mks-robin": {
-        "display_type": "tft_serial",
-        "status": "partial",
-        "compatibility_class": "compatible_with_adapter",
-        "recommendation": "optional",
-        "notes": ["MKS TFT displays have limited compatibility with Klipper"],
-        "damage_risks": [],
-        "required_modifications": [
-            "Use web UI (Mainsail/Fluidd) for all printer control"
-        ],
-    },
-}
-
-
+# ── Authoritative data loaders ────────────────────────────────────────────────
 def _load_display_db() -> tuple[dict, dict, dict, dict]:
     """Load display compatibility data from data/displays.yaml.
 
     Returns a tuple of (display_configs_dict, printer_profiles_dict, board_display_matrix_dict, display_catalog_dict).
-    Falls back to the hardcoded dicts above if the file is missing or unparseable.
-    Guarantees zero regression risk — never raises.
+    Missing, empty, or malformed authoritative data is a hard error.
     """
     try:
         from core.loader import load_displays_yaml
@@ -347,16 +43,19 @@ def _load_display_db() -> tuple[dict, dict, dict, dict]:
         board_display_matrix = db.get('board_display_matrix') or {}
         display_catalog = db.get('display_catalog') or {}
 
-        # Validate we got real data — fall back per-dict if empty
         if not display_configs:
-            display_configs = _DISPLAY_CONFIGS_FALLBACK
+            raise RuntimeError("[KACE] displays.yaml has no display_configs entries")
         if not printer_profiles:
-            printer_profiles = _PRINTER_PROFILES_FALLBACK
+            raise RuntimeError(
+                "[KACE] displays.yaml has no printer_display_profiles entries"
+            )
 
         return display_configs, printer_profiles, board_display_matrix, display_catalog
 
-    except Exception:
-        return _DISPLAY_CONFIGS_FALLBACK, _PRINTER_PROFILES_FALLBACK, {}, {}
+    except Exception as exc:
+        raise RuntimeError(
+            f"[KACE] failed to load authoritative displays.yaml: {exc}"
+        ) from exc
 
 
 def _load_boards_db() -> list:
@@ -364,9 +63,14 @@ def _load_boards_db() -> list:
     try:
         from core.loader import load_boards_yaml
         db = load_boards_yaml()
-        return db.get('boards', [])
-    except Exception:
-        return []
+        boards = db.get('boards', [])
+        if not boards:
+            raise RuntimeError("[KACE] boards.yaml has no boards entries")
+        return boards
+    except Exception as exc:
+        raise RuntimeError(
+            f"[KACE] failed to load authoritative boards.yaml: {exc}"
+        ) from exc
 
 
 # Module-level cache — loaded once per process when accessed
@@ -414,15 +118,16 @@ def _get_boards() -> list:
 def detect_display_sections(parsed_cfg: dict) -> list:
     """Return a list of display-related section names found in the parsed config.
 
-    Checks only against the known set of display section names (_DISPLAY_SECTION_NAMES).
+    Checks only against section names from authoritative displays.yaml.
     Does NOT include auxiliary sections like 'display_status' that appear in
     virtually all configs — only genuine display hardware sections trigger a finding.
     """
     found = []
+    known_sections = _get_display_configs()
     for key in parsed_cfg:
         # Normalize: strip trailing specifiers like "neopixel my_led" → "neopixel"
         base_key = key.split()[0].lower()
-        if base_key in _DISPLAY_SECTION_NAMES:
+        if base_key in known_sections:
             if base_key not in found:
                 found.append(base_key)
     return found

@@ -1,7 +1,6 @@
 import unittest
 import firmware.derivation as drv
 import os
-from firmware.derivation import _FW_DB_FALLBACK
 from core.exceptions import DerivationAmbiguityError
 
 class TestDerivation(unittest.TestCase):
@@ -77,20 +76,11 @@ class TestDerivation(unittest.TestCase):
             ]
         }
 
-        logs = []
-        import builtins
-        original_print = builtins.print
-        def mock_print(*args, **kwargs):
-            logs.append(" ".join(map(str, args)))
-        builtins.print = mock_print
-
         try:
-            fallback = drv._load_firmware_db()
-            self.assertEqual(fallback, _FW_DB_FALLBACK, "Validation failed to fall back on shadowed pattern")
-            self.assertTrue(any("Invalid pattern precedence" in log for log in logs), "Missing warning log")
+            with self.assertRaisesRegex(RuntimeError, "pattern precedence"):
+                drv._load_firmware_db()
         finally:
             core.loader.load_boards_yaml = original_loader
-            builtins.print = original_print
 
 if __name__ == '__main__':
     unittest.main()

@@ -72,9 +72,10 @@ class TestBootstrapInstallContract(unittest.TestCase):
             r"(?:releases/latest|raw\.githubusercontent\.com/[^\n]+/(?:main|master)/)",
         )
 
-    def test_current_installer_matches_contract_hash(self):
-        actual = hashlib.sha256(INSTALLER.read_bytes()).hexdigest()
-        self.assertEqual(actual, self.install_sha256)
+    def test_worktree_installer_has_no_mutable_default(self):
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn('INSTALL_REF="${KACE_SOURCE_REF:-}"', installer)
+        self.assertNotRegex(installer, r'KACE_SOURCE_REF:-(?:main|master)')
 
     def test_pinned_git_revision_matches_contract_hash(self):
         result = subprocess.run(

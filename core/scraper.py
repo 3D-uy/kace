@@ -7,42 +7,20 @@ import time
 CACHE_EXPIRY_SECONDS = 3 * 24 * 3600  # 3 days cache duration
 
 # ── Modular BLTouch database ───────────────────────────────────────────────────
-# Loaded from data/boards.yaml. Hardcoded dict is the fallback when YAML is
-# missing (e.g., older installs or partial clones).
-#
-# WARNING: This hardcoded fallback represents duplicated data from data/boards.yaml.
-# data/boards.yaml is the canonical database. Updates should be made there to avoid
-# two-source-of-truth divergence.
+# Loaded exclusively from the authoritative data/boards.yaml database.
 
-_BLTOUCH_FALLBACK = {
     # ── LPC176x ────────────────────────────────────────────────
-    "skr-v1.4":         {"sensor_pin": "^P0.10",  "control_pin": "P2.0"},
-    "skr-v1.3":         {"sensor_pin": "^P1.27",  "control_pin": "P2.0"},
     # ── STM32F103 ──────────────────────────────────────────────
-    "skr-mini-e3-v2.0": {"sensor_pin": "^PC14",   "control_pin": "PA1"},
-    "skr-mini-e3-v3.0": {"sensor_pin": "^PC14",   "control_pin": "PA1"},
-    "creality-v4.2.2":  {"sensor_pin": "^PB1",    "control_pin": "PB0"},
-    "creality-v4.2.7":  {"sensor_pin": "^PB1",    "control_pin": "PB0"},
     # ── STM32F429 (Octopus Pro v1.0 / SKR-2) ─────────────────
-    "octopus-pro-v1.0": {"sensor_pin": "^PB7",    "control_pin": "PB6"},
-    "skr-2":            {"sensor_pin": "^PC0",    "control_pin": "PA2"},
     # ── STM32F446 (Octopus / Spider) — more-specific key first ─
-    "octopus-pro":      {"sensor_pin": "^PB7",    "control_pin": "PB6"},
-    "octopus":          {"sensor_pin": "^PC5",    "control_pin": "PE5"},
-    "spider":           {"sensor_pin": "^PA2",    "control_pin": "PA3"},
     # ── STM32H723 (Octopus MAX EZ) ───────────────────────────
-    "octopus-max-ez":   {"sensor_pin": "^PB7",    "control_pin": "PB6"},
     # ── AVR / other ──────────────────────────────────────────
-    "mks-gen-l":        {"sensor_pin": "^D18",    "control_pin": "D11"},
-    "mks-sgen-l":       {"sensor_pin": "^P1.27",  "control_pin": "P2.0"},
-    "mks-robin-nano":   {"sensor_pin": "^PA11",   "control_pin": "PA8"},
-}
 
 def _load_bltouch_db() -> dict:
     """Load BLTouch pin overrides from data/boards.yaml.
 
     Returns a flat dict mapping board-filename-fragment → {sensor_pin, control_pin}.
-    Falls back to the hardcoded dict if the file is missing or unreadable.
+    Missing or invalid authoritative data is a hard error.
     """
     try:
         from core.loader import load_boards_yaml
@@ -55,12 +33,9 @@ def _load_bltouch_db() -> dict:
         if result:
             return result
         
-        print("\n\033[93m[Warning] No BLTouch entries found in data/boards.yaml. Falling back to hardcoded _BLTOUCH_FALLBACK.\033[0m")
-        return _BLTOUCH_FALLBACK
+        raise RuntimeError("[KACE] boards.yaml has no BLTouch pin entries")
     except Exception as e:
-        print(f"\n\033[93m[Warning] Failed to load data/boards.yaml ({e}). Falling back to hardcoded _BLTOUCH_FALLBACK.\033[0m")
-        print("\033[93m          Note: data/boards.yaml is the canonical database source. Divergence risk exists.\033[0m")
-        return _BLTOUCH_FALLBACK
+        raise RuntimeError(f"[KACE] failed to load authoritative boards.yaml: {e}") from e
 
 # Lazy-loaded cache module-level database
 _BLTOUCH_DB = None
@@ -328,8 +303,7 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
                     data[current_section][last_key] += '\n    ' + clean_val
                 
     # Inject known BLTouch pins for boards that don't define them in their cfg.
-    # Pin data is loaded from data/boards.yaml (_BLTOUCH_DB) with a hardcoded
-    # fallback — so this works even without the YAML file present.
+    # Pin data is loaded from the authoritative data/boards.yaml database.
     if "bltouch" not in data:
         data["bltouch"] = {}
 
