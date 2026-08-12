@@ -267,7 +267,19 @@ def main():
         else:
             # Deferred import to optimize startup performance on slow Raspberry Pi hardware
             from core.firmware_wizard import run_firmware_wizard
-            run_firmware_wizard(user_data)
+            try:
+                firmware_result = run_firmware_wizard(user_data)
+            except WizardExit:
+                _finish(cancelled("Firmware workflow cancelled."))
+            except (KeyboardInterrupt, EOFError):
+                _finish(cancelled("Firmware workflow interrupted."))
+            if not isinstance(firmware_result, WorkflowResult):
+                _finish(failed(
+                    WorkflowOutcome.FIRMWARE_FAILED,
+                    "Firmware wizard returned no typed terminal result.",
+                ))
+            if not firmware_result.ok:
+                _finish(firmware_result)
 
     generate_macros = yes_no(
         f"\n{t('kace.generate_macros_prompt')}",

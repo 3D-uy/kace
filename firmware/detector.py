@@ -4,6 +4,7 @@ import os
 from core.menu import simple_input, numbered_select
 from core.terminal import ERROR, INFO, RESET, SUCCESS, WARNING
 from core.translations import t
+from core.exceptions import WizardExit
 
 def discover_mcu_hardware(interactive=True):
     """
@@ -24,8 +25,6 @@ def discover_mcu_hardware(interactive=True):
       - derived_mcu e.g. stm32f446xx  (None if port found but not Klipper)
       - hint        e.g. usb / uart / can / manual / skip
     """
-    import sys
-
     while True:
         # 1. Persistent by-id symlinks (best — survives reboots, survives USB hubs)
         ports = glob.glob('/dev/serial/by-id/*')
@@ -97,7 +96,7 @@ def discover_mcu_hardware(interactive=True):
                 return context
             else:
                 print(f"{WARNING}{t('mcu.exit')}{RESET}")
-                sys.exit(0)
+                raise WizardExit()
 
         if interactive:
             if len(ports) == 1:
@@ -110,7 +109,7 @@ def discover_mcu_hardware(interactive=True):
 
                 if choice is None:
                     print(f"{WARNING}{t('mcu.exit')}{RESET}")
-                    sys.exit(0)
+                    raise WizardExit()
         else:
             # Non-interactive: prefer Klipper-flashed by-id paths, else first available
             klipper_ports = [p for p in ports if "klipper" in p.lower()]

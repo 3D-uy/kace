@@ -16,6 +16,7 @@ from core.exceptions import DerivationAmbiguityError
 from core.mcu_monitor import McuIdentity, McuMonitorUnavailable
 from core.moonraker_deployer import DeployResult, DeployState
 from core.translations import t
+from core.workflow_outcome import WorkflowOutcome, WorkflowResult
 from firmware.deployment import DeploymentMethodId
 
 class TestFirmwareWizard(unittest.TestCase):
@@ -308,7 +309,9 @@ class TestFirmwareWizard(unittest.TestCase):
         with patch('sys.stdout', new_callable=io.StringIO):
             result = run_firmware_wizard(user_data)
 
-        self.assertEqual(result, {"status": "deployment_prepared", "method": "MANUAL"})
+        self.assertIsInstance(result, WorkflowResult)
+        self.assertEqual(result.outcome, WorkflowOutcome.SUCCESS)
+        self.assertIn("MANUAL", result.detail)
         self.assertTrue(user_data["pending_firmware_deployment"])
 
 if __name__ == '__main__':

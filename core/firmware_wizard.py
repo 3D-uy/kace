@@ -1,4 +1,3 @@
-import sys
 from core.menu import simple_input, yes_no, numbered_select
 from core.validators import (
     questionary_arch_validator,
@@ -7,7 +6,8 @@ from core.validators import (
 )
 from core.translations import t
 from core.terminal import BOLD, INFO, RESET, WARNING
-from core.exceptions import DerivationAmbiguityError
+from core.exceptions import DerivationAmbiguityError, WizardExit
+from core.workflow_outcome import WorkflowOutcome, WorkflowResult, failed, success
 from core.capabilities import validate_firmware_processor_for_architecture
 from firmware.derivation import derive_config
 from firmware.configuration import (
@@ -48,7 +48,7 @@ def _read_deployment_usb_identity(device_path):
 
 def _cancel_firmware_configuration():
     print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-    sys.exit(0)
+    raise WizardExit()
 
 
 def _is_back(value):
@@ -124,19 +124,19 @@ def _resolve_firmware_configuration(current_mcu, current_hint, resolved_flash=No
                     _cancel_firmware_configuration()
                 current_hint = answer.lower()
 
-def run_firmware_wizard(user_data: dict):
-    """Interactively configure, compile and deploy Klipper firmware for the target MCU."""
+def run_firmware_wizard(user_data: dict) -> WorkflowResult:
+    """Configure/build firmware and always return a typed terminal decision."""
     mcu = user_data.get('mcu_type')
     hint = user_data.get('mcu_hint')
     if not (mcu or hint == "manual"):
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
-        return
+        return success("Firmware compilation was not applicable.")
 
     prompt_mcu = mcu if mcu else "manually selected board"
     ans = yes_no(t("kace.compile_prompt", mcu=prompt_mcu))
     if not ans:
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
-        return
+        return success("Firmware compilation was explicitly skipped by the user.")
 
     # ── 1. Resolve firmware configuration interactively (derivation prompts) ──
     current_mcu = mcu
@@ -222,8 +222,7 @@ def run_firmware_wizard(user_data: dict):
             print(diff or "(no changes from derived configuration)")
             break
         elif ans_summary == t("builder.abort") or ans_summary is None:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            sys.exit(0)
+            _cancel_firmware_configuration()
         elif ans_summary == t("builder.edit_arch"):
             new_arch = simple_input(t("builder.enter_arch"), default=arch, validate=questionary_arch_validator)
             if not _is_back(new_arch) and new_arch and new_arch != arch:
@@ -387,7 +386,10 @@ def run_firmware_wizard(user_data: dict):
                 prepared = service.prepare(plan)
             except Exception as exc:
                 print(f"\n\033[91mERROR:\033[0m {t('deployment.prepare_failed', error=exc)}")
-                return {"status": "deployment_prepare_failed", "error": str(exc)}
+                return failed(
+                    WorkflowOutcome.FIRMWARE_FAILED,
+                    f"Firmware deployment preparation failed: {exc}",
+                )
 
             user_data['firmware_deployment_service'] = service
             user_data['firmware_deployment_plan'] = plan
@@ -403,7 +405,11 @@ def run_firmware_wizard(user_data: dict):
                 print(f"\033[93m[!] {t('deployment.automation_blocked')}\033[0m")
                 for blocker in plan.automation_blockers:
                     print(f"    - {blocker}")
-            return {"status": "deployment_prepared", "method": deploy_fw}
+            return success(f"Firmware deployment prepared with method {deploy_fw}.")
+
+        return success("Firmware compiled; physical deployment was not requested.")
 
     else:
-        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=result.get('message'))}")
+        message = str(result.get('message') or "Firmware build failed.")
+        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=message)}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)

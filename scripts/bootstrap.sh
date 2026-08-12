@@ -1180,6 +1180,96 @@ EOF
     log_ok "Installed KACE-owned identity override for ${service_name}.service."
 }
 
+provision_crowsnest() {
+    local operation_status=0
+
+    if [ "$PREBAKED" = "true" ]; then
+        log_stage "CROWSNEST" "Configuring Crowsnest Webcam Streamer"
+        mkdir -p "$PRINTER_HOME/printer_data/config" || return $?
+        if [ ! -f "$PRINTER_HOME/printer_data/config/crowsnest.conf" ]; then
+            echo "Creating default crowsnest.conf..."
+            cat <<EOF > "$PRINTER_HOME/printer_data/config/crowsnest.conf" || return $?
+[crowsnest]
+log_path: ~/printer_data/logs/crowsnest.log
+log_level: verbose
+delete_log: false
+
+[cam 1]
+mode: ustreamer
+enable_audio: false
+port: 8080
+device: /dev/video0
+resolution: 640x480
+max_fps: 15
+EOF
+            $SUDO chown "${PRINTER_USER}:${PRINTER_GROUP}" \
+                "$PRINTER_HOME/printer_data/config/crowsnest.conf" || return $?
+        fi
+        log_ok "Crowsnest configured."
+    else
+        log_stage "CROWSNEST" "Installing Crowsnest Webcam Streamer"
+        ensure_pinned_git_checkout \
+            "Crowsnest" "$CROWSNEST_REPOSITORY" "$CROWSNEST_REF" "$PRINTER_HOME/crowsnest" \
+            || return $?
+        if [ ! -f "$PRINTER_HOME/crowsnest/tools/install.sh" ]; then
+            log_err "Crowsnest install script not found."
+            return 1
+        fi
+        if (
+            cd "$PRINTER_HOME/crowsnest" || exit $?
+            wait_for_apt_locks || exit $?
+            $SUDO env CROWSNEST_UNATTENDED=1 CROWSNEST_SKIP_REBOOT_PROMPT=1 \
+                ./tools/install.sh
+        ); then
+            log_ok "Crowsnest installed."
+        else
+            operation_status=$?
+            log_err "Crowsnest upstream installer failed with exit code $operation_status."
+            return "$operation_status"
+        fi
+    fi
+
+    if $SUDO systemctl cat crowsnest.service >/dev/null 2>&1; then
+        :
+    else
+        operation_status=$?
+        log_err "crowsnest.service is unavailable after provisioning."
+        return "$operation_status"
+    fi
+    install_service_identity_dropin crowsnest || return $?
+    $SUDO systemctl daemon-reload || return $?
+
+    if detect_camera_hardware; then
+        if $SUDO systemctl enable crowsnest.service >/dev/null 2>&1; then
+            :
+        else
+            operation_status=$?
+            log_err "Could not enable crowsnest.service."
+            return "$operation_status"
+        fi
+        if $SUDO systemctl restart crowsnest.service; then
+            :
+        else
+            operation_status=$?
+            log_err "Could not start crowsnest.service."
+            return "$operation_status"
+        fi
+        if ! systemctl is-enabled --quiet crowsnest.service; then
+            log_err "crowsnest.service did not remain enabled."
+            return 1
+        fi
+        if ! systemctl is-active --quiet crowsnest.service; then
+            log_err "crowsnest.service did not remain active."
+            return 1
+        fi
+        log_ok "Camera hardware detected. Crowsnest service enabled and started."
+    else
+        log_warn "No physical camera detected. Existing Crowsnest enablement was preserved."
+        log_warn "Connect a webcam and run the following to activate it:"
+        log_warn "  sudo systemctl enable --now crowsnest.service"
+    fi
+}
+
 if [ "${KACE_BOOTSTRAP_LIB_ONLY:-}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
@@ -1949,59 +2039,12 @@ commit_power_reconciliation
 
 # ── 10. Crowsnest (Optional) ──────────────────────────────────────────────────
 if [ "$CROWSNEST" = "true" ]; then
-    if [ "$PREBAKED" = "true" ]; then
-        log_stage "CROWSNEST" "Configuring Crowsnest Webcam Streamer"
-        mkdir -p "$PRINTER_HOME/printer_data/config"
-        if [ ! -f "$PRINTER_HOME/printer_data/config/crowsnest.conf" ]; then
-            echo "Creating default crowsnest.conf..."
-            cat <<EOF > "$PRINTER_HOME/printer_data/config/crowsnest.conf"
-[crowsnest]
-log_path: ~/printer_data/logs/crowsnest.log
-log_level: verbose
-delete_log: false
-
-[cam 1]
-mode: ustreamer
-enable_audio: false
-port: 8080
-device: /dev/video0
-resolution: 640x480
-max_fps: 15
-EOF
-            $SUDO chown "${PRINTER_USER}:${PRINTER_GROUP}" "$PRINTER_HOME/printer_data/config/crowsnest.conf"
-        fi
-        log_ok "Crowsnest configured."
+    if provision_crowsnest; then
+        :
     else
-        log_stage "CROWSNEST" "Installing Crowsnest Webcam Streamer"
-        ensure_pinned_git_checkout \
-            "Crowsnest" "$CROWSNEST_REPOSITORY" "$CROWSNEST_REF" "$PRINTER_HOME/crowsnest"
-        if [ ! -f "$PRINTER_HOME/crowsnest/tools/install.sh" ]; then
-            log_err "Crowsnest install script not found."
-            exit 1
-        fi
-        (
-            cd "$PRINTER_HOME/crowsnest"
-            wait_for_apt_locks
-            if ! sudo -E env CROWSNEST_UNATTENDED=1 CROWSNEST_SKIP_REBOOT_PROMPT=1 ./tools/install.sh; then
-                log_warn "Crowsnest upstream installer returned an error. Continuing..."
-            fi
-        )
-        log_ok "Crowsnest installed."
-    fi
-
-    install_service_identity_dropin crowsnest
-    $SUDO systemctl daemon-reload
-
-    # Start the selected service only when a camera is currently visible. Do not
-    # disable an existing service: activation policy remains user-owned.
-    if detect_camera_hardware; then
-        $SUDO systemctl enable crowsnest.service >/dev/null 2>&1 || true
-        $SUDO systemctl restart crowsnest || true
-        log_ok "Camera hardware detected. Crowsnest service enabled and started."
-    else
-        log_warn "No physical camera detected. Existing Crowsnest enablement was preserved."
-        log_warn "Connect a webcam and run the following to activate it:"
-        log_warn "  sudo systemctl enable --now crowsnest.service"
+        CROWSNEST_EXIT=$?
+        emit_bootstrap_terminal "workflow_failed" "CROWSNEST" "$CROWSNEST_EXIT"
+        exit "$CROWSNEST_EXIT"
     fi
 else
     log_stage "CROWSNEST" "Webcam Streamer"

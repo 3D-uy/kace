@@ -27,6 +27,7 @@
 import sys
 from core.menu import simple_input, numbered_select
 from core.translations import t
+from core.exceptions import WizardExit
 
 # ── ANSI color constants (SSH/Pi-safe subset) ────────────────────────────────
 _CY  = "\033[96m"   # cyan   — info / borders
@@ -386,7 +387,7 @@ def run_probe_offset_step(
         )
 
         if ans == "quit" or ans is None:
-            sys.exit(0)
+            raise WizardExit()
         elif ans == "back":
             result["probe_x_offset"] = "__back__"
             return result

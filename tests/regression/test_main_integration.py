@@ -598,6 +598,85 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
 class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
     """The structured terminal result must control the process exit code."""
 
+    def test_firmware_wizard_failure_stops_before_config_generation(self):
+        from core.workflow_outcome import WorkflowOutcome, failed
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "rp2040",
+            "mcu_hint": "usb",
+        }
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard", return_value=user_data), \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.has_todo_pins", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("kace.time.sleep"), \
+             patch("builtins.print"), \
+             patch(
+                 "core.firmware_wizard.run_firmware_wizard",
+                 return_value=failed(WorkflowOutcome.FIRMWARE_FAILED, "compiler failed"),
+             ):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 30)
+        generate.assert_not_called()
+
+    def test_firmware_wizard_cancel_reaches_typed_cancelled_terminal(self):
+        from core.exceptions import WizardExit
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "rp2040",
+            "mcu_hint": "usb",
+        }
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard", return_value=user_data), \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.has_todo_pins", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("kace.time.sleep"), \
+             patch("builtins.print"), \
+             patch(
+                 "core.firmware_wizard.run_firmware_wizard",
+                 side_effect=WizardExit,
+             ):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 2)
+        generate.assert_not_called()
+
+    def test_untyped_firmware_wizard_result_fails_closed(self):
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "rp2040",
+            "mcu_hint": "usb",
+        }
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard", return_value=user_data), \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.has_todo_pins", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("kace.time.sleep"), \
+             patch("builtins.print"), \
+             patch("core.firmware_wizard.run_firmware_wizard", return_value=None):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 30)
+        generate.assert_not_called()
+
     def _run(self, terminal_state):
         from core.moonraker_deployer import DeployResult
         # kace.py owns ``-v`` as --version; unittest also uses it for verbose
