@@ -36,7 +36,12 @@ def _assignment(content: str, name: str) -> str:
 
 
 def _bash() -> str | None:
-    for candidate in ("bash", r"C:\Program Files\Git\bin\bash.exe"):
+    candidates = (
+        (r"C:\Program Files\Git\bin\bash.exe", "bash")
+        if os.name == "nt"
+        else ("bash",)
+    )
+    for candidate in candidates:
         try:
             subprocess.run(
                 [candidate, "--version"],
