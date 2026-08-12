@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      full_klipper_sweep:
+        description: Run the complete sweep against the pinned Klipper commit
+        required: false
+        default: false
+        type: boolean
 
 # Cancel older runs on the same branch/PR when new commits are pushed.
 # Keeps CI queues clean and saves runner minutes.
@@ -194,13 +200,14 @@ jobs:
   # This keeps contributor PRs fast while guaranteeing full upstream
   # compatibility validation on every commit that lands on main.
   #
-  # Future: add workflow_dispatch to allow maintainers to trigger the sweep
-  # manually on selected PRs (e.g. when touching parser/template logic).
+  # A maintainer may also opt in from workflow_dispatch for a branch under review.
   full-klipper-sweep:
     name: Full Klipper Config Sweep (192+ configs)
     runs-on: ubuntu-24.04
     needs: regression-tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.full_klipper_sweep)
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 

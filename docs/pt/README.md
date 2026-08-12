@@ -256,7 +256,7 @@ O GitHub Actions verifica atualmente:
 - Testes unitários e de regressão snapshot.
 - Esquema e regras de precedência de `boards.yaml`.
 - Uma matriz reduzida de KACE para Klipper em pull requests e pushes.
-- O sweep completo de configuração upstream em pushes para `main`.
+- O sweep completo e fixado de configuração upstream em pushes para `main`, ou por ativação manual explícita.
 - Uma matriz completa por pares quando acionada manualmente.
 - Compilações de firmware em contêiner para alvos representativos LPC1769, STM32, RP2040 e AVR.
 

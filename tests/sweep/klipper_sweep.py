@@ -20,9 +20,9 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from tests.sweep.result_codes import SweepResult, SweepSummary
+from tests.klipper_contract import KLIPPER_REF, KLIPPER_REPO_URL
 from core.advanced_module_handler import is_unsupported_section
 
-KLIPPER_REPO_URL = "https://github.com/Klipper3d/klipper.git"
 CONFIG_SUBDIR    = "config"
 
 _TODO_RE = re.compile(r'\bTODO\b', re.IGNORECASE)
@@ -45,10 +45,15 @@ def _clone_klipper(target_dir):
         sparse = os.path.join(target_dir, ".git", "info", "sparse-checkout")
         with open(sparse, "w") as f:
             f.write(f"{CONFIG_SUBDIR}/\n")
-        _run(["git", "fetch", "--depth=1", "origin", "master"], cwd=target_dir)
-        _run(["git", "checkout", "master"], cwd=target_dir)
+        _run(["git", "fetch", "--depth=1", "origin", KLIPPER_REF], cwd=target_dir)
+        _run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=target_dir)
+        checked_out = _run(["git", "rev-parse", "HEAD"], cwd=target_dir).stdout.strip()
+        if checked_out != KLIPPER_REF:
+            raise RuntimeError(
+                f"Klipper checkout mismatch: expected {KLIPPER_REF}, got {checked_out}"
+            )
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError) as exc:
         print(f"\n  \033[91m[ERROR]\033[0m Could not clone Klipper: {exc}")
         return False
 

@@ -229,7 +229,7 @@ The full pairwise matrix is intended for manual or pre-release use:
 python tests/matrix/run_matrix.py --profile full
 ```
 
-The matrix generates configurations through the real KACE flow, validates accepted cases with a fixed Klipper commit inside Docker, distinguishes safe expected rejections from failures, and writes Markdown and JSON reports. The broader upstream configuration sweep is available with:
+The matrix generates configurations through the real KACE flow, validates accepted cases with a fixed Klipper commit inside Docker, distinguishes safe expected rejections from failures, and writes Markdown and JSON reports. The broader upstream configuration sweep uses the same authoritative commit in `tests/klipper_contract.py` and is available with:
 
 ```bash
 python tests/run_tests.py --full-klipper-sweep --verbose
@@ -256,7 +256,7 @@ GitHub Actions currently checks:
 - Unit and snapshot regression tests.
 - `boards.yaml` schema and precedence rules.
 - A reduced KACE-to-Klipper matrix on pull requests and pushes.
-- The full upstream configuration sweep on pushes to `main`.
+- The full pinned upstream configuration sweep on pushes to `main`, or by explicit `full_klipper_sweep` opt-in in a manual workflow dispatch.
 - A full pairwise matrix when manually dispatched.
 - Containerized firmware builds for representative LPC1769, STM32, RP2040, and AVR targets.
 
