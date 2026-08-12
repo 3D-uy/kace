@@ -72,9 +72,10 @@ class TestBootstrapInstallContract(unittest.TestCase):
             r"(?:releases/latest|raw\.githubusercontent\.com/[^\n]+/(?:main|master)/)",
         )
 
-    def test_current_installer_matches_contract_hash(self):
-        actual = hashlib.sha256(INSTALLER.read_bytes()).hexdigest()
-        self.assertEqual(actual, self.install_sha256)
+    def test_worktree_installer_has_no_mutable_default(self):
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn('INSTALL_REF="${KACE_SOURCE_REF:-}"', installer)
+        self.assertNotRegex(installer, r'KACE_SOURCE_REF:-(?:main|master)')
 
     def test_pinned_git_revision_matches_contract_hash(self):
         result = subprocess.run(
@@ -90,10 +91,13 @@ class TestBootstrapInstallContract(unittest.TestCase):
         failure_block = self.script.split('if [ "$INSTALL_OK" -ne 1 ]; then', 1)[1]
         failure_block = failure_block.split("fi", 1)[0]
         self.assertIn("=== KACE_BOOTSTRAP_ERROR: KACE_INSTALL ===", failure_block)
-        self.assertIn("exit 1", failure_block)
+        self.assertIn('exit "$INSTALL_EXIT"', failure_block)
+        for exit_code in (2, 10, 20, 30, 40):
+            self.assertRegex(failure_block, rf"(?m)^\s*{exit_code}\)\s*$")
 
     def test_installed_repository_uses_same_pinned_revision_and_launches_wizard(self):
         self.assertIn('KACE_SOURCE_REF="$KACE_INSTALL_REF"', self.script)
+        self.assertIn('KACE_EXPECTED_COMMIT="$KACE_INSTALL_REF"', self.script)
         self.assertNotIn("KACE_NO_LAUNCH=1", self.script)
         installer_index = self.script.index('bash "$tmp_script"')
         finalization_index = self.script.index(

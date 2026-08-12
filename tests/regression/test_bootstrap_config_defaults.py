@@ -86,7 +86,11 @@ SUDO=""
             printer_cfg = root / "printer.cfg"
             moonraker_cfg = root / "moonraker.conf"
             printer_cfg.write_text("[printer]\nkinematics: none\n", encoding="utf-8")
-            moonraker_cfg.write_text("[server]\nport: 7125\n", encoding="utf-8")
+            moonraker_cfg.write_text(
+                "[server]\nport: 7125\n\n[authorization]\ntrusted_clients:\n    127.0.0.1\n"
+                "\n[file_manager]\ncustom_option: preserved\n",
+                encoding="utf-8",
+            )
 
             self._apply_defaults(printer_cfg, moonraker_cfg)
             first_printer = printer_cfg.read_bytes()
@@ -148,10 +152,13 @@ SUDO=""
             self.assertEqual(moonraker.count("enable_object_processing: True"), 1)
             self.assertIn("queue_gcode_uploads: True", moonraker)
 
-    def test_bootstrap_applies_all_three_defaults(self):
+    def test_bootstrap_only_reconciles_the_moonraker_default(self):
         script = BOOTSTRAP.read_text(encoding="utf-8")
-        self.assertIn('"exclude_object"', script)
-        self.assertIn('"force_move" "enable_force_move" "True"', script)
+        config_block = script.split('# ── 5. Printer Data Directories & Config Files', 1)[1].split(
+            '# ── 6. Dashboard UI', 1
+        )[0]
+        self.assertNotIn('"exclude_object"', config_block)
+        self.assertNotIn('"force_move" "enable_force_move" "True"', config_block)
         self.assertIn('"file_manager" "enable_object_processing" "True"', script)
 
     def test_requested_relay_replaces_existing_values_and_verifies(self):
@@ -169,7 +176,13 @@ SUDO=""
                 "custom_option: preserved\n",
                 encoding="utf-8",
             )
+            power_json = root / "power.json"
+            power_json.write_text(
+                '{"schema":1,"enabled":true,"device":"printer"}\n',
+                encoding="utf-8",
+            )
             command = """
+POWER_CONFIG_PATH="$3"
 POWER_RELAY=true
 POWER_DEVICE=printer
 POWER_GPIO=20
@@ -182,7 +195,7 @@ ensure_moonraker_config "$1" "$2"
 verify_requested_power_relay "$1"
 """
             result = self._run_bootstrap_library(
-                command, moonraker_cfg, root / "comms" / "klippy.sock"
+                command, moonraker_cfg, root / "comms" / "klippy.sock", power_json
             )
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
             content = moonraker_cfg.read_text(encoding="utf-8")
@@ -193,6 +206,277 @@ verify_requested_power_relay "$1"
             self.assertIn("off_when_shutdown: false", content)
             self.assertIn("custom_option: preserved", content)
             self.assertNotIn("gpiochip0/gpio5", content)
+            self.assertIn("# BEGIN KACE MANAGED: power", content)
+            self.assertIn("# END KACE MANAGED: power", content)
+
+    def test_power_reconciliation_is_idempotent_before_state_is_persisted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_dir = root / "printer_data" / "config"
+            config_dir.mkdir(parents=True)
+            moonraker_cfg = config_dir / "moonraker.conf"
+            moonraker_cfg.write_text(
+                "[server]\nport: 7125\n\n[authorization]\ntrusted_clients:\n    127.0.0.1\n"
+                "\n[file_manager]\ncustom_option: preserved\n",
+                encoding="utf-8",
+            )
+            command = """
+PRINTER_HOME="$3"
+POWER_RELAY=true
+POWER_DEVICE=printer
+POWER_GPIO=20
+POWER_ACTIVE_LOW=true
+POWER_RESTART_KLIPPER=true
+POWER_INITIAL_STATE=on
+POWER_OFF_WHEN_SHUTDOWN=false
+ensure_moonraker_config "$1" "$2"
+"""
+            first = self._run_bootstrap_library(
+                command, moonraker_cfg, root / "comms" / "klippy.sock", root
+            )
+            self.assertEqual(first.returncode, 0, first.stderr or first.stdout)
+            result = self._run_bootstrap_library(
+                command, moonraker_cfg, root / "comms" / "klippy.sock", root
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                (result.stderr or result.stdout) + "\n" + moonraker_cfg.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                moonraker_cfg.read_text(encoding="utf-8").count("[power printer]"),
+                1,
+            )
+
+    def test_power_rename_and_disable_remove_only_previous_managed_device(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            moonraker_cfg = root / "moonraker.conf"
+            power_json = root / "power.json"
+            moonraker_cfg.write_text(
+                "[server]\nport: 7125\n\n"
+                "[power printer]\ntype: gpio\npin: gpiochip0/gpio5\n\n"
+                "[power lights]\ntype: gpio\npin: gpiochip0/gpio6\n",
+                encoding="utf-8",
+            )
+            power_json.write_text(
+                '{"schema":1,"enabled":true,"device":"printer"}\n',
+                encoding="utf-8",
+            )
+            rename = """
+POWER_CONFIG_PATH="$3"
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+POWER_GPIO=20
+POWER_ACTIVE_LOW=false
+POWER_RESTART_KLIPPER=true
+POWER_INITIAL_STATE=on
+POWER_OFF_WHEN_SHUTDOWN=false
+validate_power_relay_settings
+ensure_moonraker_config "$1" "$2"
+"""
+            result = self._run_bootstrap_library(
+                rename, moonraker_cfg, root / "comms" / "klippy.sock", power_json
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            renamed = moonraker_cfg.read_text(encoding="utf-8")
+            self.assertNotIn("[power printer]", renamed)
+            self.assertIn("[power main_psu]", renamed)
+            self.assertIn("[power lights]", renamed)
+
+            power_json.write_text(
+                '{"schema":"kace-power/v1","revision":2,"enabled":true,'
+                '"device":"main_psu","pin":"gpiochip0/gpio20","active_low":false,'
+                '"initial_state":"on","restart_klipper_when_powered":true,'
+                '"off_when_shutdown":false}\n',
+                encoding="utf-8",
+            )
+            disable = """
+POWER_CONFIG_PATH="$3"
+POWER_RELAY=false
+POWER_DEVICE=""
+POWER_GPIO=""
+POWER_ACTIVE_LOW=""
+POWER_RESTART_KLIPPER=""
+POWER_INITIAL_STATE=""
+POWER_OFF_WHEN_SHUTDOWN=""
+validate_power_relay_settings
+ensure_moonraker_config "$1" "$2"
+"""
+            result = self._run_bootstrap_library(
+                disable, moonraker_cfg, root / "comms" / "klippy.sock", power_json
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            disabled = moonraker_cfg.read_text(encoding="utf-8")
+            self.assertNotIn("[power main_psu]", disabled)
+            self.assertNotIn("KACE MANAGED: power", disabled)
+            self.assertIn("[power lights]", disabled)
+
+    def test_isolated_end_marker_does_not_claim_user_power_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            moonraker_cfg = root / "moonraker.conf"
+            moonraker_cfg.write_text(
+                "[server]\nport: 7125\n\n"
+                "[power lights]\ntype: gpio\npin: gpiochip0/gpio6\n"
+                "# END KACE MANAGED: power\n",
+                encoding="utf-8",
+            )
+            command = """
+POWER_CONFIG_PATH="$3"
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+POWER_GPIO=20
+POWER_ACTIVE_LOW=false
+POWER_RESTART_KLIPPER=true
+POWER_INITIAL_STATE=on
+POWER_OFF_WHEN_SHUTDOWN=false
+validate_power_relay_settings
+ensure_moonraker_config "$1" "$2"
+"""
+            result = self._run_bootstrap_library(
+                command, moonraker_cfg, root / "comms" / "klippy.sock", root / "power.json"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            content = moonraker_cfg.read_text(encoding="utf-8")
+            self.assertIn("[power lights]", content)
+            self.assertIn("pin: gpiochip0/gpio6", content)
+            self.assertIn("[power main_psu]", content)
+
+    def test_stray_begin_marker_does_not_jump_to_later_user_power_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            moonraker_cfg = root / "moonraker.conf"
+            moonraker_cfg.write_text(
+                "# BEGIN KACE MANAGED: power\n"
+                "[server]\nport: 7125\n\n"
+                "[power lights]\ntype: gpio\npin: gpiochip0/gpio6\n",
+                encoding="utf-8",
+            )
+            command = """
+POWER_CONFIG_PATH="$3"
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+POWER_GPIO=20
+POWER_ACTIVE_LOW=false
+POWER_RESTART_KLIPPER=true
+POWER_INITIAL_STATE=on
+POWER_OFF_WHEN_SHUTDOWN=false
+validate_power_relay_settings
+ensure_moonraker_config "$1" "$2"
+"""
+            result = self._run_bootstrap_library(
+                command, moonraker_cfg, root / "comms" / "klippy.sock", root / "power.json"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            content = moonraker_cfg.read_text(encoding="utf-8")
+            self.assertIn("[power lights]", content)
+            self.assertIn("pin: gpiochip0/gpio6", content)
+            self.assertIn("[power main_psu]", content)
+
+    def test_malformed_power_state_cannot_claim_an_unmanaged_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            moonraker_cfg = root / "moonraker.conf"
+            power_json = root / "power.json"
+            original = "[power lights]\ntype: gpio\npin: gpiochip0/gpio6\n"
+            moonraker_cfg.write_text(original, encoding="utf-8")
+            power_json.write_text(
+                '{"schema":"unknown","enabled":true,"device":"lights"}\n',
+                encoding="utf-8",
+            )
+            command = """
+POWER_CONFIG_PATH="$3"
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+POWER_GPIO=20
+POWER_ACTIVE_LOW=false
+POWER_RESTART_KLIPPER=true
+POWER_INITIAL_STATE=on
+POWER_OFF_WHEN_SHUTDOWN=false
+validate_power_relay_settings
+begin_power_reconciliation "$1" "$3"
+if ensure_moonraker_config "$1" "$2"; then
+    exit 9
+fi
+rollback_power_reconciliation
+"""
+            result = self._run_bootstrap_library(
+                command, moonraker_cfg, root / "comms" / "klippy.sock", power_json
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertEqual(moonraker_cfg.read_text(encoding="utf-8"), original)
+
+    def test_power_json_persistence_occurs_only_after_api_verification(self):
+        script = BOOTSTRAP.read_text(encoding="utf-8")
+        early_config = script.index(
+            "ensure_moonraker_config \\",
+            script.index('mkdir -p "$PRINTER_HOME/printer_data/config"'),
+        )
+        api_verify = script.index('verify_power_api_configuration "http://127.0.0.1:7125"')
+        persist = script.index("persist_power_controller_config", api_verify)
+        self.assertLess(early_config, api_verify)
+        self.assertLess(api_verify, persist)
+
+    def test_failed_power_reconciliation_restores_exact_moonraker_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            moonraker_cfg = root / "moonraker.conf"
+            original = b"[server]\r\nport: 7125\r\n\r\n[power lights]\r\ntype: gpio\r\npin: gpiochip0/gpio6\r\n"
+            moonraker_cfg.write_bytes(original)
+            command = """
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+POWER_GPIO=20
+POWER_ACTIVE_LOW=false
+POWER_RESTART_KLIPPER=true
+POWER_INITIAL_STATE=on
+POWER_OFF_WHEN_SHUTDOWN=false
+validate_power_relay_settings
+begin_power_reconciliation "$1"
+ensure_moonraker_config "$1" "$2"
+rollback_power_reconciliation
+"""
+            result = self._run_bootstrap_library(
+                command, moonraker_cfg, root / "comms" / "klippy.sock"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertEqual(moonraker_cfg.read_bytes(), original)
+
+    def test_failed_power_persistence_restores_exact_config_and_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            home = root / "home"
+            state_dir = home / ".config" / "kace"
+            state_dir.mkdir(parents=True)
+            moonraker_cfg = root / "moonraker.conf"
+            power_json = state_dir / "power.json"
+            original_config = b"[server]\r\nport: 7125\r\n"
+            original_state = b'{"schema":1,"enabled":false}\r\n'
+            moonraker_cfg.write_bytes(original_config)
+            power_json.write_bytes(original_state)
+            command = """
+PRINTER_HOME="$2"
+PRINTER_USER="$(id -un)"
+PRINTER_GROUP="$PRINTER_USER"
+chown() { return 0; }
+POWER_RELAY=true
+POWER_DEVICE=main_psu
+POWER_GPIO=20
+POWER_ACTIVE_LOW=false
+POWER_RESTART_KLIPPER=true
+POWER_INITIAL_STATE=on
+POWER_OFF_WHEN_SHUTDOWN=false
+validate_power_relay_settings
+begin_power_reconciliation "$1"
+ensure_moonraker_config "$1" "$2/printer_data/comms/klippy.sock"
+persist_power_controller_config
+rollback_power_reconciliation
+"""
+            result = self._run_bootstrap_library(command, moonraker_cfg, home)
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            self.assertEqual(moonraker_cfg.read_bytes(), original_config)
+            self.assertEqual(power_json.read_bytes(), original_state)
 
     def test_invalid_requested_relay_fails_and_preserves_boot_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -395,7 +679,7 @@ prepare_power_relay_for_kace
             config_call = script.index(
                 '    "$PRINTER_HOME/printer_data/config/moonraker.conf"'
             )
-            restart_call = script.index("systemctl restart moonraker")
+            restart_call = script.index("systemctl restart moonraker", config_call)
             power_gate_call = script.index("if ! prepare_power_relay_for_kace; then")
             kace_stage = script.index('log_stage "KACE" "Installing KACE Agent"')
             self.assertLess(config_call, restart_call)

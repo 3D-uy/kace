@@ -77,7 +77,7 @@ The release page should contain:
 - Hardware-validation scope.
 - Upgrade and rollback notes.
 
-Do not claim CI artifacts are signed or reproducible unless both properties have been demonstrated.
+CI installs the committed dependency locks with `--require-hashes`, pins third-party Actions to full commits, and pins the firmware-validation container base by digest. These controls make inputs auditable; they do not by themselves demonstrate that an output is signed or bit-for-bit reproducible. Do not make either claim without separate evidence.
 
 ## Rollback
 

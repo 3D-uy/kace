@@ -63,11 +63,11 @@ KACE é a CLI interativa executada no lado Raspberry Pi do ecossistema KACE. Ela
 | Checkout do código-fonte ou configuração de contribuição | Clone o repositório, instale as dependências bloqueadas e execute `python kace.py`. |
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='edfd3ede9c9ab18b3887006a9b555b4785c9b722'; KACE_INSTALL_SHA256='f116b3475684f6f242b10c53fcc3f898a8ab7b6e4e7149892a3a0e932dc1d701'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 > [!WARNING]
-> Este comando de conveniência transmite conteúdo remoto da branch mutável `main` diretamente para o Bash. Para uma instalação auditável, baixe `install.sh` de um commit ou tag imutável, verifique seu SHA-256 por meio de um valor confiável separado, inspecione-o e então execute-o.
+> O comando fixa um commit exato, verifica o instalador antes da execução e fornece a mesma identidade imutável ao instalador transacional. Atualize commit e checksum somente como um par revisado por um canal confiável.
 
 ## Como o ecossistema flui
 
@@ -111,7 +111,7 @@ Marcadores legíveis por máquina de etapas e erros em `scripts/bootstrap.sh` s�
 | 🖨️ Movimento e sondas | Geração de configuração para fluxos Cartesian e CoreXY implementados; sem sonda, BLTouch, CR Touch, indutiva e sonda personalizada. |
 | 🖥️ Displays | Verificações de compatibilidade e configuração de display gerada quando suportada. |
 | 📄 Artefatos gerados | Geração de configuração e macros do Klipper a partir de templates do projeto, armazenadas em `~/kace/` no host da impressora. |
-| ⚙️ Firmware | Derivação e compilação opcionais do firmware Klipper para MCU; artefatos de firmware independentes da implantação mais estratégias MANUAL e USB protegida. |
+| ⚙️ Firmware | Derivação e compilação opcionais do firmware Klipper para MCU; estratégias exatas por placa para AVRDUDE, cartão SD e preparação UF2 validadas, com placas desconhecidas limitadas a somente preparar. |
 | 📦 Implantação | Caminhos de implantação de configuração por mídia local/removível, SSH/SFTP e Moonraker; suporte a backup, validação e rollback em torno da implantação. |
 
 Espera-se que escolhas sem suporte ou contraditórias falhem de forma segura, em vez de produzir uma configuração sabidamente inválida.
@@ -140,13 +140,13 @@ Para um novo Raspberry Pi, use o [KACE Studio](https://github.com/3D-uy/KACE-stu
 
 ### Instalar diretamente em um host Linux existente
 
-O comando de conveniência instala a partir da branch mutável `main`:
+O comando standalone instala a partir de um commit imutável revisado:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='edfd3ede9c9ab18b3887006a9b555b4785c9b722'; KACE_INSTALL_SHA256='f116b3475684f6f242b10c53fcc3f898a8ab7b6e4e7149892a3a0e932dc1d701'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
-Isso transmite conteúdo de rede diretamente para o Bash. Para uma instalação auditável, baixe `install.sh` de um commit ou tag imutável, verifique seu SHA-256 por meio de um valor confiável separado, inspecione-o e então execute-o. `install.sh` respeita `KACE_SOURCE_REF`, de modo que um integrador pode instalar o conteúdo do repositório da mesma revisão imutável que o instalador.
+O instalador é baixado para um arquivo temporário, verificado antes da execução e vinculado ao mesmo commit completo por `KACE_SOURCE_REF` e `KACE_EXPECTED_COMMIT`. O instalador verifica o commit obtido e o checkout, cria um ambiente virtual novo em staging e publica somente os caminhos de runtime que controla, com rollback. Os artefatos gerados existentes em `~/kace/` permanecem intactos.
 
 ### Executar a partir de um checkout do código-fonte
 
@@ -182,6 +182,8 @@ Execute `python kace.py --help` para ver as opções de CLI disponíveis.
 
 Para um caminho integrado de firmware, o KACE exibe o progresso transacional da instalação diretamente em um terminal interativo e mantém `Ctrl+C` disponível para um cancelamento seguro. Saída redirecionada, pipes, CI e terminais sem recursos dinâmicos recebem linhas simples de progresso ASCII. Os mesmos eventos canônicos de fluxo são emitidos como linhas JSON `KACE_WORKFLOW_EVENT` para o KACE Studio; nenhuma visualização de terminal controla ou reconstrói a máquina de estados da instalação.
 
+A identidade do MCU após a gravação só é aceita automaticamente quando uma avaliação pontuada inclui a porta USB física capturada ou a topologia `by-path` e o VID/PID de aplicação esperado pelo perfil, sem evidência conflitante. Um serial estável aumenta a confiança, mas nunca substitui uma porta diferente ou um VID/PID incorreto. Candidatos ambíguos exigem confirmação física explícita e a decisão fica registrada no evento do workflow.
+
 > [!TIP]
 > Revise os artefatos gerados antes da implantação e trate a primeira energização, homing, aquecedores, sensores e verificações de movimento como etapas de segurança controladas pela pessoa operadora.
 
@@ -193,8 +195,8 @@ Para um caminho integrado de firmware, o KACE exibe o progresso transacional da 
 | `core/wizard/` | Fluxo interativo e escolhas normalizadas da pessoa usuária. |
 | `core/scraper.py`, `core/hardware_detector.py` | Obtenção de configuração upstream e descoberta de hardware. |
 | `core/generator.py`, `core/templates.py` | Geração de configuração e macros do Klipper. |
-| `firmware/` | Derivação/compilação de firmware mais artefatos tipados e estratégias de implantação MANUAL/USB. |
-| `data/firmware_deployments.yaml` | Nomes finais, instruções e perfis de segurança USB permitidos. |
+| `firmware/` | Derivação/compilação de firmware mais artefatos tipados e estratégias exatas de implantação por placa. |
+| `data/firmware_deployments.yaml` | IDs exatos de placa, nomes nativos/finais, offsets de bootloader, instruções de entrada, identidade USB esperada, método físico e contrato de verificação posterior. |
 | `core/deployer.py`, `core/moonraker.py`, `core/moonraker_deployer.py` | Caminhos de implantação, instalação transacional, transferência remota, backup e rollback. |
 | `core/terminal_progress.py` | Visualizações TTY nativas e orientadas a linhas dos eventos canônicos de instalação. |
 | `data/`, `templates/`, `config/` | Contratos de placa, traduções, templates de conteúdo gerado e dados de configuração. |
@@ -254,7 +256,7 @@ O GitHub Actions verifica atualmente:
 - Testes unitários e de regressão snapshot.
 - Esquema e regras de precedência de `boards.yaml`.
 - Uma matriz reduzida de KACE para Klipper em pull requests e pushes.
-- O sweep completo de configuração upstream em pushes para `main`.
+- O sweep completo e fixado de configuração upstream em pushes para `main`, ou por ativação manual explícita.
 - Uma matriz completa por pares quando acionada manualmente.
 - Compilações de firmware em contêiner para alvos representativos LPC1769, STM32, RP2040 e AVR.
 

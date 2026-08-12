@@ -8,12 +8,15 @@ import hashlib
 import tempfile
 
 from .models import (
+    DeploymentArtifactError,
     DeploymentExecutionContext,
     DeploymentInstruction,
     DeploymentPlan,
     DeploymentResult,
     DeploymentStatus,
+    DeploymentStrategyId,
     PreparedDeployment,
+    require_deployable_artifact,
 )
 
 
@@ -27,10 +30,21 @@ class ManualDeploymentMethod:
         return digest.hexdigest()
 
     def plan(self, *, deployment_id, artifact, target, profile, translate) -> DeploymentPlan:
+        require_deployable_artifact(artifact)
+        automation_blocker = (
+            "profile prepares an artifact but cannot perform the physical flash"
+            if profile.strategy is DeploymentStrategyId.PREPARE_ONLY
+            else "board-specific SD-card deployment requires user action"
+        )
         instructions = tuple(
             DeploymentInstruction(
                 key,
-                translate(key, filename=profile.final_filename),
+                translate(
+                    key,
+                    filename=profile.final_filename,
+                    board=target.board or "unknown board",
+                    device=target.device_path or "the board's verified serial device",
+                ),
             )
             for key in profile.instruction_keys
         )
@@ -44,7 +58,7 @@ class ManualDeploymentMethod:
             instructions=instructions,
             automation_supported=False,
             automation_eligible=False,
-            automation_blockers=("manual deployment requires user action",),
+            automation_blockers=(automation_blocker,),
         )
 
     def execute(
@@ -52,6 +66,37 @@ class ManualDeploymentMethod:
         prepared: PreparedDeployment,
         context: DeploymentExecutionContext,
     ) -> DeploymentResult:
+        try:
+            require_deployable_artifact(prepared.plan.artifact)
+            staged_digest = self._sha256(prepared.staged_path)
+            if staged_digest != prepared.sha256 or staged_digest != prepared.plan.artifact.sha256:
+                raise DeploymentArtifactError(
+                    "prepared firmware checksum no longer matches the immutable artifact"
+                )
+        except (DeploymentArtifactError, OSError) as exc:
+            return DeploymentResult(
+                DeploymentStatus.FAILED,
+                f"manual deployment rejected unsafe artifact: {exc}",
+                prepared,
+                error_code="ARTIFACT_UNSAFE",
+            )
+        if prepared.plan.profile.strategy is DeploymentStrategyId.PREPARE_ONLY:
+            return DeploymentResult(
+                DeploymentStatus.ACTION_REQUIRED,
+                (
+                    f"{prepared.plan.final_filename} is prepared at {prepared.staged_path}; "
+                    "KACE has no safe automatic or removable-media flash procedure for this profile"
+                ),
+                prepared,
+                error_code="PREPARE_ONLY",
+            )
+        if prepared.plan.profile.strategy is not DeploymentStrategyId.SD_CARD:
+            return DeploymentResult(
+                DeploymentStatus.FAILED,
+                "manual deployment profile selected an unsupported physical strategy",
+                prepared,
+                error_code="INVALID_STRATEGY",
+            )
         if context.media_path_provider is not None:
             destination = context.media_path_provider()
             if not destination:
@@ -94,4 +139,4 @@ class ManualDeploymentMethod:
             detail = f"{prepared.plan.final_filename} copied to {destination}"
         else:
             detail = f"{prepared.plan.final_filename} is ready for manual installation"
-        return DeploymentResult(DeploymentStatus.ACTION_REQUIRED, detail, prepared)
+        return DeploymentResult(DeploymentStatus.MEDIA_PREPARED, detail, prepared)

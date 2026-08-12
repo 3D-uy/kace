@@ -8,6 +8,7 @@
 #
 
 from core.motion_model import PrinterMotionSpace
+from core.exceptions import GenerationError
 
 def generate_bed_mesh_config(
     motion_space: PrinterMotionSpace,
@@ -48,7 +49,10 @@ def generate_bed_mesh_config(
     # Using nozzle_range_for_probing() here was wrong: it returns nozzle coords
     # and never clamps against the bed bounds, producing negative mesh_min when
     # x_position_min < 0 (e.g. Octopus Pro with x_min=-30 and offset=0 → -20).
-    probeable = motion_space.probeable_bed_area()
+    try:
+        probeable = motion_space.validate_probeable_area()
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
     px_min, px_max = probeable["x"]
     py_min, py_max = probeable["y"]
 

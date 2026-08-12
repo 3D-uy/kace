@@ -22,9 +22,9 @@ serial: /dev/serial/by-id/usb-Klipper_stm32f103xe_mock-if00 # Serial connection 
 # --------------------------------------------------
 
 [printer]
-kinematics: cartesian                           # Printer kinematics type (cartesian, corexy, delta)
+kinematics: cartesian                           # Printer kinematics type (cartesian, corexy)
 max_velocity: 300                               # Maximum velocity (in mm/s) of the toolhead
-max_accel: 3000                                 # Maximum acceleration (in mm/s^2) of the toolhead
+max_accel: 500                                  # Maximum acceleration (in mm/s^2) of the toolhead
 max_z_velocity: 5                               # Maximum velocity (in mm/s) of movement along the z axis
 max_z_accel: 100                                # Maximum acceleration (in mm/s^2) of movement along the z axis
 
@@ -73,7 +73,7 @@ enable_pin: !PC3                                # Enable pin for the stepper dri
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 8                            # Distance in mm the axis travels per full rotation of the motor
 endstop_pin: probe:z_virtual_endstop            # Endstop pin. Add or remove "!" to invert logic
-position_min: -2                                # Minimum valid Z position
+position_min: 0                                 # Minimum valid Z position
 position_max: 250                               # Maximum valid Z position
 
 [extruder]
@@ -83,14 +83,14 @@ enable_pin: !PC3                                # Enable pin for the stepper dri
 heater_pin: PA1                                 # Pin connected to the hotend heater cartridge
 sensor_pin: PC5                                 # Pin connected to the hotend thermistor
 microsteps: 16                                  # Number of microsteps per full step
-rotation_distance: 33.5                         # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
+rotation_distance: 33.500                       # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
 nozzle_diameter: 0.400                          # Diameter of the installed nozzle in mm
 filament_diameter: 1.750                        # Diameter of the filament being used
 sensor_type: EPCOS 100K B57560G104F             # Type of thermistor used for the hotend
 control: pid                                    # Temperature control algorithm
-pid_Kp: 22.2                                    # PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=extruder TARGET=200)
-pid_Ki: 1.08                                    # PID integral --- manual configuration --- (run PID_CALIBRATE)
-pid_Kd: 114                                     # PID derivative --- manual configuration --- (run PID_CALIBRATE)
+pid_Kp: 21.527                                  # PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=extruder TARGET=200)
+pid_Ki: 1.063                                   # PID integral --- manual configuration --- (run PID_CALIBRATE)
+pid_Kd: 108.982                                 # PID derivative --- manual configuration --- (run PID_CALIBRATE)
 min_temp: 0                                     # Minimum safe temperature
 max_temp: 250                                   # Maximum safe temperature
 # --------------------------------------------------
@@ -107,7 +107,7 @@ y_offset: 0                                     # distance from nozzle to probe 
 z_offset: 0                                     # nozzle to bed distance (mm) --- manual configuration --- (set using PROBE_CALIBRATE)
 
 [safe_z_home]
-home_xy_position: 117.5, 117.5                  # XY position to move to before homing Z
+home_xy_position: 117.5, 117.5                  # Nozzle coordinate that centers the probe within its reachable bed area
 speed: 50                                       # Speed at which the toolhead is moved to the safe Z home coordinate
 z_hop: 10                                       # Distance (in mm) to lift the Z axis prior to homing
 z_hop_speed: 5                                  # Speed (in mm/s) at which the Z axis is lifted prior to homing

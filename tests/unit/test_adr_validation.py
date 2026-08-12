@@ -104,7 +104,7 @@ class TestAdrValidation(unittest.TestCase):
         })
         with self.assertRaises(GenerationError) as context:
             generate_config(parsed_data=_PARSED_COMPLETE, user_data=user_data)
-        self.assertIn("exceeds maximum X travel range", str(context.exception))
+        self.assertIn("outside physical X travel limits", str(context.exception))
 
     def test_printable_depth_exceeds_travel(self):
         """Test generation fails when printable depth exceeds travel range."""
@@ -120,7 +120,7 @@ class TestAdrValidation(unittest.TestCase):
         })
         with self.assertRaises(GenerationError) as context:
             generate_config(parsed_data=_PARSED_COMPLETE, user_data=user_data)
-        self.assertIn("exceeds maximum Y travel range", str(context.exception))
+        self.assertIn("outside physical Y travel limits", str(context.exception))
 
     def test_printable_height_exceeds_travel(self):
         """Test generation fails when printable height exceeds travel range."""
@@ -135,7 +135,7 @@ class TestAdrValidation(unittest.TestCase):
         })
         with self.assertRaises(GenerationError) as context:
             generate_config(parsed_data=_PARSED_COMPLETE, user_data=user_data)
-        self.assertIn("exceeds maximum Z travel range", str(context.exception))
+        self.assertIn("must be within Z travel", str(context.exception))
 
     def test_printable_boundary_outside_travel_limits(self):
         """Test generation fails when printable bounds are outside travel limits."""

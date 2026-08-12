@@ -1,9 +1,8 @@
 import unittest
 from core.wizard import _load_mcu_search_terms
 from core.scraper import _load_bltouch_db
-from firmware.derivation import _load_firmware_db, _FW_DB_FALLBACK
+from firmware.derivation import _load_firmware_db
 import os
-import builtins
 import firmware.derivation as drv
 
 class TestYamlDb(unittest.TestCase):
@@ -34,22 +33,12 @@ class TestYamlDb(unittest.TestCase):
         idx_stm  = patterns.index('stm32')
         self.assertTrue(idx_f103 < idx_f1 < idx_stm, "STM32 pattern order is wrong in boards.yaml")
 
-    def test_yaml_parse_failure_recovery(self):
-        """Simulate a broken YAML file and ensure it gracefully falls back without crashing."""
+    def test_yaml_parse_failure_fails_closed(self):
+        """A broken authoritative database must abort instead of using shadow data."""
         from unittest.mock import patch
-        logs = []
-        original_print = builtins.print
-        def mock_print(*args, **kwargs):
-            logs.append(" ".join(map(str, args)))
-        builtins.print = mock_print
-
         with patch("core.loader.load_boards_yaml", side_effect=Exception("Mock YAML parse error")):
-            try:
-                fallback = drv._load_firmware_db()
-                self.assertEqual(fallback, _FW_DB_FALLBACK, "Failed to fall back on broken YAML")
-                self.assertTrue(any("Failed to load modular hardware database" in log for log in logs), "Missing warning log")
-            finally:
-                builtins.print = original_print
+            with self.assertRaisesRegex(RuntimeError, "authoritative boards.yaml"):
+                drv._load_firmware_db()
 
 if __name__ == '__main__':
     unittest.main()

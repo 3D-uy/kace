@@ -85,6 +85,25 @@ def _post(url: str, data: bytes = b"", content_type: str = "application/json", a
         return False, f"Unexpected error: {e}", {}
 
 
+def _delete(url: str, api_key: str = None) -> tuple[bool, str, dict]:
+    """Perform a DELETE request and return the standard structured tuple."""
+    try:
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["X-Api-Key"] = api_key
+        req = urllib.request.Request(url, headers=headers, method="DELETE")
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            raw = resp.read()
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+            return True, "OK", body
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}: {e.reason}", {}
+    except urllib.error.URLError as e:
+        return False, f"Connection error: {e.reason}", {}
+    except Exception as e:
+        return False, f"Unexpected error: {e}", {}
+
+
 def _post_multipart(url: str, field_name: str, filename: str, file_bytes: bytes, root: str = "config", api_key: str = None) -> tuple[bool, str, dict]:
     """POST a file as multipart/form-data to the Moonraker file upload endpoint."""
     boundary = uuid.uuid4().hex
@@ -228,6 +247,15 @@ def restart_klipper_service(host: str, port: int = DEFAULT_PORT, api_key: str = 
     return True, "Klipper service restart issued"
 
 
+def restart_moonraker_service(host: str, port: int = DEFAULT_PORT, api_key: str = None) -> tuple[bool, str]:
+    """Request a Moonraker service restart through the machine API."""
+    url = f"{_base_url(host, port)}/machine/services/restart?service=moonraker"
+    ok, msg, _ = _post(url, data=b"{}", content_type="application/json", api_key=api_key)
+    # Moonraker may close its own HTTP connection while restarting. A clean
+    # response is ideal; callers still verify that it returns before commit.
+    return (True, "Moonraker service restart issued") if ok else (False, msg)
+
+
 def download_printer_cfg(host: str, port: int, filename: str, api_key: str = None) -> tuple[bool, bytes]:
     """Download a file from Moonraker's config root via GET /server/files/config/{filename}.
 
@@ -245,6 +273,16 @@ def download_printer_cfg(host: str, port: int, filename: str, api_key: str = Non
             return True, resp.read()
     except Exception as e:
         return False, str(e).encode("utf-8")
+
+
+def delete_config_file(host: str, port: int, filename: str, api_key: str = None) -> tuple[bool, str]:
+    """Delete one file from Moonraker's config root."""
+    encoded = "/".join(urllib.parse.quote(part, safe="") for part in filename.split("/"))
+    ok, message, _ = _delete(
+        f"{_base_url(host, port)}/server/files/config/{encoded}",
+        api_key=api_key,
+    )
+    return ok, message
 
 
 def check_klipper_ready(host: str, port: int, api_key: str = None) -> tuple[bool, str]:
@@ -373,3 +411,18 @@ def list_config_files(host: str, port: int, api_key: str = None) -> list:
         return []
     files = body.get("result", [])
     return [f["path"] for f in files if isinstance(f, dict) and "path" in f]
+
+
+def list_config_files_checked(host: str, port: int, api_key: str = None) -> tuple[bool, str, list]:
+    """List config files while preserving reachability/error information."""
+    url = f"{_base_url(host, port)}/server/files/list?root=config"
+    ok, message, body = _get(url, api_key=api_key)
+    if not ok:
+        return False, message, []
+    files = body.get("result", [])
+    if not isinstance(files, list):
+        return False, "Moonraker returned an invalid config file list", []
+    return True, "OK", [
+        item["path"] for item in files
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    ]

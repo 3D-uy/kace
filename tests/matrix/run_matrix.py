@@ -20,9 +20,9 @@ from tests.matrix.cases import (
     FACTOR_VALUES, build_cases, generate_case, pair_tokens,
     pairwise_rows, supported_boards,
 )
+from tests.klipper_contract import KLIPPER_REF
 
 
-KLIPPER_REF = "d865997403cad36d105026f73a4b76dcacec4c76"
 SCHEMA_VERSION = 1
 FINAL_PASS = "PASS"
 FINAL_EXPECTED_REJECT = "EXPECTED_REJECT"

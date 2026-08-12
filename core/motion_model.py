@@ -7,14 +7,21 @@
 # Represents the printer's physical coordinate system and travel envelopes.
 # Differentiates between printable area, nozzle reachable area, probe reachable
 # area, and homed coordinate origin.
-#
+import math
+
+
 def _safe_float(val, default):
     if val is None:
         return default
     try:
-        return float(val)
+        number = float(val)
+        return number if math.isfinite(number) else default
     except (ValueError, TypeError):
         return default
+
+
+class ProbeGeometryError(ValueError):
+    """Raised when nozzle/probe geometry has no physically usable overlap."""
 
 class PrinterMotionSpace:
     """Represents the printer's physical coordinate system and motion space.
@@ -179,6 +186,51 @@ class PrinterMotionSpace:
         return {
             "x": (max(self.printable_x_min, x_probe_min), min(self.printable_x_max, x_probe_max)),
             "y": (max(self.printable_y_min, y_probe_min), min(self.printable_y_max, y_probe_max))
+        }
+
+    def validate_probeable_area(self) -> dict:
+        """Return a non-empty probeable rectangle or fail with axis details."""
+        area = self.probeable_bed_area()
+        for axis in ("x", "y"):
+            minimum, maximum = area[axis]
+            if minimum >= maximum:
+                raise ProbeGeometryError(
+                    f"Probeable {axis.upper()} area is empty or inverted "
+                    f"[{minimum:g}, {maximum:g}]; check travel limits and probe_{axis}_offset."
+                )
+        return area
+
+    def safe_z_home_position(self) -> tuple[float, float]:
+        """Derive a nozzle coordinate whose probe tip is centered on reachable bed."""
+        area = self.validate_probeable_area()
+        probe_x = sum(area["x"]) / 2.0
+        probe_y = sum(area["y"]) / 2.0
+        nozzle_x = probe_x - self.probe_x_offset
+        nozzle_y = probe_y - self.probe_y_offset
+        if not (self.x_min <= nozzle_x <= self.x_max):
+            raise ProbeGeometryError(
+                f"Derived safe_z_home X ({nozzle_x:g}) is outside nozzle travel [{self.x_min:g}, {self.x_max:g}]."
+            )
+        if not (self.y_min <= nozzle_y <= self.y_max):
+            raise ProbeGeometryError(
+                f"Derived safe_z_home Y ({nozzle_y:g}) is outside nozzle travel [{self.y_min:g}, {self.y_max:g}]."
+            )
+        return nozzle_x, nozzle_y
+
+    def starter_macro_positions(self) -> dict[str, tuple[float, ...]]:
+        """Return conservative, in-range coordinates for generated starter macros."""
+        center_x = (self.printable_x_min + self.printable_x_max) / 2.0
+        center_y = (self.printable_y_min + self.printable_y_max) / 2.0
+        margin_x = min(10.0, max(0.0, (self.printable_x_max - self.printable_x_min) / 10.0))
+        margin_y = min(10.0, max(0.0, (self.printable_y_max - self.printable_y_min) / 10.0))
+        park_x = self.printable_x_min + margin_x
+        park_y = self.printable_y_min + margin_y
+        safe_z = min(self.printable_z_max, max(self.z_min, min(50.0, self.printable_z_max * 0.2)))
+        movement_z = min(self.printable_z_max, max(self.z_min, min(20.0, self.printable_z_max * 0.1)))
+        return {
+            "center": (center_x, center_y, safe_z),
+            "park": (park_x, park_y, safe_z),
+            "test": (center_x, center_y, movement_z),
         }
 
     def homed_origin(self) -> dict:

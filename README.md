@@ -63,11 +63,11 @@ KACE is the Raspberry Pi-side interactive CLI in the KACE ecosystem. It guides a
 | Source checkout or contributor setup | Clone the repository, install the locked dependencies, and run `python kace.py`. |
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='edfd3ede9c9ab18b3887006a9b555b4785c9b722'; KACE_INSTALL_SHA256='f116b3475684f6f242b10c53fcc3f898a8ab7b6e4e7149892a3a0e932dc1d701'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 > [!WARNING]
-> This convenience command streams remote content from the mutable `main` branch directly to Bash. For an auditable installation, download `install.sh` from an immutable commit or tag, verify its SHA-256 through a separately trusted value, inspect it, and then execute it.
+> The command pins one exact commit, verifies the downloaded installer before execution, and passes that same immutable identity to the transactional installer. Update the commit and checksum only as a reviewed pair from a trusted release channel.
 
 ## How the ecosystem flows
 
@@ -111,7 +111,7 @@ Machine-readable stage and error markers in `scripts/bootstrap.sh` are consumed 
 | 🖨️ Motion and probing | Configuration generation for implemented Cartesian and CoreXY flows; no probe, BLTouch, CR Touch, inductive, and custom probe flows. |
 | 🖥️ Displays | Compatibility checks and generated display configuration where supported. |
 | 📄 Generated artifacts | Klipper configuration and macro generation from project templates, stored under `~/kace/` on the printer host. |
-| ⚙️ Firmware | Optional Klipper MCU firmware derivation and build; deployment-agnostic firmware artifacts plus MANUAL and safety-gated USB strategies. |
+| ⚙️ Firmware | Optional Klipper MCU firmware derivation and build; exact board strategies for validated AVRDUDE, SD-card, and UF2 preparation workflows, with unsupported boards limited to prepare-only. |
 | 📦 Deployment | Local/removable-media, SSH/SFTP, and Moonraker configuration deployment paths; backup, validation, and rollback support around deployment. |
 
 Unsupported or contradictory selections are expected to fail safely rather than produce a configuration that is known to be invalid.
@@ -140,13 +140,13 @@ For a new Raspberry Pi, use [KACE Studio](https://github.com/3D-uy/KACE-studio).
 
 ### Install directly on an existing Linux host
 
-The convenience command installs from the mutable `main` branch:
+The standalone command installs from a reviewed immutable commit:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/3D-uy/KACE/main/install.sh)
+KACE_COMMIT='edfd3ede9c9ab18b3887006a9b555b4785c9b722'; KACE_INSTALL_SHA256='f116b3475684f6f242b10c53fcc3f898a8ab7b6e4e7149892a3a0e932dc1d701'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
-This streams network content directly to Bash. For an auditable installation, download `install.sh` from an immutable commit or tag, verify its SHA-256 through a separately trusted value, inspect it, and then execute it. `install.sh` honors `KACE_SOURCE_REF` so an integrator can install the repository content from the same immutable revision as the installer.
+The installer is downloaded to a temporary file, verified before execution, and bound to the same full commit through `KACE_SOURCE_REF` and `KACE_EXPECTED_COMMIT`. It verifies the fetched and checked-out commit, builds a fresh staged virtual environment, and publishes only installer-owned runtime paths with rollback. Generated artifacts already stored under `~/kace/` remain untouched.
 
 ### Run from a source checkout
 
@@ -180,7 +180,9 @@ Run `python kace.py --help` for the available CLI options.
 7. Flash the MCU only according to the controller manufacturer's documented procedure.
 8. Start Klipper and complete its official verification sequence before energizing heaters or commanding unrestricted motion.
 
-For an integrated firmware path, KACE displays transactional installation progress directly in an interactive terminal and keeps `Ctrl+C` available for a safe cancellation. Redirected output, pipes, CI, and terminals without dynamic capabilities receive plain ASCII progress lines instead. The same canonical workflow events are emitted as `KACE_WORKFLOW_EVENT` JSON lines for KACE Studio; neither terminal view controls or reconstructs the installation state machine.
+For an integrated firmware path, KACE displays transactional installation progress directly in an interactive terminal and keeps `Ctrl+C` available for a safe cancellation. Firmware target edits are re-derived as a complete configuration, so changing an architecture or processor cannot retain stale clock, offset, machine, or processor flags; KACE displays the resulting `.config` diff before starting the build. Each real build records the exact Klipper commit, canonical `.config`, toolchain versions, and artifact SHA-256, while a unique build ID embedded in the MCU version prevents an unchanged previous firmware from passing post-flash verification. Physical delivery distinguishes prepared media, safe media installation, bootloader entry, flashing, reenumeration and firmware verification; an action still required from the operator is never reported as success. With a configured relay, KACE receives permission before powering off, waits for confirmed MCU removal, asks the operator to install the media while power is off, and powers on only after a second confirmation. Mock, identity-less, tampered or otherwise non-flashable artifacts are rejected by every deployment method. Redirected output, pipes, CI, and terminals without dynamic capabilities receive plain ASCII progress lines instead. The same canonical workflow events are emitted as `KACE_WORKFLOW_EVENT` JSON lines for KACE Studio; neither terminal view controls or reconstructs the installation state machine.
+
+Post-flash MCU identity is accepted automatically only when a scored assessment includes the captured physical USB port or `by-path` topology and the board profile's expected application VID/PID, with no conflicting evidence. A stable serial adds confidence but never overrides a changed port or incorrect VID/PID. Ambiguous candidates require an explicit physical confirmation and that decision is recorded in the workflow event.
 
 > [!TIP]
 > Review generated artifacts before deployment, and treat the first power-on, homing, heater, sensor, and movement checks as operator-controlled safety steps.
@@ -193,8 +195,8 @@ For an integrated firmware path, KACE displays transactional installation progre
 | `core/wizard/` | Interactive workflow and normalized user selections. |
 | `core/scraper.py`, `core/hardware_detector.py` | Upstream configuration retrieval and hardware discovery. |
 | `core/generator.py`, `core/templates.py` | Klipper configuration and macro generation. |
-| `firmware/` | Firmware derivation/build plus typed artifacts and MANUAL/USB deployment strategies. |
-| `data/firmware_deployments.yaml` | Final filenames, instructions, and allow-listed USB safety profiles. |
+| `firmware/` | Firmware derivation/build plus typed artifacts and exact board-specific deployment strategies. |
+| `data/firmware_deployments.yaml` | Exact board IDs, native/final artifact names, bootloader offsets, entry instructions, USB identity expectations, physical methods, and post-flash verification contracts. |
 | `core/deployer.py`, `core/moonraker.py`, `core/moonraker_deployer.py` | Deployment, transactional installation, remote transfer, backup, and rollback paths. |
 | `core/terminal_progress.py` | Native TTY and line-oriented views of canonical installation events. |
 | `data/`, `templates/`, `config/` | Board contracts, translations, generated-content templates, and configuration data. |
@@ -227,7 +229,7 @@ The full pairwise matrix is intended for manual or pre-release use:
 python tests/matrix/run_matrix.py --profile full
 ```
 
-The matrix generates configurations through the real KACE flow, validates accepted cases with a fixed Klipper commit inside Docker, distinguishes safe expected rejections from failures, and writes Markdown and JSON reports. The broader upstream configuration sweep is available with:
+The matrix generates configurations through the real KACE flow, validates accepted cases with a fixed Klipper commit inside Docker, distinguishes safe expected rejections from failures, and writes Markdown and JSON reports. The broader upstream configuration sweep uses the same authoritative commit in `tests/klipper_contract.py` and is available with:
 
 ```bash
 python tests/run_tests.py --full-klipper-sweep --verbose
@@ -254,7 +256,7 @@ GitHub Actions currently checks:
 - Unit and snapshot regression tests.
 - `boards.yaml` schema and precedence rules.
 - A reduced KACE-to-Klipper matrix on pull requests and pushes.
-- The full upstream configuration sweep on pushes to `main`.
+- The full pinned upstream configuration sweep on pushes to `main`, or by explicit `full_klipper_sweep` opt-in in a manual workflow dispatch.
 - A full pairwise matrix when manually dispatched.
 - Containerized firmware builds for representative LPC1769, STM32, RP2040, and AVR targets.
 

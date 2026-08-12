@@ -2,7 +2,7 @@
 #
 # Unit tests for core/display_checker.py
 # Covers: section detection, database lookup, printer profile matching,
-#         fallback behavior (no YAML), status mapping, and empty-config safety.
+#         authoritative YAML behavior, status mapping, and empty-config safety.
 
 import sys
 import os
@@ -16,9 +16,6 @@ from core.display_checker import (
     detect_display_sections,
     get_display_compat,
     check_display_compatibility,
-    _DISPLAY_CONFIGS_FALLBACK,
-    _PRINTER_PROFILES_FALLBACK,
-    _DISPLAY_SECTION_NAMES,
 )
 
 
@@ -222,37 +219,8 @@ class TestCheckDisplayCompatibility(unittest.TestCase):
             self.assertIn(key, finding, f"Finding missing key: {key}")
 
 
-class TestFallbackDatabase(unittest.TestCase):
-    """Verify the hardcoded fallback dicts are internally consistent."""
-
-    def test_fallback_configs_have_required_keys(self):
-        for section, data in _DISPLAY_CONFIGS_FALLBACK.items():
-            for key in ("status", "recommendation", "notes"):
-                self.assertIn(key, data, f"_DISPLAY_CONFIGS_FALLBACK[{section!r}] missing key {key!r}")
-            self.assertIn(data["status"], ("supported", "partial", "unsupported", "untested"))
-            self.assertIn(data["recommendation"], ("disconnect", "optional", "none"))
-
-    def test_fallback_printer_profiles_have_required_keys(self):
-        for profile, data in _PRINTER_PROFILES_FALLBACK.items():
-            for key in ("status", "recommendation", "notes"):
-                self.assertIn(key, data, f"_PRINTER_PROFILES_FALLBACK[{profile!r}] missing key {key!r}")
-            self.assertIn(data["status"], ("supported", "partial", "unsupported", "untested"))
-
-    def test_fallback_covers_critical_sections(self):
-        critical = {"t5uid1", "dwin_set", "tft_serial", "display", "neopixel"}
-        for section in critical:
-            self.assertIn(section, _DISPLAY_CONFIGS_FALLBACK,
-                          f"Critical section {section!r} missing from fallback")
-
-    def test_fallback_covers_critical_printers(self):
-        critical = {"cr6-se", "artillery-sidewinder", "artillery-genius"}
-        for printer in critical:
-            self.assertIn(printer, _PRINTER_PROFILES_FALLBACK,
-                          f"Critical printer profile {printer!r} missing from fallback")
-
-
-class TestYamlLoadFallback(unittest.TestCase):
-    """Verify the module works when displays.yaml is unavailable."""
+class TestAuthoritativeYamlLoad(unittest.TestCase):
+    """Verify missing or corrupt displays.yaml fails closed."""
 
     def setUp(self):
         import core.loader
@@ -262,25 +230,21 @@ class TestYamlLoadFallback(unittest.TestCase):
         import core.loader
         core.loader._DISPLAYS_CACHE = None
 
-    def test_module_works_without_yaml(self):
+    def test_module_fails_without_yaml(self):
         """Simulate missing YAML by patching open() to raise FileNotFoundError."""
         with patch("builtins.open", side_effect=FileNotFoundError("no file")):
             # Re-import _load_display_db with patched open
             from core import display_checker
-            configs, profiles, matrix, catalog = display_checker._load_display_db()
-            self.assertEqual(configs, _DISPLAY_CONFIGS_FALLBACK)
-            self.assertEqual(profiles, _PRINTER_PROFILES_FALLBACK)
+            with self.assertRaisesRegex(RuntimeError, "displays"):
+                display_checker._load_display_db()
 
-    def test_module_works_with_corrupt_yaml(self):
-        """Simulate corrupt YAML — should fall back gracefully."""
+    def test_module_fails_with_corrupt_yaml(self):
         import io
         corrupt_content = "this: {is: [corrupt yaml"
         with patch("builtins.open", return_value=io.StringIO(corrupt_content)):
             from core import display_checker
-            configs, profiles, matrix, catalog = display_checker._load_display_db()
-            # Should fall back without raising
-            self.assertIsInstance(configs, dict)
-            self.assertIsInstance(profiles, dict)
+            with self.assertRaisesRegex(RuntimeError, "displays"):
+                display_checker._load_display_db()
 
 
 if __name__ == "__main__":

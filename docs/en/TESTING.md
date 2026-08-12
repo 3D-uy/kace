@@ -30,6 +30,9 @@ python tests/matrix/run_matrix.py --profile full
 
 # Broad sweep of upstream Klipper generic/printer configs
 python tests/run_tests.py --full-klipper-sweep --verbose
+
+# Hardware-free physical-workflow integration lab
+python -m unittest tests.integration.test_simulated_firmware_lab -v
 ```
 
 Use the narrowest command that covers a change, then run the complete relevant gate before submitting it.
@@ -46,6 +49,19 @@ Regression tests exercise complete generation paths, CLI integration, runtime be
 
 The default runner discovers every `test_*.py` file under `tests/`. Environment-dependent real firmware builds skip when their required toolchain is unavailable; CI separately runs representative builds in the development container.
 
+### Simulated hardware integration — `tests/integration/`
+
+The deterministic integration lab runs the production Moonraker HTTP adapter,
+Power API controller, firmware deployment strategies, MCU presence monitor,
+firmware build-identity verification, configuration upload, and rollback
+against stateful loopback Moonraker and udev simulators. It covers successful
+SD and AVRDUDE workflows plus stale firmware, wrong VID/PID, ambiguous identity,
+timeouts, corrupted uploads, and failed activation.
+
+This gate never opens a physical serial device, GPIO, or removable disk. A pass
+proves software ordering and failure semantics, not electrical behavior, Linux
+permissions, real USB timing, bootloader behavior, or media compatibility.
+
 ### YAML integrity
 
 ```bash
@@ -56,7 +72,7 @@ This gate parses `data/boards.yaml`, checks required top-level and entry fields,
 
 ### Generated-config matrix — `tests/matrix/`
 
-The matrix generates each accepted case through KACE, stores it with a deterministic ID, and loads it inside Docker with Klipper commit `d865997403cad36d105026f73a4b76dcacec4c76`.
+The matrix generates each accepted case through KACE, stores it with a deterministic ID, and loads it inside Docker with the exact Klipper commit declared by `tests/klipper_contract.py`.
 
 Results are classified as:
 
@@ -74,7 +90,7 @@ An expected rejection is not counted as a pass. Reports and generated configurat
 
 ### Full Klipper sweep — `tests/sweep/`
 
-The sweep clones the current upstream Klipper `config/` tree, parses its `generic-*.cfg` and `printer-*.cfg` files, and classifies known unsupported inputs separately from unhandled failures. It requires Git and network access and is intentionally different from the matrix: the sweep tests breadth against the live upstream tree, while the matrix tests representative KACE output against a fixed Klipper commit.
+The sweep clones the Klipper `config/` tree at the exact commit declared by `tests/klipper_contract.py`, verifies the detached checkout's `HEAD`, parses its `generic-*.cfg` and `printer-*.cfg` files, and classifies known unsupported inputs separately from unhandled failures. It requires Git and network access. The sweep and generated-config matrix deliberately share the same immutable upstream identity: the sweep tests breadth of upstream examples, while the matrix tests representative KACE output through Klipper's real loader.
 
 The sweep report is generated output and is not committed.
 
@@ -113,12 +129,13 @@ Mock firmware created by the interactive development container is not flashable.
 
 | Job | Trigger | Validation |
 | --- | --- | --- |
-| `lint` | Push and pull request | Compile every Python file |
+| `lint` | Push, pull request, and manual dispatch | Compile every Python file; run `bash -n` and pinned ShellCheck over critical scripts |
 | `unit-tests` | Push and pull request | Full default test discovery |
+| `simulated-hardware-integration` | Push and pull request | Stateful Moonraker/power/udev firmware workflow without physical devices |
 | `yaml-integrity` | Push and pull request | Board schema and precedence |
 | `regression-tests` | Push and pull request | Snapshot regression gate |
 | `config-matrix-quick` | Push and pull request | Reduced pinned-Klipper matrix |
-| `full-klipper-sweep` | Push to `main` | Broad upstream config sweep |
+| `full-klipper-sweep` | Push to `main`, or manual dispatch with `full_klipper_sweep=true` | Broad pinned upstream config sweep |
 | `config-matrix-full` | Manual dispatch | Full pairwise pinned-Klipper matrix |
 | `docker-firmware-build` | Push and pull request | Representative real MCU builds in Docker |
 

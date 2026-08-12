@@ -1,80 +1,155 @@
-import sys
 from core.menu import simple_input, yes_no, numbered_select
-from core.validators import questionary_arch_validator, questionary_hex_offset_validator
+from core.validators import (
+    questionary_arch_validator,
+    questionary_hex_offset_validator,
+    questionary_processor_validator,
+)
 from core.translations import t
 from core.terminal import BOLD, INFO, RESET, WARNING
-from core.exceptions import DerivationAmbiguityError
+from core.exceptions import DerivationAmbiguityError, WizardExit
+from core.workflow_outcome import WorkflowOutcome, WorkflowResult, failed, success
+from core.capabilities import validate_firmware_processor_for_architecture
 from firmware.derivation import derive_config
+from firmware.configuration import (
+    BootloaderOffset,
+    FirmwareConfigurationError,
+    bootloader_offset_from_config,
+    render_config_diff,
+    validate_firmware_configuration,
+)
 from firmware.builder import build_firmware_orchestrator, BuildContext
 from firmware.artifacts import BuildArtifact
 from firmware.deployment import (
     DeploymentMethodId,
     DeploymentTarget,
     FirmwareDeploymentService,
+    deployment_artifact_blockers,
 )
 
-def run_firmware_wizard(user_data: dict):
-    """Interactively configure, compile and deploy Klipper firmware for the target MCU."""
+
+def _read_deployment_usb_identity(device_path):
+    """Best-effort current USB facts; absence disables automatic flashing."""
+    if not device_path:
+        return {}
+    from core.mcu_monitor import McuIdentityReader, McuMonitorError
+
+    try:
+        identity = McuIdentityReader().read(device_path)
+    except (McuMonitorError, OSError):
+        return {}
+    if identity is None:
+        return {}
+    return {
+        "usb_vid": identity.vendor_id,
+        "usb_pid": identity.model_id,
+        "usb_path": identity.physical_port or identity.physical_path,
+    }
+
+
+def _cancel_firmware_configuration():
+    print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
+    raise WizardExit()
+
+
+def _is_back(value):
+    return str(value or "").strip().lower() in ("<", "back", "volver")
+
+
+def _processor_validator_for_architecture(architecture: str):
+    def _validate(value):
+        text = str(value or "").strip()
+        if _is_back(text):
+            return True
+        if not text:
+            return "Processor is required after changing architecture."
+        try:
+            validate_firmware_processor_for_architecture(text, architecture)
+            return True
+        except ValueError as exc:
+            return str(exc)
+
+    return _validate
+
+
+def _resolve_firmware_configuration(current_mcu, current_hint, resolved_flash=None):
+    """Resolve every dependent field and return one validated configuration."""
+    while True:
+        try:
+            config = derive_config(
+                current_mcu,
+                current_hint,
+                flash_start=resolved_flash,
+            )
+            validate_firmware_configuration(config, processor=current_mcu)
+            return config, current_mcu, current_hint
+        except DerivationAmbiguityError as ambig:
+            if ambig.param == "mcu_family":
+                choices = ambig.options + ["Enter manually"]
+                answer = numbered_select(
+                    f"Select MCU architecture family for {current_mcu if current_mcu else 'Board'}:",
+                    choices=choices,
+                )
+                if answer == "Enter manually" or answer is None:
+                    answer = simple_input(
+                        "Enter Klipper ARCH (e.g. stm32)",
+                        validate=questionary_arch_validator,
+                    )
+                if not answer:
+                    _cancel_firmware_configuration()
+                current_mcu = answer
+                resolved_flash = None
+            elif ambig.param == "bootloader_offset":
+                options = ambig.options
+                choices = list(options.keys()) + ["No bootloader (0x0)", "Enter manually"]
+                answer = numbered_select(
+                    f"Select bootloader offset for {current_mcu.upper()}:",
+                    choices=choices,
+                )
+                if answer == "Enter manually":
+                    answer = simple_input(
+                        "Enter HEX offset (e.g. 0x8000)",
+                        validate=questionary_hex_offset_validator,
+                    )
+                elif answer == "No bootloader (0x0)" or answer is None:
+                    answer = "0x0"
+                else:
+                    answer = options.get(answer, "0x0")
+                resolved_flash = BootloaderOffset.from_value(answer)
+            elif ambig.param == "comm_interface":
+                answer = numbered_select(
+                    f"Select the communication interface for {(current_mcu or 'Board').upper()}:",
+                    choices=ambig.options,
+                )
+                if not answer:
+                    _cancel_firmware_configuration()
+                current_hint = answer.lower()
+
+def run_firmware_wizard(user_data: dict) -> WorkflowResult:
+    """Configure/build firmware and always return a typed terminal decision."""
     mcu = user_data.get('mcu_type')
     hint = user_data.get('mcu_hint')
     if not (mcu or hint == "manual"):
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
-        return
+        return success("Firmware compilation was not applicable.")
 
     prompt_mcu = mcu if mcu else "manually selected board"
     ans = yes_no(t("kace.compile_prompt", mcu=prompt_mcu))
     if not ans:
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
-        return
+        return success("Firmware compilation was explicitly skipped by the user.")
 
     # ── 1. Resolve firmware configuration interactively (derivation prompts) ──
-    config_dict = None
     current_mcu = mcu
     current_hint = hint
-    resolved_flash = None
-
-    while config_dict is None:
-        try:
-            config_dict = derive_config(current_mcu, current_hint, flash_start=resolved_flash)
-        except DerivationAmbiguityError as ambig:
-            if ambig.param == "mcu_family":
-                choices = ambig.options + ["Enter manually"]
-                ans_family = numbered_select(
-                    f"Select MCU architecture family for {current_mcu if current_mcu else 'Board'}:",
-                    choices=choices
-                )
-                if ans_family == "Enter manually" or ans_family is None:
-                    ans_family = simple_input("Enter Klipper ARCH (e.g. stm32)", validate=questionary_arch_validator)
-                if not ans_family:
-                    print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-                    sys.exit(0)
-                current_mcu = ans_family
-            elif ambig.param == "bootloader_offset":
-                options = ambig.options
-                choices = list(options.keys()) + ["No bootloader (0x0)", "Enter manually"]
-                ans_boot = numbered_select(
-                    f"Select bootloader offset for {current_mcu.upper()}:",
-                    choices=choices
-                )
-                if ans_boot == "Enter manually":
-                    ans_boot = simple_input("Enter HEX offset (e.g. 0x8000)", validate=questionary_hex_offset_validator)
-                elif ans_boot == "No bootloader (0x0)" or ans_boot is None:
-                    ans_boot = "0x0"
-                else:
-                    ans_boot = options.get(ans_boot, "0x0")
-                resolved_flash = ans_boot
-            elif ambig.param == "comm_interface":
-                ans_comm = numbered_select(
-                    f"Select the communication interface for {(current_mcu or 'Board').upper()}:",
-                    choices=ambig.options
-                )
-                if not ans_comm:
-                    print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-                    sys.exit(0)
-                current_hint = ans_comm.lower()
+    config_dict, current_mcu, current_hint = _resolve_firmware_configuration(
+        current_mcu, current_hint
+    )
+    initial_config = dict(config_dict)
 
     # ── 2. Run the interactive compile summary wizard ──
     def format_flash(f):
+        if f is None:
+            return "N/A"
         mapping = {
             "0x0": t("builder.boot_no"),
             "0x2000": t("builder.boot_8k"),
@@ -95,7 +170,7 @@ def run_firmware_wizard(user_data: dict):
     while True:
         arch = config_dict.get("CONFIG_MCU", "Unknown").replace('"', '')
         model = current_mcu if current_mcu else "Unknown"
-        flash = config_dict.get("CONFIG_FLASH_START", "0x0")
+        flash = config_dict.get("CONFIG_FLASH_START")
         comm = "USB" if config_dict.get("CONFIG_USB") == "y" else \
                "CAN" if config_dict.get("CONFIG_CANBUS") == "y" else \
                "UART" if config_dict.get("CONFIG_SERIAL") == "y" else \
@@ -126,9 +201,10 @@ def run_firmware_wizard(user_data: dict):
             t("builder.compile_now"),
             t("builder.edit_arch"),
             t("builder.edit_proc"),
-            t("builder.edit_boot"),
-            t("builder.edit_comm"),
         ]
+        if flash is not None:
+            choices.append(t("builder.edit_boot"))
+        choices.append(t("builder.edit_comm"))
         if clock:
             choices.append(t("builder.edit_clock"))
         choices.append(t("builder.abort"))
@@ -136,16 +212,44 @@ def run_firmware_wizard(user_data: dict):
         ans_summary = numbered_select(t("builder.config_correct"), choices=choices)
 
         if ans_summary == t("builder.compile_now"):
+            try:
+                validate_firmware_configuration(config_dict, processor=current_mcu)
+            except FirmwareConfigurationError as exc:
+                print(f"\n\033[91mERROR:\033[0m {exc}")
+                continue
+            diff = render_config_diff(initial_config, config_dict)
+            print("\n\033[96m[*]\033[0m Firmware configuration diff:")
+            print(diff or "(no changes from derived configuration)")
             break
         elif ans_summary == t("builder.abort") or ans_summary is None:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            sys.exit(0)
+            _cancel_firmware_configuration()
         elif ans_summary == t("builder.edit_arch"):
             new_arch = simple_input(t("builder.enter_arch"), default=arch, validate=questionary_arch_validator)
-            if new_arch: config_dict["CONFIG_MCU"] = f'"{new_arch}"'
+            if not _is_back(new_arch) and new_arch and new_arch != arch:
+                new_model = simple_input(
+                    t("builder.enter_proc"),
+                    default="",
+                    validate=_processor_validator_for_architecture(new_arch),
+                )
+                if not _is_back(new_model) and new_model:
+                    try:
+                        validate_firmware_processor_for_architecture(new_model, new_arch)
+                        config_dict, current_mcu, current_hint = _resolve_firmware_configuration(
+                            new_model, current_hint, None
+                        )
+                    except (FirmwareConfigurationError, ValueError) as exc:
+                        print(f"\n\033[91mERROR:\033[0m {exc}")
         elif ans_summary == t("builder.edit_proc"):
-            new_model = simple_input(t("builder.enter_proc"), default=model)
-            if new_model: current_mcu = new_model
+            new_model = simple_input(
+                t("builder.enter_proc"), default=model, validate=questionary_processor_validator
+            )
+            if not _is_back(new_model) and new_model and new_model != current_mcu:
+                try:
+                    config_dict, current_mcu, current_hint = _resolve_firmware_configuration(
+                        new_model, current_hint, None
+                    )
+                except (FirmwareConfigurationError, ValueError) as exc:
+                    print(f"\n\033[91mERROR:\033[0m {exc}")
         elif ans_summary == t("builder.edit_boot"):
             opts = [
                 f"{t('builder.boot_no')} (0x0)", f"{t('builder.boot_8k')} (0x2000)", f"{t('builder.boot_16k')} (0x4000)",
@@ -155,30 +259,57 @@ def run_firmware_wizard(user_data: dict):
             f_ans = numbered_select(t("builder.select_boot"), choices=opts)
             if f_ans == t("builder.enter_manual"):
                 f_ans = simple_input(t("builder.enter_hex"), default=flash, validate=questionary_hex_offset_validator)
-                if f_ans: config_dict["CONFIG_FLASH_START"] = f_ans
             elif f_ans:
-                config_dict["CONFIG_FLASH_START"] = f_ans.split(" (")[1].replace(")", "")
+                f_ans = f_ans.split(" (")[1].replace(")", "")
+            if not _is_back(f_ans) and f_ans:
+                try:
+                    offset = BootloaderOffset.from_value(f_ans)
+                    config_dict, current_mcu, current_hint = _resolve_firmware_configuration(
+                        current_mcu, current_hint, offset
+                    )
+                except (FirmwareConfigurationError, ValueError) as exc:
+                    print(f"\n\033[91mERROR:\033[0m {exc}")
         elif ans_summary == t("builder.edit_comm"):
             c_ans = numbered_select(t("builder.select_interface"), choices=["USB", "UART", "CAN", "SPI"])
             if c_ans:
-                config_dict["CONFIG_USB"]    = "y" if c_ans == "USB"  else "n"
-                config_dict["CONFIG_SERIAL"] = "y" if c_ans == "UART" else "n"
-                config_dict["CONFIG_CANBUS"] = "y" if c_ans == "CAN"  else "n"
-                config_dict["CONFIG_SPI"]    = "y" if c_ans == "SPI"  else "n"
+                try:
+                    offset = bootloader_offset_from_config(config_dict, current_mcu)
+                    config_dict, current_mcu, current_hint = _resolve_firmware_configuration(
+                        current_mcu, c_ans.lower(), offset
+                    )
+                except (FirmwareConfigurationError, ValueError) as exc:
+                    print(f"\n\033[91mERROR:\033[0m {exc}")
         elif ans_summary == t("builder.edit_clock"):
             clk = simple_input(t("builder.enter_clock"), default=clock)
-            if clk: config_dict["CONFIG_CLOCK_FREQ"] = clk
+            if clk:
+                candidate = dict(config_dict)
+                candidate["CONFIG_CLOCK_FREQ"] = clk
+                try:
+                    validate_firmware_configuration(candidate, processor=current_mcu)
+                    config_dict = candidate
+                except FirmwareConfigurationError as exc:
+                    print(f"\n\033[91mERROR:\033[0m {exc}")
 
     # ── 3. Invoke Headless Compiler Orchestrator ──
     print(f"\n\033[92m[*]\033[0m {t('kace.compiling')}", flush=True)
-    result = build_firmware_orchestrator(
-        mcu_path=user_data.get('mcu_path'),
-        derived_mcu=current_mcu,
-        hint=current_hint,
-        output_dir="~/kace",
-        config_dict=config_dict,
-        build_context=BuildContext(make_command=user_data.get('make_command', 'make'))
-    )
+    try:
+        result = build_firmware_orchestrator(
+            mcu_path=user_data.get('mcu_path'),
+            derived_mcu=current_mcu,
+            hint=current_hint,
+            output_dir="~/kace",
+            config_dict=config_dict,
+            build_context=BuildContext(make_command=user_data.get('make_command', 'make'))
+        )
+    except Exception as exc:
+        message = f"Firmware build failed unexpectedly: {exc}"
+        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=message)}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
+
+    if not isinstance(result, dict):
+        message = "Firmware builder returned an invalid result."
+        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=message)}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
 
     if result.get("status") == "success":
         print(f"\033[92mSUCCESS:\033[0m {t('kace.firmware_success', path=result.get('path'))}")
@@ -198,7 +329,14 @@ def run_firmware_wizard(user_data: dict):
                 size_warning=bool(result.get('size_warning', False)),
             )
         user_data['firmware_artifact'] = artifact
-        if result.get('klipper_version'):
+        identity = getattr(artifact, "firmware_identity", None)
+        if identity is not None:
+            user_data['firmware_identity'] = identity
+            user_data['klipper_version'] = identity.reported_version
+            user_data['mcu_name'] = result.get('mcu_name', 'mcu')
+        elif result.get('klipper_version'):
+            # Compatibility metadata may still be displayed/exported, but it
+            # cannot authorize the integrated post-flash verification path.
             user_data['klipper_version'] = result.get('klipper_version')
             user_data['mcu_name'] = result.get('mcu_name', 'mcu')
 
@@ -215,13 +353,24 @@ def run_firmware_wizard(user_data: dict):
             )
 
         service = FirmwareDeploymentService(output_dir="~/kace")
+        mcu_path = user_data.get('mcu_path') or ""
         target = DeploymentTarget(
             board=user_data.get('board') or "",
             mcu=result.get('mcu') or current_mcu or "",
-            device_path=user_data.get('mcu_path') or "",
+            device_path=mcu_path,
             mcu_name=user_data.get('mcu_name', 'mcu'),
+            **_read_deployment_usb_identity(mcu_path),
         )
         available = service.available_methods(target, artifact)
+        artifact_blockers = deployment_artifact_blockers(artifact)
+        if artifact_blockers:
+            print("\n\033[93m[!] Firmware deployment is disabled for this artifact:\033[0m")
+            for blocker in artifact_blockers:
+                print(f"    - {blocker}")
+        elif not available:
+            print("\n\033[93m[!] The exact board strategy rejected this build:\033[0m")
+            for blocker in service.profile_blockers(target, artifact):
+                print(f"    - {blocker}")
         deploy_options = [
             {"name": f"✅  {t('kace.deploy_none')}", "value": "none"},
         ]
@@ -247,7 +396,10 @@ def run_firmware_wizard(user_data: dict):
                 prepared = service.prepare(plan)
             except Exception as exc:
                 print(f"\n\033[91mERROR:\033[0m {t('deployment.prepare_failed', error=exc)}")
-                return {"status": "deployment_prepare_failed", "error": str(exc)}
+                return failed(
+                    WorkflowOutcome.FIRMWARE_FAILED,
+                    f"Firmware deployment preparation failed: {exc}",
+                )
 
             user_data['firmware_deployment_service'] = service
             user_data['firmware_deployment_plan'] = plan
@@ -263,7 +415,11 @@ def run_firmware_wizard(user_data: dict):
                 print(f"\033[93m[!] {t('deployment.automation_blocked')}\033[0m")
                 for blocker in plan.automation_blockers:
                     print(f"    - {blocker}")
-            return {"status": "deployment_prepared", "method": deploy_fw}
+            return success(f"Firmware deployment prepared with method {deploy_fw}.")
+
+        return success("Firmware compiled; physical deployment was not requested.")
 
     else:
-        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=result.get('message'))}")
+        message = str(result.get('message') or "Firmware build failed.")
+        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=message)}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)

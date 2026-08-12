@@ -79,7 +79,8 @@ class TestClassificationAndContracts(unittest.TestCase):
     def test_docker_contract_is_immutable_and_offline_at_validation(self):
         dockerfile = (matrix.PROJECT_ROOT / "tests/matrix/Dockerfile").read_text(encoding="utf-8")
         source = Path(matrix.__file__).read_text(encoding="utf-8")
-        self.assertIn(matrix.KLIPPER_REF, dockerfile)
+        self.assertNotIn(matrix.KLIPPER_REF, dockerfile)
+        self.assertIn("ARG KLIPPER_REF", dockerfile)
         self.assertIn('test "$(git -C /opt/klipper rev-parse HEAD)" = "${KLIPPER_REF}"', dockerfile)
         self.assertIn('"--network", "none"', source)
 

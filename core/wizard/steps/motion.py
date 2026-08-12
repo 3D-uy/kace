@@ -4,11 +4,13 @@ from core.menu import simple_input, yes_no, numbered_select, autocomplete_select
 from core.scraper import fetch_raw_config, parse_config, extract_profile_defaults
 from core.translations import t
 from core.terminal import DIM, ERROR, INFO, RESET, SECTION, WARNING
-from core.exceptions import WizardExit
+from core.exceptions import GenerationError, WizardExit
 from core.validators import questionary_numeric_validator, questionary_pos_numeric_validator, questionary_thermistor_validator
 from data.profiles import THERMISTOR_PRESETS
 from core.wizard.runner import _BACK, _QUIT
 from core.wizard.ui import _back_choice, _quit_choice
+from core.capabilities import finite_number, normalize_and_validate_configuration, supported_kinematics
+from core.profile_values import mark_profile_values, mark_user_override, safe_defaults
 
 _PRINTER_PROFILES_DB = None
 _INTERACTIVE_MODE = True
@@ -143,17 +145,11 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
     staged_parsed    = copy.deepcopy(parsed)
     staged_user_data = copy.deepcopy(user_data)
 
-    def validate_float(val):
-        try:
-            float(val)
-            return True
-        except (ValueError, TypeError):
-            return False
-
     def validate_pos_float(val):
         try:
-            return float(val) > 0
-        except (ValueError, TypeError):
+            finite_number("build_volume", val, minimum=0.0, maximum=2000.0, minimum_inclusive=False)
+            return True
+        except GenerationError:
             return False
 
     def _resolve(sd, sp):
@@ -229,131 +225,23 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             raise WizardExit()
 
         if prop == "save":
-            # Run ADR 001 Validation Layer
             try:
-                # Stepper limits
-                x_min_stepper = float(staged_user_data.get("x_position_min", 0.0))
-                x_max_stepper = float(staged_user_data.get("x_position_max", float(staged_user_data.get("x_size", 235.0))))
-                y_min_stepper = float(staged_user_data.get("y_position_min", 0.0))
-                y_max_stepper = float(staged_user_data.get("y_position_max", float(staged_user_data.get("y_size", 235.0))))
-                z_min_stepper = float(staged_user_data.get("z_position_min", 0.0))
-                z_max_stepper = float(staged_user_data.get("z_position_max", float(staged_user_data.get("z_size", 250.0))))
-
-                # Printable limits (with robust derivation fallback and shift alignment)
-                p_x_min_val = staged_user_data.get("printable_x_min")
-                p_x_min = float(p_x_min_val) if p_x_min_val is not None else (x_min_stepper if x_min_stepper > 0.0 else 0.0)
-                p_x_max_val = staged_user_data.get("printable_x_max")
-                p_x_max = float(p_x_max_val) if p_x_max_val is not None else float(staged_user_data.get("x_size", 235.0))
-
-                # Shift printable X area within physical limits if possible, only if NOT explicitly set by user
-                if p_x_min_val is None and p_x_max_val is None:
-                    if p_x_max > x_max_stepper:
-                        shift_x = p_x_max - x_max_stepper
-                        if p_x_min - shift_x >= x_min_stepper:
-                            p_x_min -= shift_x
-                            p_x_max -= shift_x
-                    elif p_x_min < x_min_stepper:
-                        shift_x = x_min_stepper - p_x_min
-                        if p_x_max + shift_x <= x_max_stepper:
-                            p_x_min += shift_x
-                            p_x_max += shift_x
-
-                p_y_min_val = staged_user_data.get("printable_y_min")
-                p_y_min = float(p_y_min_val) if p_y_min_val is not None else (y_min_stepper if y_min_stepper > 0.0 else 0.0)
-                p_y_max_val = staged_user_data.get("printable_y_max")
-                p_y_max = float(p_y_max_val) if p_y_max_val is not None else float(staged_user_data.get("y_size", 235.0))
-
-                # Shift printable Y area within physical limits if possible, only if NOT explicitly set by user
-                if p_y_min_val is None and p_y_max_val is None:
-                    if p_y_max > y_max_stepper:
-                        shift_y = p_y_max - y_max_stepper
-                        if p_y_min - shift_y >= y_min_stepper:
-                            p_y_min -= shift_y
-                            p_y_max -= shift_y
-                    elif p_y_min < y_min_stepper:
-                        shift_y = y_min_stepper - p_y_min
-                        if p_y_max + shift_y <= y_max_stepper:
-                            p_y_min += shift_y
-                            p_y_max += shift_y
-
-                p_z_max = float(staged_user_data.get("printable_z_max", float(staged_user_data.get("z_size", 250.0))))
-
-                staged_user_data["printable_x_min"] = f"{p_x_min:g}"
-                staged_user_data["printable_x_max"] = f"{p_x_max:g}"
-                staged_defaults["printable_x_min"] = f"{p_x_min:g}"
-                staged_defaults["printable_x_max"] = f"{p_x_max:g}"
-                staged_user_data["printable_y_min"] = f"{p_y_min:g}"
-                staged_user_data["printable_y_max"] = f"{p_y_max:g}"
-                staged_defaults["printable_y_min"] = f"{p_y_min:g}"
-                staged_defaults["printable_y_max"] = f"{p_y_max:g}"
-            except (ValueError, TypeError) as e:
-                print(f"\n{ERROR}[!] Validation Error: Invalid numeric value: {e}{RESET}")
-                import time
-                time.sleep(2.0)
-                continue
-
-            # Validate bed range
-            validation_error = None
-            if (p_x_max - p_x_min) > (x_max_stepper - x_min_stepper):
-                validation_error = f"Printable area width ({p_x_max - p_x_min:g}mm) exceeds maximum X travel range ({x_max_stepper - x_min_stepper:g}mm)."
-            elif (p_y_max - p_y_min) > (y_max_stepper - y_min_stepper):
-                validation_error = f"Printable area depth ({p_y_max - p_y_min:g}mm) exceeds maximum Y travel range ({y_max_stepper - y_min_stepper:g}mm)."
-            elif p_z_max > z_max_stepper:
-                validation_error = f"Printable area height ({p_z_max:g}mm) exceeds maximum Z travel range ({z_max_stepper:g}mm)."
-            elif p_x_min < x_min_stepper or p_x_max > x_max_stepper:
-                validation_error = f"Printable X boundary [{p_x_min:g}, {p_x_max:g}] is outside physical X travel limits [{x_min_stepper:g}, {x_max_stepper:g}]."
-            elif p_y_min < y_min_stepper or p_y_max > y_max_stepper:
-                validation_error = f"Printable Y boundary [{p_y_min:g}, {p_y_max:g}] is outside physical Y travel limits [{y_min_stepper:g}, {y_max_stepper:g}]."
-
-            if validation_error:
+                validation_data = safe_defaults()
+                validation_data.update(staged_defaults)
+                validation_data.update(staged_user_data)
+                normalize_and_validate_configuration(validation_data)
+            except GenerationError as exc:
                 print(f"\n{ERROR}[!] Configuration Validation Failed:{RESET}")
-                print(f"    - {validation_error}")
-                import time
-                time.sleep(3.0)
+                print(f"    - {exc}")
                 continue
 
-            # Sanitize axis limits before saving to ensure position_min <= position_endstop <= position_max
-            adjusted_msg = []
-            for axis, size_key in [("x", "x_size"), ("y", "y_size"), ("z", "z_size")]:
-                try:
-                    endstop = float(staged_user_data.get(f"{axis}_position_endstop", 0.0))
-                except (ValueError, TypeError):
-                    endstop = 0.0
+            staged_user_data.update(validation_data)
 
-                try:
-                    p_min = float(staged_user_data.get(f"{axis}_position_min", 0.0))
-                except (ValueError, TypeError):
-                    p_min = 0.0
-
-                try:
-                    p_max = float(staged_user_data.get(f"{axis}_position_max", staged_user_data.get(size_key, 235.0)))
-                except (ValueError, TypeError):
-                    p_max = 235.0
-
-                if p_min > endstop:
-                    if axis == "z":
-                        p_min = min(endstop - 1.0, -2.0)
-                    else:
-                        p_min = endstop
-                    staged_user_data[f"{axis}_position_min"] = f"{p_min:g}"
-                    staged_defaults[f"{axis}_position_min"] = f"{p_min:g}"
-                    staged_parsed.setdefault(f"stepper_{axis}", {})["position_min"] = f"{p_min:g}"
-                    adjusted_msg.append(f"{axis.upper()} position_min adjusted to {p_min:g} to accommodate endstop {endstop:g}")
-
-                if p_max < endstop:
-                    p_max = endstop
-                    staged_user_data[f"{axis}_position_max"] = f"{p_max:g}"
-                    staged_defaults[f"{axis}_position_max"] = f"{p_max:g}"
-                    staged_parsed.setdefault(f"stepper_{axis}", {})["position_max"] = f"{p_max:g}"
-                    adjusted_msg.append(f"{axis.upper()} position_max adjusted to {p_max:g} to accommodate endstop {endstop:g}")
-
-            if adjusted_msg and _INTERACTIVE_MODE and os.environ.get("KACE_QUIET") != "1":
-                print(f"\n{WARNING}[!] Automatically adjusted limits to ensure physical consistency:{RESET}")
-                for msg in adjusted_msg:
-                    print(f"    - {msg}")
-                # Give the user a moment to see the message
-                import time
-                time.sleep(2.5)
+            for key in (
+                "printable_x_min", "printable_x_max",
+                "printable_y_min", "printable_y_max", "printable_z_max",
+            ):
+                staged_defaults[key] = staged_user_data[key]
 
             defaults.clear()
             defaults.update(staged_defaults)
@@ -369,11 +257,12 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
         if prop == "kinematics":
             new_kin = numbered_select(
                 "Select Kinematics:",
-                choices=["cartesian", "corexy", "delta"],
-                default=["cartesian", "corexy", "delta"].index(kin) if kin in ["cartesian", "corexy", "delta"] else 0
+                choices=list(supported_kinematics()),
+                default=list(supported_kinematics()).index(kin) if kin in supported_kinematics() else 0
             )
             if new_kin:
                 staged_user_data["kinematics"] = new_kin
+                mark_user_override(staged_user_data, "kinematics")
                 staged_defaults["kinematics"] = new_kin
                 staged_parsed.setdefault('printer', {})['kinematics'] = new_kin
 
@@ -391,6 +280,12 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                                          ("printable_z_max", new_z)]:
                             staged_user_data[key] = val
                             staged_defaults[key] = val
+                        mark_user_override(
+                            staged_user_data,
+                            "x_size", "y_size", "z_size",
+                            "printable_x_min", "printable_x_max",
+                            "printable_y_min", "printable_y_max", "printable_z_max",
+                        )
 
                         # Safe adjustment to avoid validation errors if mechanical limits are smaller
                         try:
@@ -442,6 +337,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             if new_val is not None and new_val.strip().lower() not in ("<", "back", "volver", ""):
                 val_clean = new_val.strip()
                 staged_user_data[prop] = val_clean
+                mark_user_override(staged_user_data, prop)
                 staged_defaults[prop] = val_clean
                 
                 sx = staged_parsed.setdefault(f"stepper_{axis}", {})
@@ -460,6 +356,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 new_th = simple_input("Enter custom hotend thermistor name:", validate=questionary_thermistor_validator)
             if new_th:
                 staged_user_data["hotend_thermistor"] = new_th
+                mark_user_override(staged_user_data, "hotend_thermistor")
                 staged_defaults["hotend_thermistor"] = new_th
                 staged_parsed.setdefault('extruder', {})['sensor_type'] = new_th
 
@@ -474,6 +371,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 new_tb = simple_input("Enter custom bed thermistor name:", validate=questionary_thermistor_validator)
             if new_tb:
                 staged_user_data["bed_thermistor"] = new_tb
+                mark_user_override(staged_user_data, "bed_thermistor")
                 staged_defaults["bed_thermistor"] = new_tb
                 staged_parsed.setdefault('heater_bed', {})['sensor_type'] = new_tb
 
@@ -561,18 +459,25 @@ def _step_printer_profile(user_data, printer_configs):
     user_data["raw_config"]      = raw
     parsed   = parse_config(raw, ans)
     defaults = extract_profile_defaults(parsed)
+    try:
+        from core.capabilities import validate_kinematics
+        defaults["kinematics"] = validate_kinematics(defaults.get("kinematics"))
+    except GenerationError as exc:
+        print(f"\n{ERROR}[!] Unsupported printer profile: {exc}{RESET}")
+        return "__retry__"
     for k, v in defaults.items():
         user_data[k] = v
     user_data["profile_loaded"]  = True
     user_data["_profile_parsed"]   = parsed
     user_data["_profile_defaults"] = defaults
+    mark_profile_values(user_data, parsed)
     return ans
 
 
 def _step_kinematics(user_data):
     if "kinematics" in user_data.get("_authoritative", set()):
         return user_data["kinematics"]
-    choices = ["cartesian", "corexy", "delta", _back_choice(), _quit_choice()]
+    choices = list(supported_kinematics()) + [_back_choice(), _quit_choice()]
     default_kin = user_data.get("kinematics")
     default_idx = choices.index(default_kin) if default_kin in choices[:3] else 0
     ans = numbered_select(
@@ -583,6 +488,7 @@ def _step_kinematics(user_data):
     if ans == _QUIT or ans is None: raise WizardExit()
     if ans == _BACK: return _BACK
     user_data["kinematics"] = ans
+    mark_user_override(user_data, "kinematics")
     return ans
 
 
@@ -599,6 +505,7 @@ def _step_volume(user_data, size_key, max_key, msg_text):
     val_clean = ans.strip()
     old_val = user_data.get(size_key)
     user_data[size_key] = val_clean
+    mark_user_override(user_data, size_key)
     if user_data.get(max_key) == old_val or not user_data.get(max_key):
         user_data[max_key] = val_clean
     
@@ -629,6 +536,7 @@ def _step_x_limits(user_data):
             if val.strip().lower() in ("<", "back", "volver"):
                 return _BACK
             user_data["x_position_min"] = val.strip()
+            mark_user_override(user_data, "x_position_min")
             idx += 1
         elif curr == "max":
             val = simple_input(
@@ -642,6 +550,7 @@ def _step_x_limits(user_data):
                 idx -= 1
                 continue
             user_data["x_position_max"] = val.strip()
+            mark_user_override(user_data, "x_position_max")
             idx += 1
         elif curr == "endstop":
             val = simple_input(
@@ -655,6 +564,7 @@ def _step_x_limits(user_data):
                 idx -= 1
                 continue
             user_data["x_position_endstop"] = val.strip()
+            mark_user_override(user_data, "x_position_endstop")
             idx += 1
     return "done"
 
@@ -675,6 +585,7 @@ def _step_y_limits(user_data):
             if val.strip().lower() in ("<", "back", "volver"):
                 return _BACK
             user_data["y_position_min"] = val.strip()
+            mark_user_override(user_data, "y_position_min")
             idx += 1
         elif curr == "max":
             val = simple_input(
@@ -688,6 +599,7 @@ def _step_y_limits(user_data):
                 idx -= 1
                 continue
             user_data["y_position_max"] = val.strip()
+            mark_user_override(user_data, "y_position_max")
             idx += 1
         elif curr == "endstop":
             val = simple_input(
@@ -701,6 +613,7 @@ def _step_y_limits(user_data):
                 idx -= 1
                 continue
             user_data["y_position_endstop"] = val.strip()
+            mark_user_override(user_data, "y_position_endstop")
             idx += 1
     return "done"
 
@@ -721,6 +634,7 @@ def _step_z_limits(user_data):
             if val.strip().lower() in ("<", "back", "volver"):
                 return _BACK
             user_data["z_position_min"] = val.strip()
+            mark_user_override(user_data, "z_position_min")
             idx += 1
         elif curr == "max":
             val = simple_input(
@@ -734,6 +648,7 @@ def _step_z_limits(user_data):
                 idx -= 1
                 continue
             user_data["z_position_max"] = val.strip()
+            mark_user_override(user_data, "z_position_max")
             idx += 1
         elif curr == "endstop":
             val = simple_input(
@@ -747,5 +662,6 @@ def _step_z_limits(user_data):
                 idx -= 1
                 continue
             user_data["z_position_endstop"] = val.strip()
+            mark_user_override(user_data, "z_position_endstop")
             idx += 1
     return "done"

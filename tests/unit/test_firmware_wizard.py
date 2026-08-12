@@ -7,13 +7,165 @@ from unittest.mock import patch, MagicMock
 import io
 import sys
 
-from core.firmware_wizard import run_firmware_wizard
+from core.firmware_wizard import (
+    _processor_validator_for_architecture,
+    _read_deployment_usb_identity,
+    run_firmware_wizard,
+)
 from core.exceptions import DerivationAmbiguityError
+from core.mcu_monitor import McuIdentity, McuMonitorUnavailable
 from core.moonraker_deployer import DeployResult, DeployState
 from core.translations import t
+from core.workflow_outcome import WorkflowOutcome, WorkflowResult
 from firmware.deployment import DeploymentMethodId
 
 class TestFirmwareWizard(unittest.TestCase):
+
+    @patch("core.mcu_monitor.McuIdentityReader.read")
+    def test_deployment_usb_identity_uses_observed_udev_facts(self, mock_read):
+        mock_read.return_value = McuIdentity(
+            configured_path="/dev/serial/by-id/mega",
+            device_node="/dev/ttyACM0",
+            physical_path="pci-0000:00:14.0-usb-0:2:1.0",
+            vendor_id="2341",
+            model_id="0042",
+        )
+
+        result = _read_deployment_usb_identity("/dev/serial/by-id/mega")
+
+        self.assertEqual(
+            result,
+            {
+                "usb_vid": "2341",
+                "usb_pid": "0042",
+                "usb_path": "pci-0000:00:14.0-usb-0:2:1.0",
+            },
+        )
+
+    @patch("core.mcu_monitor.McuIdentityReader.read")
+    def test_deployment_usb_identity_fails_closed_when_udev_is_unavailable(self, mock_read):
+        mock_read.side_effect = McuMonitorUnavailable("udevadm unavailable")
+
+        self.assertEqual(
+            _read_deployment_usb_identity("/dev/serial/by-id/mega"),
+            {},
+        )
+
+    def test_architecture_processor_validator_returns_error_instead_of_raising(self):
+        result = _processor_validator_for_architecture("stm32")("not-a-processor")
+        self.assertIsInstance(result, str)
+        self.assertIn("Unsupported", result)
+
+    @patch('core.firmware_wizard.yes_no', return_value=True)
+    @patch('core.firmware_wizard.numbered_select')
+    @patch('core.firmware_wizard.build_firmware_orchestrator')
+    def test_offset_not_applicable_is_not_presented_as_editable_bootloader(
+        self, mock_build, mock_select, _mock_confirm
+    ):
+        mock_select.side_effect = [t("builder.compile_now"), "none"]
+        mock_build.return_value = {
+            "status": "success",
+            "mcu": "rp2040",
+            "firmware": "klipper.uf2",
+            "path": "/fake/kace/klipper.uf2",
+        }
+
+        with patch('sys.stdout', new_callable=io.StringIO) as output:
+            run_firmware_wizard({"mcu_type": "rp2040", "mcu_hint": "usb"})
+
+        summary_choices = mock_select.call_args_list[0].kwargs["choices"]
+        self.assertNotIn(t("builder.edit_boot"), summary_choices)
+        self.assertIn("N/A", output.getvalue())
+
+    @patch('core.firmware_wizard.yes_no', return_value=True)
+    @patch('core.firmware_wizard.numbered_select')
+    @patch('core.firmware_wizard.simple_input', return_value="stm32f446xx")
+    @patch('core.firmware_wizard.build_firmware_orchestrator')
+    def test_processor_edit_rederives_all_dependent_fields_and_shows_diff(
+        self, mock_build, _mock_input, mock_select, _mock_confirm
+    ):
+        mock_select.side_effect = [
+            t("builder.edit_proc"),
+            t("builder.compile_now"),
+            "none",
+        ]
+        mock_build.return_value = {
+            "status": "success",
+            "mcu": "stm32f446xx",
+            "firmware": "klipper.bin",
+            "path": "/fake/kace/klipper.bin",
+        }
+        user_data = {"mcu_type": "lpc1769", "mcu_hint": "usb"}
+
+        with patch('sys.stdout', new_callable=io.StringIO) as output:
+            run_firmware_wizard(user_data)
+
+        config = mock_build.call_args.kwargs["config_dict"]
+        self.assertEqual(config["CONFIG_MCU"], '"stm32"')
+        self.assertEqual(config["CONFIG_MCU_STM32F446XX"], "y")
+        self.assertEqual(config["CONFIG_FLASH_START"], "0x8000")
+        self.assertNotIn("CONFIG_MACH_LPC176X", config)
+        self.assertNotIn("CONFIG_CLOCK_FREQ", config)
+        self.assertIn("Firmware configuration diff", output.getvalue())
+        self.assertIn("-CONFIG_CLOCK_FREQ=120000000", output.getvalue())
+
+    @patch('core.firmware_wizard.yes_no', return_value=True)
+    @patch('core.firmware_wizard.numbered_select')
+    @patch('core.firmware_wizard.simple_input')
+    @patch('core.firmware_wizard.build_firmware_orchestrator')
+    def test_architecture_edit_requires_compatible_processor_and_rederives(
+        self, mock_build, mock_input, mock_select, _mock_confirm
+    ):
+        mock_select.side_effect = [
+            t("builder.edit_arch"),
+            t("builder.compile_now"),
+            "none",
+        ]
+        mock_input.side_effect = ["avr", "atmega2560"]
+        mock_build.return_value = {
+            "status": "success",
+            "mcu": "atmega2560",
+            "firmware": "klipper.elf.hex",
+            "path": "/fake/kace/klipper.elf.hex",
+        }
+        user_data = {"mcu_type": "stm32f446xx", "mcu_hint": "uart"}
+
+        with patch('sys.stdout', new_callable=io.StringIO):
+            run_firmware_wizard(user_data)
+
+        config = mock_build.call_args.kwargs["config_dict"]
+        self.assertEqual(config["CONFIG_MCU"], '"avr"')
+        self.assertEqual(config["CONFIG_MCU_ATMEGA2560"], "y")
+        self.assertNotIn("CONFIG_FLASH_START", config)
+        self.assertFalse(any(key.startswith("CONFIG_MCU_STM32") for key in config))
+
+    @patch('core.firmware_wizard.yes_no', return_value=True)
+    @patch('core.firmware_wizard.numbered_select')
+    @patch('core.firmware_wizard.simple_input', return_value="<")
+    @patch('core.firmware_wizard.build_firmware_orchestrator')
+    def test_processor_edit_back_keeps_complete_original_configuration(
+        self, mock_build, _mock_input, mock_select, _mock_confirm
+    ):
+        mock_select.side_effect = [
+            t("builder.edit_proc"),
+            t("builder.compile_now"),
+            "none",
+        ]
+        mock_build.return_value = {
+            "status": "success",
+            "mcu": "lpc1769",
+            "firmware": "klipper.bin",
+            "path": "/fake/kace/klipper.bin",
+        }
+
+        with patch('sys.stdout', new_callable=io.StringIO):
+            run_firmware_wizard({"mcu_type": "lpc1769", "mcu_hint": "usb"})
+
+        config = mock_build.call_args.kwargs["config_dict"]
+        self.assertEqual(config["CONFIG_MCU"], '"lpc176x"')
+        self.assertEqual(config["CONFIG_MACH_LPC176X"], "y")
+        self.assertEqual(config["CONFIG_CLOCK_FREQ"], "120000000")
+        self.assertEqual(config["CONFIG_FLASH_START"], "0x4000")
 
     @patch('core.firmware_wizard.yes_no')
     def test_skip_wizard_if_no_mcu(self, mock_confirm):
@@ -157,7 +309,9 @@ class TestFirmwareWizard(unittest.TestCase):
         with patch('sys.stdout', new_callable=io.StringIO):
             result = run_firmware_wizard(user_data)
 
-        self.assertEqual(result, {"status": "deployment_prepared", "method": "MANUAL"})
+        self.assertIsInstance(result, WorkflowResult)
+        self.assertEqual(result.outcome, WorkflowOutcome.SUCCESS)
+        self.assertIn("MANUAL", result.detail)
         self.assertTrue(user_data["pending_firmware_deployment"])
 
 if __name__ == '__main__':

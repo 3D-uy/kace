@@ -167,6 +167,31 @@ class TestValidateFirmwareConfig(unittest.TestCase):
         ok, msg = validate_config(self.klipper_path)
         self.assertTrue(ok, f"Expected validation to pass, got: {msg}")
 
+    def test_valid_stm32_no_bootloader_uses_explicit_zero_offset(self):
+        """No bootloader remains a valid typed STM32 flash configuration."""
+        self._write_config(
+            'CONFIG_MCU="stm32"\n'
+            "CONFIG_MACH_STM32=y\n"
+            "CONFIG_MCU_STM32F1=y\n"
+            "CONFIG_FLASH_START=0x0\n"
+            "CONFIG_USB=y\n"
+        )
+        ok, msg = validate_config(self.klipper_path)
+        self.assertTrue(ok, f"Expected validation to pass, got: {msg}")
+
+    def test_valid_lpc_no_bootloader_uses_explicit_zero_offset(self):
+        """LPC no-bootloader output satisfies the post-olddefconfig contract."""
+        self._write_config(
+            'CONFIG_MCU="lpc176x"\n'
+            "CONFIG_MACH_LPC176X=y\n"
+            "CONFIG_MCU_LPC1769=y\n"
+            "CONFIG_CLOCK_FREQ=120000000\n"
+            "CONFIG_FLASH_START=0x0\n"
+            "CONFIG_USB=y\n"
+        )
+        ok, msg = validate_config(self.klipper_path)
+        self.assertTrue(ok, f"Expected validation to pass, got: {msg}")
+
     def test_valid_rp2040_usb_config(self):
         """RP2040 USB config with no flash offset must pass validation."""
         self._write_config('CONFIG_MCU="rp2040"\nCONFIG_USB=y\n')

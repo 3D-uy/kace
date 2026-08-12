@@ -717,6 +717,41 @@ UI_STRINGS: dict = {
         "Español":   "Instale el medio en la controladora y reinicie únicamente la impresora.",
         "Português": "Instale a mídia na controladora e reinicie somente a impressora.",
     },
+    "deployment.prepare_only.unsupported": {
+        "English":   "No exact flash strategy exists for {board}. KACE only prepared {filename}; follow the controller manufacturer's procedure.",
+        "Español":   "No existe una estrategia exacta de flasheo para {board}. KACE solo preparó {filename}; siga el procedimiento del fabricante.",
+        "Português": "Não existe uma estratégia exata de gravação para {board}. O KACE apenas preparou {filename}; siga o procedimento do fabricante.",
+    },
+    "deployment.ramps.prepare": {
+        "English":   "The RAMPS/ATmega2560 artifact is {filename}; do not copy this IHEX file to removable media.",
+        "Español":   "El artefacto RAMPS/ATmega2560 es {filename}; no copie este archivo IHEX a un medio extraíble.",
+        "Português": "O artefato RAMPS/ATmega2560 é {filename}; não copie este arquivo IHEX para uma mídia removível.",
+    },
+    "deployment.ramps.avrdude_manual": {
+        "English":   "Flash only through the verified serial device {device} using avrdude part atmega2560, programmer wiring and 115200 baud.",
+        "Español":   "Flashee únicamente mediante el dispositivo serial verificado {device}, usando avrdude con parte atmega2560, programador wiring y 115200 baudios.",
+        "Português": "Grave somente pelo dispositivo serial verificado {device}, usando avrdude com parte atmega2560, programador wiring e 115200 baud.",
+    },
+    "deployment.skr_mini_e3_v3.copy": {
+        "English":   "Copy {filename} to the root of a FAT-formatted SD card for the SKR Mini E3 v3.0.",
+        "Español":   "Copie {filename} en la raíz de una tarjeta SD formateada en FAT para la SKR Mini E3 v3.0.",
+        "Português": "Copie {filename} para a raiz de um cartão SD formatado em FAT para a SKR Mini E3 v3.0.",
+    },
+    "deployment.skr_mini_e3_v3.power_cycle": {
+        "English":   "With controller power off, insert the SD card and power on; the board bootloader consumes firmware.bin.",
+        "Español":   "Con la controladora apagada, inserte la tarjeta SD y encienda; el bootloader consume firmware.bin.",
+        "Português": "Com a controladora desligada, insira o cartão SD e ligue; o bootloader consome firmware.bin.",
+    },
+    "deployment.skr_pico.bootsel": {
+        "English":   "Power off the SKR Pico, hold BOOTSEL, connect USB, then release BOOTSEL when the RP2040 boot volume appears.",
+        "Español":   "Apague la SKR Pico, mantenga BOOTSEL presionado, conecte USB y suelte BOOTSEL cuando aparezca el volumen de arranque RP2040.",
+        "Português": "Desligue a SKR Pico, mantenha BOOTSEL pressionado, conecte o USB e solte BOOTSEL quando o volume de boot RP2040 aparecer.",
+    },
+    "deployment.skr_pico.copy": {
+        "English":   "Copy {filename} to the RP2040 BOOTSEL mass-storage volume; KACE does not treat an arbitrary directory as that bootloader.",
+        "Español":   "Copie {filename} al volumen de almacenamiento BOOTSEL del RP2040; KACE no trata un directorio cualquiera como ese bootloader.",
+        "Português": "Copie {filename} para o volume de armazenamento BOOTSEL do RP2040; o KACE não trata qualquer diretório como esse bootloader.",
+    },
     "deployment.usb.connect": {
         "English":   "Keep the controller connected through the identified USB device: {device}.",
         "Español":   "Mantenga la controladora conectada mediante el dispositivo USB identificado: {device}.",

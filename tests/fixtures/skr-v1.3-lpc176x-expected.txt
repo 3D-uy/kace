@@ -23,10 +23,10 @@ serial: /dev/serial/by-id/usb-Klipper_lpc1768_mock-if00 # Serial connection to t
 # --------------------------------------------------
 
 [printer]
-kinematics: cartesian                           # Printer kinematics type (cartesian, corexy, delta)
-max_velocity: 300                               # Maximum velocity (in mm/s) of the toolhead
-max_accel: 3000                                 # Maximum acceleration (in mm/s^2) of the toolhead
-max_z_velocity: 5                               # Maximum velocity (in mm/s) of movement along the z axis
+kinematics: cartesian                           # Printer kinematics type (cartesian, corexy)
+max_velocity: 400                               # Maximum velocity (in mm/s) of the toolhead
+max_accel: 500                                  # Maximum acceleration (in mm/s^2) of the toolhead
+max_z_velocity: 10                              # Maximum velocity (in mm/s) of movement along the z axis
 max_z_accel: 100                                # Maximum acceleration (in mm/s^2) of movement along the z axis
 
 # --------------------------------------------------
@@ -85,7 +85,7 @@ enable_pin: !P2.12                              # Enable pin for the stepper dri
 heater_pin: P2.7                                # Pin connected to the hotend heater cartridge
 sensor_pin: P0.24                               # Pin connected to the hotend thermistor
 microsteps: 16                                  # Number of microsteps per full step
-rotation_distance: 33.5                         # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
+rotation_distance: 33.500                       # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
 nozzle_diameter: 0.400                          # Diameter of the installed nozzle in mm
 filament_diameter: 1.750                        # Diameter of the filament being used
 sensor_type: EPCOS 100K B57560G104F             # Type of thermistor used for the hotend
@@ -94,7 +94,7 @@ pid_Kp: 22.2                                    # PID proportional --- manual co
 pid_Ki: 1.08                                    # PID integral --- manual configuration --- (run PID_CALIBRATE)
 pid_Kd: 114                                     # PID derivative --- manual configuration --- (run PID_CALIBRATE)
 min_temp: 0                                     # Minimum safe temperature
-max_temp: 250                                   # Maximum safe temperature
+max_temp: 260                                   # Maximum safe temperature
 
 # --------------------------------------------------
 # Part Cooling Fan

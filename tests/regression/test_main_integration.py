@@ -44,6 +44,7 @@ import io
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -212,17 +213,13 @@ class _HeadlessMixin:
     Setting KACE_AUTO=1 in setUp() causes main() to set _bypassed=True and
     skip the dashboard import entirely.
 
-    3.  kace.py runs `_ap.parse_known_args()` at module-import time.  When
-        pytest is invoked with ``-v`` (verbose), that flag is seen as the
-        ``--version``/``-v`` CLI option and `sys.exit(0)` fires during the
-        lazy `import kace` triggered by @patch decorators.  Neutralising
-        sys.argv in setUp() prevents this; tearDown() restores it so other
-        test modules are unaffected.
+    3.  kace.py no longer consumes process arguments when imported. Keeping
+        sys.argv neutral here also isolates these integration cases from any
+        future CLI-boundary behavior.
     """
 
     def setUp(self):
-        # Neutralise sys.argv so kace.py's module-level argparse does not
-        # misinterpret pytest's -v/--verbose flag as --version.
+        # Isolate the imported CLI module from test-runner arguments.
         self._orig_argv = sys.argv[:]
         sys.argv = ["kace"]
         # Bypass dashboard / prompt_toolkit import inside kace.main()
@@ -253,24 +250,24 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
     @patch('kace.print_kace_banner')
     @patch('kace.run_wizard', side_effect=__import__('core.exceptions', fromlist=['WizardExit']).WizardExit)
     @patch('builtins.print')
-    def test_wizard_exit_is_caught_and_exits_0(self, mock_print, mock_wizard, mock_banner):
-        """WizardExit raised by run_wizard must be caught and exit cleanly (code 0)."""
+    def test_wizard_exit_is_caught_and_exits_cancelled(self, mock_print, mock_wizard, mock_banner):
+        """WizardExit is a terminal cancellation, never workflow success."""
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(ctx.exception.code, 2)
 
     # ── KeyboardInterrupt ─────────────────────────────────────────────────────
 
     @patch('kace.print_kace_banner')
     @patch('kace.run_wizard', side_effect=KeyboardInterrupt)
     @patch('builtins.print')
-    def test_keyboard_interrupt_is_caught_and_exits_0(self, mock_print, mock_wizard, mock_banner):
-        """Ctrl-C (KeyboardInterrupt) from the wizard must exit cleanly (code 0)."""
+    def test_keyboard_interrupt_is_caught_and_exits_cancelled(self, mock_print, mock_wizard, mock_banner):
+        """Ctrl-C from the wizard is a terminal cancellation."""
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(ctx.exception.code, 2)
 
     # ── Missing dependency ────────────────────────────────────────────────────
 
@@ -282,7 +279,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(ctx.exception.code, 10)
 
     # ── Board fetch failure ───────────────────────────────────────────────────
 
@@ -296,7 +293,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         import kace
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(ctx.exception.code, 10)
         printed = ' '.join(str(c) for c in mock_print.call_args_list)
         self.assertIn("Board configuration could not be fetched", printed)
 
@@ -392,7 +389,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 kace.main()
 
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(ctx.exception.code, 20)
         printed = ' '.join(str(c) for c in mock_print.call_args_list)
         self.assertIn("ERROR", printed)
 
@@ -601,6 +598,85 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
 class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
     """The structured terminal result must control the process exit code."""
 
+    def test_firmware_wizard_failure_stops_before_config_generation(self):
+        from core.workflow_outcome import WorkflowOutcome, failed
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "rp2040",
+            "mcu_hint": "usb",
+        }
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard", return_value=user_data), \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.has_todo_pins", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("kace.time.sleep"), \
+             patch("builtins.print"), \
+             patch(
+                 "core.firmware_wizard.run_firmware_wizard",
+                 return_value=failed(WorkflowOutcome.FIRMWARE_FAILED, "compiler failed"),
+             ):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 30)
+        generate.assert_not_called()
+
+    def test_firmware_wizard_cancel_reaches_typed_cancelled_terminal(self):
+        from core.exceptions import WizardExit
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "rp2040",
+            "mcu_hint": "usb",
+        }
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard", return_value=user_data), \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.has_todo_pins", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("kace.time.sleep"), \
+             patch("builtins.print"), \
+             patch(
+                 "core.firmware_wizard.run_firmware_wizard",
+                 side_effect=WizardExit,
+             ):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 2)
+        generate.assert_not_called()
+
+    def test_untyped_firmware_wizard_result_fails_closed(self):
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "rp2040",
+            "mcu_hint": "usb",
+        }
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard", return_value=user_data), \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.has_todo_pins", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("kace.time.sleep"), \
+             patch("builtins.print"), \
+             patch("core.firmware_wizard.run_firmware_wizard", return_value=None):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 30)
+        generate.assert_not_called()
+
     def _run(self, terminal_state):
         from core.moonraker_deployer import DeployResult
         # kace.py owns ``-v`` as --version; unittest also uses it for verbose
@@ -610,6 +686,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
         user_data["pending_firmware_deployment"] = True
         user_data["klipper_version"] = "kace-test"
+        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=object())
         result = DeployResult(terminal_state, "test result")
 
         with patch('kace.print_kace_banner'), \
@@ -636,7 +713,40 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
 
     def test_non_done_exits_nonzero(self):
         from core.moonraker_deployer import DeployState
-        self.assertEqual(self._run(DeployState.FAILED_FLASH), 1)
+        self.assertEqual(self._run(DeployState.FAILED_FLASH), 30)
+
+    def test_cancelled_physical_deployment_uses_cancelled_exit_code(self):
+        from core.moonraker_deployer import DeployState
+        self.assertEqual(self._run(DeployState.CANCELLED), 2)
+
+    def test_standalone_firmware_prompt_cancellation_is_not_reported_as_failure(self):
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
+        user_data["pending_firmware_deployment"] = True
+        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=None)
+        deployment_result = SimpleNamespace(
+            status=SimpleNamespace(value="CANCELLED"),
+            detail="manual destination selection cancelled",
+            ok=False,
+        )
+
+        with patch('kace.print_kace_banner'), \
+             patch('kace.run_wizard', return_value=user_data), \
+             patch('kace.check_display_compatibility', return_value=[]), \
+             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.has_todo_pins', return_value=[]), \
+             patch('kace.print_summary'), \
+             patch('kace.time.sleep'), \
+             patch('builtins.print'), \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select') as deploy_menu, \
+             patch('kace.execute_firmware_deployment', return_value=deployment_result):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 2)
+        deploy_menu.assert_not_called()
 
 
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────

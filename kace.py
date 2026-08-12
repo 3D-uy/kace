@@ -16,16 +16,14 @@ except (AttributeError, OSError):
     pass
 
 # ── Early argument handling (no heavy imports needed) ─────────
-# Q-03: Migrated from manual sys.argv loop to argparse so the CLI surface
-# scales cleanly as new flags are added. parse_known_args() is used here
-# so unrecognised args are silently ignored rather than causing a hard error
-# before the main import block runs.
+# Parse the complete public CLI surface before loading heavier modules. Normal
+# execution is strict; importing kace for its version/API does not consume the
+# embedding process's arguments.
 import argparse as _argparse
 import json as _json
 _ap = _argparse.ArgumentParser(
     prog="kace",
     description="Klipper Automated Configuration Ecosystem",
-    add_help=False,  # defer --help to after full imports load
 )
 _ap.add_argument("--version", "-v", action="store_true", help="Print version and exit")
 _ap.add_argument("--auto", action="store_true", help="Non-interactive mode (CI/auto deploy)")
@@ -37,7 +35,7 @@ _ap.add_argument(
     choices=("status", "on", "off", "wait"),
     help="Run one non-interactive Moonraker power operation and return JSON",
 )
-_known, _ = _ap.parse_known_args()
+_known = _ap.parse_args() if __name__ == "__main__" else _ap.parse_args([])
 
 if _known.version:
     print(f"KACE {__version__}")
@@ -115,10 +113,23 @@ from core.translations import t
 from core.display_checker import check_display_compatibility
 from core.summary import print_summary
 from core.display_warning import print_display_warning
+from core.workflow_outcome import (
+    WorkflowOutcome,
+    WorkflowResult,
+    cancelled,
+    failed,
+    success,
+)
 
 # print_summary has been refactored into core.summary to improve testability.
 
 
+
+
+def _finish(result: WorkflowResult) -> None:
+    """Emit the stable machine-readable outcome and terminate the CLI."""
+    print(result.marker(), flush=True)
+    raise SystemExit(result.exit_code)
 
 
 def main():
@@ -134,9 +145,9 @@ def main():
             _action = run_dashboard(_state)
         except WizardExit:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            return
+            _finish(cancelled("Dashboard cancelled."))
         if _action == "quit":
-            sys.exit(0)
+            _finish(cancelled("Dashboard closed by the user."))
     
     # Interactive Wizard & Phase 1 Execution Loop
     user_data = {"make_command": _make_command}
@@ -145,14 +156,14 @@ def main():
         user_data = run_wizard(user_data)
     except WizardExit:
         print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-        sys.exit(0)
+        _finish(cancelled("Wizard cancelled."))
     except (KeyboardInterrupt, EOFError):
         print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-        sys.exit(0)
+        _finish(cancelled("Wizard interrupted."))
     except ImportError as e:
         print(f"\n\033[91mERROR:\033[0m {t('kace.missing_dep', error=e)}")
         print(f"\033[93m{t('kace.missing_dep_hint')}\033[0m")
-        sys.exit(1)
+        _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, f"Missing dependency: {e}"))
 
     # ==========================================
     # PHASE 1: CONFIGURATION FETCH & DRIVER SETUP
@@ -165,7 +176,10 @@ def main():
             print(f"\033[93m    This may indicate an invalid board selection or a network error.\033[0m")
             print(f"\033[93m    Please re-run KACE and select a valid board configuration.\033[0m")
             print(f"\033[2m[!] Aborting — cannot generate a configuration without board data.\033[0m")
-            sys.exit(1)
+            _finish(failed(
+                WorkflowOutcome.PRECONDITION_FAILED,
+                f"Board configuration could not be fetched: {user_data['board']}",
+            ))
         parsed_data = parse_config(raw_cfg, user_data['board'], keep_comments=True)
         user_data["board_parsed"] = parsed_data
 
@@ -223,7 +237,7 @@ def main():
             _should_continue = print_display_warning(_display_findings)
             if not _should_continue:
                 print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-                sys.exit(0)
+                _finish(cancelled("Display compatibility warning was declined."))
 
     time.sleep(0.5)
     print(f"\033[92m[*]\033[0m {t('kace.fetching_cfg_done', board=user_data['board'])}")
@@ -253,7 +267,19 @@ def main():
         else:
             # Deferred import to optimize startup performance on slow Raspberry Pi hardware
             from core.firmware_wizard import run_firmware_wizard
-            run_firmware_wizard(user_data)
+            try:
+                firmware_result = run_firmware_wizard(user_data)
+            except WizardExit:
+                _finish(cancelled("Firmware workflow cancelled."))
+            except (KeyboardInterrupt, EOFError):
+                _finish(cancelled("Firmware workflow interrupted."))
+            if not isinstance(firmware_result, WorkflowResult):
+                _finish(failed(
+                    WorkflowOutcome.FIRMWARE_FAILED,
+                    "Firmware wizard returned no typed terminal result.",
+                ))
+            if not firmware_result.ok:
+                _finish(firmware_result)
 
     generate_macros = yes_no(
         f"\n{t('kace.generate_macros_prompt')}",
@@ -275,7 +301,7 @@ def main():
             for section, key in gen_err.todos:
                 print(f"\033[93m      • {section} → {key}\033[0m")
         print("\033[93m    Resolve the missing pins and re-run KACE.\033[0m")
-        sys.exit(1)
+        _finish(failed(WorkflowOutcome.GENERATION_FAILED, str(gen_err)))
     time.sleep(0.5)
     print(f"\r\033[92m[*]\033[0m {t('kace.generating_cfg_done')}")
     
@@ -290,20 +316,33 @@ def main():
     # available, compose it with the verified configuration transaction.
     if user_data.get("pending_firmware_deployment"):
         from core.moonraker_deployer import DeployState
-        if user_data.get("klipper_version") and user_data.get("mcu_path"):
+        artifact = user_data.get("firmware_artifact")
+        if getattr(artifact, "firmware_identity", None) and user_data.get("mcu_path"):
             result = deploy_firmware_installation(user_data)
             if result.state is DeployState.DONE:
                 print("\n\033[92m[OK] Installation completed and validated.\033[0m")
-                sys.exit(0)
+                _finish(success("Firmware and configuration installation validated."))
             print(f"\n\033[91m[!] Installation did not complete: {result.state.name}: {result.detail}\033[0m")
-            sys.exit(1)
+            if result.state in (DeployState.CANCELLED, DeployState.ABORTED):
+                _finish(cancelled(result.detail or "Firmware installation cancelled."))
+            if result.state is DeployState.FAILED_PRECONDITION:
+                _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, result.detail))
+            _finish(failed(WorkflowOutcome.FIRMWARE_FAILED, result.detail or result.state.name))
 
         # A firmware artifact remains useful without a connected MCU or a
         # fingerprint. Execute its delivery method, then let the user choose a
         # separate configuration destination; do not claim verification.
         deployment_result = execute_firmware_deployment(user_data)
-        if deployment_result is not None and not deployment_result.ok:
+        if deployment_result is None:
+            _finish(failed(
+                WorkflowOutcome.PRECONDITION_FAILED,
+                "Firmware deployment was requested but no prepared strategy exists.",
+            ))
+        if deployment_result.status.value == "CANCELLED":
+            _finish(cancelled(deployment_result.detail or "Firmware deployment cancelled."))
+        if not deployment_result.ok:
             print(f"\n\033[91m[!] Firmware deployment did not complete: {deployment_result.detail}\033[0m")
+            _finish(failed(WorkflowOutcome.FIRMWARE_FAILED, deployment_result.detail))
 
     # ==========================================
     # PHASE 4: CONFIGURATION DEPLOYMENT
@@ -321,17 +360,18 @@ def main():
 
     if deploy_cfg is None:
         print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-        sys.exit(0)
+        _finish(cancelled("Configuration deployment selection cancelled."))
 
+    deployment_result = None
     if deploy_cfg == "usb":
-        deploy_usb(user_data, artifact_type="config")
+        deployment_result = deploy_usb(user_data, artifact_type="config")
     elif deploy_cfg == "local":
-        deploy_local(user_data, artifact_type="config")
+        deployment_result = deploy_local(user_data, artifact_type="config")
     elif deploy_cfg == "ssh":
         host = simple_input(t("kace.ssh_host_prompt"))
         if host is None or not host:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            sys.exit(0)
+            _finish(cancelled("SSH host entry cancelled."))
         # Default SSH user is overridable via KACE_SSH_USER (e.g. "kace" for
         # KACE-installed Klipper). Falls back to the historical default "pi".
         user = simple_input(
@@ -340,29 +380,36 @@ def main():
         )
         if user is None or not user:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            sys.exit(0)
+            _finish(cancelled("SSH user entry cancelled."))
         password = password_input(t("kace.ssh_pass_prompt"))
         if password is None:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            sys.exit(0)
+            _finish(cancelled("SSH password entry cancelled."))
         dest_path = simple_input(t("kace.ssh_dest_prompt"), default="~/printer_data/config/")
         if dest_path is None or not dest_path:
             print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
-            sys.exit(0)
+            _finish(cancelled("SSH destination entry cancelled."))
 
         user_data['host'] = host
         user_data['user'] = user
         user_data['password'] = password
         user_data['dest_path'] = dest_path
         if host and user and dest_path:
-            deploy_config(user_data)
+            deployment_result = deploy_config(user_data)
             # Q2-04: Zero/remove password from user_data after deployment completes
             user_data.pop('password', None)
             password = None
     elif deploy_cfg == "moonraker":
-        deploy_moonraker(user_data)
+        deployment_result = deploy_moonraker(user_data)
 
-    sys.exit(0)
+    if deploy_cfg == "none":
+        _finish(success("Configuration generated; deployment intentionally skipped."))
+    if not isinstance(deployment_result, WorkflowResult):
+        _finish(failed(
+            WorkflowOutcome.DEPLOYMENT_FAILED,
+            "Deployment returned no terminal result.",
+        ))
+    _finish(deployment_result)
 
 if __name__ == "__main__":
     main()

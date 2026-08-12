@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from firmware.detector import discover_mcu_hardware
+from core.exceptions import WizardExit
 from core.translations import get_lang, set_lang
 
 class TestDetector(unittest.TestCase):
@@ -94,7 +95,7 @@ class TestDetector(unittest.TestCase):
     def test_no_mcu_flow_uses_selected_spanish_locale(self, mock_print, _select, _glob):
         """The post-dashboard MCU recovery path must not revert to English."""
         set_lang("Español")
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(WizardExit):
             discover_mcu_hardware(interactive=True)
 
         printed = "\n".join(call.args[0] for call in mock_print.call_args_list)

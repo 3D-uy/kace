@@ -310,7 +310,7 @@ def run_dashboard(state: dict) -> str:
         try:
             action_choice = input(f"  {_Y}{t('menu.select_range', count=2)}{_R} ").strip()
         except (KeyboardInterrupt, EOFError):
-            sys.exit(0)
+            raise WizardExit()
 
         action = ACTIONS.get(action_choice, "quit")
 

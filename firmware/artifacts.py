@@ -7,6 +7,9 @@ import os
 import uuid
 from dataclasses import asdict, dataclass
 from enum import Enum
+from typing import Optional
+
+from .identity import FirmwareBuildIdentity, FirmwareBuildInputs
 
 
 class FirmwareFormat(str, Enum):
@@ -56,6 +59,7 @@ class BuildArtifact:
     firmware_fingerprint: str
     provenance: BuildProvenance
     flashable: bool
+    firmware_identity: Optional[FirmwareBuildIdentity] = None
 
     @classmethod
     def create(
@@ -68,20 +72,32 @@ class BuildArtifact:
         firmware_fingerprint: str,
         mock_build: bool,
         size_warning: bool,
+        build_identity: Optional[FirmwareBuildInputs] = None,
     ) -> "BuildArtifact":
         provenance = BuildProvenance.MOCK if mock_build else BuildProvenance.REAL
         digest = _sha256(path)
+        artifact_format = FirmwareFormat.from_filename(native_filename)
+        identity = None
+        if build_identity is not None and digest:
+            identity = build_identity.complete(
+                artifact_sha256=digest,
+                artifact_size=int(size_bytes),
+                artifact_format=artifact_format.value,
+            )
         return cls(
             build_id=str(uuid.uuid4()),
             path=os.path.abspath(os.path.expanduser(path)),
             native_filename=native_filename,
-            format=FirmwareFormat.from_filename(native_filename),
+            format=artifact_format,
             sha256=digest,
             size_bytes=int(size_bytes),
             mcu=mcu or "",
-            firmware_fingerprint=firmware_fingerprint or "",
+            firmware_fingerprint=(
+                identity.reported_version if identity is not None else firmware_fingerprint or ""
+            ),
             provenance=provenance,
-            flashable=bool(not mock_build and not size_warning and digest),
+            flashable=bool(not mock_build and not size_warning and digest and identity is not None),
+            firmware_identity=identity,
         )
 
     def to_dict(self) -> dict:

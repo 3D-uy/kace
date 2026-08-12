@@ -3,6 +3,19 @@ import platform
 import posixpath
 import shutil
 import sys
+import tempfile
+
+from core.known_hosts import (
+    get_known_hosts_path,
+    known_hosts_lock,
+    persist_host_keys_atomically,
+)
+from core.workflow_outcome import (
+    WorkflowOutcome,
+    cancelled,
+    failed,
+    success as workflow_success,
+)
 
 
 def _preflight_check(cfg_path, user_data, yes_no_fn):
@@ -132,8 +145,8 @@ class _InteractiveHostKeyPolicy:
     chance to abort. This policy shows the key fingerprint and requires an
     explicit yes before the connection is made.
 
-    On acceptance the key is saved to ~/.ssh/known_hosts so the prompt
-    only appears once per host (standard SSH behaviour).
+    Acceptance is staged in the client. The surrounding trust transaction
+    persists it atomically before the connection is returned to a caller.
     """
 
     def missing_host_key(self, client, hostname, key):
@@ -161,16 +174,34 @@ class _InteractiveHostKeyPolicy:
                 f"Connection to {hostname} rejected — unknown host key not trusted."
             )
 
-        # Save to known_hosts so the prompt doesn't repeat next time
+        # Stage the accepted key in memory. Durable publication is owned by
+        # _connect_ssh_client while it still holds the trust-store lock.
         client.get_host_keys().add(hostname, algo, key)
-        try:
-            known_hosts = os.path.expanduser("~/.ssh/known_hosts")
-            client.save_host_keys(known_hosts)
-        except Exception:
-            pass  # Non-fatal — key is still trusted for this session
 
 
-def deploy_config(user_data):
+def _connect_ssh_client(paramiko, hostname, **connect_kwargs):
+    """Connect under one serialized, fail-closed host-trust transaction."""
+    known_hosts_path = get_known_hosts_path()
+    client = paramiko.SSHClient()
+    try:
+        with known_hosts_lock(known_hosts_path):
+            client.load_system_host_keys()
+            client.load_host_keys(known_hosts_path)
+            client.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
+            client.connect(hostname, **connect_kwargs)
+            persist_host_keys_atomically(
+                paramiko,
+                client,
+                known_hosts_path,
+                lock_held=True,
+            )
+        return client
+    except Exception:
+        client.close()
+        raise
+
+
+def _legacy_deploy_config(user_data):
     """Deploys the generated printer.cfg to the Klipper host via SSH/SCP.
 
     Note (Q2-02): Intentionally mutates user_data by popping 'password' immediately
@@ -181,7 +212,10 @@ def deploy_config(user_data):
     password_for_reconnect = password
     paramiko = _require_paramiko()
     if paramiko is None:
-        return  # error already printed by _require_paramiko
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "Paramiko is unavailable; SSH deployment cannot start.",
+        )
 
     # BUG-007: Verify the config file exists locally before attempting upload.
     # sftp.put() raises a cryptic FileNotFoundError that the broad except below
@@ -190,7 +224,7 @@ def deploy_config(user_data):
     if not os.path.isfile(cfg_path):
         print(f"\033[91m[!] Deployment aborted: printer.cfg not found at {cfg_path}\033[0m")
         print("\033[93m    Run 'Generate new config' first to create the file.\033[0m")
-        return
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, "printer.cfg is missing.")
 
     # Pre-flight structural integrity check.
     # Pushing a printer.cfg that Klipper can't load causes an instant fatal
@@ -201,7 +235,10 @@ def deploy_config(user_data):
     from core.pin_validator import validate_required_sections, validate_pins_for_mcu
     from core.menu import yes_no as _yes_no
     if not _preflight_check(cfg_path, user_data, _yes_no):
-        return
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "printer.cfg failed deployment preflight.",
+        )
 
     # RES-01 fix: declare handles as None so the finally block can safely test
     # whether each resource was successfully created before attempting to close it.
@@ -218,17 +255,15 @@ def deploy_config(user_data):
     dest_file = ""
     dest_macros = ""
     macros_uploaded = False
+    workflow_result = failed(
+        WorkflowOutcome.DEPLOYMENT_FAILED,
+        "SSH deployment did not complete.",
+    )
 
     try:
-        ssh = paramiko.SSHClient()
-        # UNSAFE-002: WarningPolicy warns the user on unknown host keys instead
-        # of silently accepting them (AutoAddPolicy is MITM-vulnerable).
-        # Known hosts are still loaded from ~/.ssh/known_hosts for verification.
-        ssh.load_system_host_keys()
-        ssh.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
-
         print(f"Connecting to {user_data['host']}...")
-        ssh.connect(
+        ssh = _connect_ssh_client(
+            paramiko,
             user_data['host'],
             username=user_data['user'],
             password=password
@@ -327,6 +362,7 @@ def deploy_config(user_data):
 
         # ── Step 6: Post-Deployment Success & Instructions ─────────
         deployed_successfully = True
+        workflow_result = workflow_success("Configuration uploaded through SSH.")
         print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
         if restart_done:
             print(f"\033[96m[*]\033[0m Klipper restart issued successfully.")
@@ -335,12 +371,16 @@ def deploy_config(user_data):
         print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}/\033[0m")
 
     except paramiko.AuthenticationException as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH authentication failed: {e}")
         print(f"\033[91mDeployment failed: Authentication error — check username and password. Details: {e}\033[0m")
     except TimeoutError as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH connection timed out: {e}")
         print(f"\033[91mDeployment failed: Connection timed out — is the Pi powered on and reachable? Details: {e}\033[0m")
     except OSError as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH network error: {e}")
         print(f"\033[91mDeployment failed: Network error — {e}\033[0m")
     except Exception as e:
+        workflow_result = failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH deployment failed: {e}")
         print(f"\033[91mDeployment failed: {e}\033[0m")
     finally:
         # Perform rollback if backups exist and deployment wasn't successful
@@ -370,10 +410,8 @@ def deploy_config(user_data):
                         except Exception:
                             pass
                     
-                    ssh = paramiko.SSHClient()
-                    ssh.load_system_host_keys()
-                    ssh.set_missing_host_key_policy(_InteractiveHostKeyPolicy())
-                    ssh.connect(
+                    ssh = _connect_ssh_client(
+                        paramiko,
                         user_data['host'],
                         username=user_data['user'],
                         password=password_for_reconnect,
@@ -452,21 +490,252 @@ def deploy_config(user_data):
             except Exception:
                 pass
 
+    return workflow_result
+
+
+def _generated_config_bytes():
+    hardware_path = os.path.expanduser("~/kace/printer.cfg")
+    macros_path = os.path.expanduser("~/kace/macros.cfg")
+    if not os.path.isfile(hardware_path):
+        raise FileNotFoundError(f"printer.cfg not found at {hardware_path}")
+    with open(hardware_path, "rb") as source:
+        hardware = source.read()
+    macros = None
+    if os.path.isfile(macros_path):
+        with open(macros_path, "rb") as source:
+            macros = source.read()
+    return hardware_path, hardware, macros
+
+
+def _config_result_to_workflow(result):
+    from core.config_transaction import ConfigTransactionState
+    from core.workflow_outcome import pending_activation
+
+    if result.state is ConfigTransactionState.COMMITTED:
+        return workflow_success(result.detail)
+    if result.state is ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION:
+        return pending_activation(result.detail)
+    if result.state is ConfigTransactionState.CANCELLED:
+        return cancelled(result.detail)
+    if result.state in {
+        ConfigTransactionState.PRECONDITION_FAILED,
+        ConfigTransactionState.SNAPSHOT_FAILED,
+    }:
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, result.detail)
+    return failed(WorkflowOutcome.DEPLOYMENT_FAILED, result.detail)
+
+
+def _run_config_transaction(transport, user_data, activation, generated=None):
+    from core.config_transaction import ConfigDeploymentTransaction
+    from core.menu import yes_no
+
+    hardware_path, hardware, macros = generated or _generated_config_bytes()
+    if not _preflight_check(hardware_path, user_data, yes_no):
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "generated hardware configuration failed deployment preflight.",
+        )
+
+    def _show_diff(diff):
+        print("\n\033[96m[*]\033[0m Configuration dry-run diff:")
+        print(diff or "(no changes)")
+
+    transaction = ConfigDeploymentTransaction(
+        transport,
+        hardware,
+        macros,
+        activation=activation,
+        confirm=lambda _diff: bool(yes_no("Apply this configuration diff?", default=False)),
+        output=_show_diff,
+        board=user_data.get("board", ""),
+        kace_version=_KACE_VERSION,
+    )
+    result = transaction.run()
+    if result.rollback_succeeded is False:
+        print(f"\033[91m[!] Rollback incomplete: {result.detail}\033[0m")
+    elif result.rollback_succeeded:
+        print("\033[92m[OK] Rollback restored byte-identical configuration and Klipper Ready.\033[0m")
+    return _config_result_to_workflow(result)
+
+
+def deploy_config(user_data):
+    """Deploy configuration through the shared verified transaction over SFTP."""
+    from core.config_transaction import SftpConfigTransport
+    from core.menu import numbered_select
+    from core.translations import t
+
+    password = user_data.pop("password", "")
+    try:
+        generated = _generated_config_bytes()
+    except (OSError, FileNotFoundError) as exc:
+        password = None
+        print(f"\033[91m[!] Deployment aborted: {exc}\033[0m")
+        print("\033[93m    Run 'Generate new config' first and retry.\033[0m")
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc))
+    paramiko = _require_paramiko()
+    if paramiko is None:
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, "Paramiko is unavailable.")
+
+    ssh = None
+    sftp = None
+    try:
+        ssh = _connect_ssh_client(
+            paramiko,
+            user_data["host"],
+            username=user_data["user"],
+            password=password,
+            timeout=10,
+        )
+        sftp = ssh.open_sftp()
+        destination = user_data["dest_path"]
+        if destination.startswith("~/"):
+            destination = destination.replace("~/", f"/home/{user_data['user']}/", 1)
+        config_dir = (
+            posixpath.dirname(destination)
+            if destination.endswith(".cfg")
+            else destination.rstrip("/")
+        )
+        activation = numbered_select(
+            t("moonraker.restart_prompt"),
+            choices=[
+                {"name": t("moonraker.restart_firmware"), "value": "firmware"},
+                {"name": t("moonraker.restart_service"), "value": "service"},
+                {"name": t("moonraker.restart_skip"), "value": "none"},
+            ],
+        ) or "none"
+        if activation == "skip":
+            activation = "none"
+        transport = SftpConfigTransport(
+            sftp,
+            config_dir,
+            user_data["host"],
+            int(user_data.get("moonraker_port", 7125)),
+            user_data.get("moonraker_api_key") or None,
+        )
+        return _run_config_transaction(transport, user_data, activation, generated)
+    except paramiko.AuthenticationException as exc:
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH authentication failed: {exc}")
+    except (OSError, TimeoutError) as exc:
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH deployment failed: {exc}")
+    except Exception as exc:
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH deployment failed: {exc}")
+    finally:
+        password = None
+        if sftp is not None:
+            try:
+                sftp.close()
+            except Exception:
+                pass
+        if ssh is not None:
+            try:
+                ssh.close()
+            except Exception:
+                pass
+
+
+def deploy_moonraker(user_data):
+    """Deploy configuration through the same transaction over Moonraker."""
+    from urllib.parse import urlsplit
+
+    from core.config_transaction import MoonrakerConfigTransport
+    from core.menu import numbered_select, password_input, simple_input, yes_no
+    from core.moonraker import DEFAULT_PORT, _base_url, check_moonraker
+    from core.translations import t
+
+    host = simple_input(t("moonraker.host_prompt"), default=user_data.get("moonraker_host", ""))
+    if not host:
+        return cancelled("Moonraker deployment cancelled before connecting.")
+    port_value = simple_input(
+        t("moonraker.port_prompt"),
+        default=str(user_data.get("moonraker_port", DEFAULT_PORT)),
+    )
+    try:
+        port = int(port_value) if port_value else DEFAULT_PORT
+    except ValueError:
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, "Invalid Moonraker port.")
+    api_key = simple_input(t("moonraker.api_key_prompt"), default="") or ""
+    if api_key and urlsplit(_base_url(host, port)).scheme != "https":
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "Moonraker API key requires an effective HTTPS URL.",
+        )
+
+    ok, detail = check_moonraker(host, port, api_key=api_key)
+    if not ok:
+        if yes_no(t("moonraker.fallback_ssh"), default=False):
+            user_data["host"] = host
+            user_data["user"] = simple_input(
+                t("kace.ssh_user_prompt"),
+                default=os.environ.get("KACE_SSH_USER", "kace"),
+            )
+            user_data["password"] = password_input(t("kace.ssh_pass_prompt"))
+            user_data["dest_path"] = simple_input(
+                t("kace.ssh_dest_prompt"), default="~/printer_data/config/"
+            )
+            if user_data.get("user") and user_data.get("dest_path"):
+                return deploy_config(user_data)
+            user_data.pop("password", None)
+            return cancelled("SSH fallback was not fully configured.")
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Moonraker is unreachable: {detail}")
+
+    user_data["moonraker_host"] = host
+    user_data["moonraker_port"] = port
+    activation = numbered_select(
+        t("moonraker.restart_prompt"),
+        choices=[
+            {"name": t("moonraker.restart_firmware"), "value": "firmware"},
+            {"name": t("moonraker.restart_service"), "value": "service"},
+            {"name": t("moonraker.restart_skip"), "value": "none"},
+        ],
+    ) or "none"
+    if activation == "skip":
+        activation = "none"
+    return _run_config_transaction(
+        MoonrakerConfigTransport(host, port, api_key or None),
+        user_data,
+        activation,
+    )
+
 
 def _copy_artifacts(user_data, dest, artifact_type) -> bool:
-    success = False
+    config_success = artifact_type not in ["config", "all"]
+    firmware_success = artifact_type not in ["firmware", "all"]
     if artifact_type in ["config", "all"]:
-        cfg_path = os.path.expanduser('~/kace/printer.cfg')
-        if os.path.exists(cfg_path):
-            print(f"Copying printer.cfg to {dest}...")
-            shutil.copy2(cfg_path, os.path.join(dest, 'printer.cfg'))
-            success = True
-        
-        # Copy macros.cfg if it exists
-        macros_path = os.path.expanduser('~/kace/macros.cfg')
-        if os.path.exists(macros_path):
-            print(f"Copying macros.cfg to {dest}...")
-            shutil.copy2(macros_path, os.path.join(dest, 'macros.cfg'))
+        from core.config_transaction import (
+            ConfigDeploymentTransaction,
+            ConfigTransactionState,
+            LocalConfigTransport,
+        )
+        from core.menu import yes_no
+
+        try:
+            _, hardware, macros = _generated_config_bytes()
+            transaction = ConfigDeploymentTransaction(
+                LocalConfigTransport(dest),
+                hardware,
+                macros,
+                activation="none",
+                confirm=lambda _diff: bool(yes_no(
+                    "Write this managed configuration to the selected destination?",
+                    default=False,
+                )),
+                output=lambda diff: print(
+                    "\n\033[96m[*]\033[0m Configuration dry-run diff:\n"
+                    + (diff or "(no changes)")
+                ),
+                board=user_data.get("board", ""),
+                kace_version=_KACE_VERSION,
+            )
+            result = transaction.run()
+            config_success = result.state in {
+                ConfigTransactionState.COMMITTED,
+                ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION,
+            }
+            if not config_success:
+                print(f"\033[91mConfiguration export failed: {result.detail}\033[0m")
+        except Exception as exc:
+            print(f"\033[91mConfiguration export failed: {exc}\033[0m")
+            config_success = False
     
     if artifact_type in ["firmware", "all"]:
         fw_path = user_data.get("firmware_path")
@@ -475,16 +744,16 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
             ext = os.path.basename(firmware_bin)
             print(f"Copying firmware {ext} to {dest}...")
             shutil.copy2(firmware_bin, os.path.join(dest, ext))
-            success = True
+            firmware_success = True
         else:
             for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
                 firmware_bin = os.path.expanduser(f'~/kace/{ext}')
                 if os.path.exists(firmware_bin):
                     print(f"Copying firmware {ext} to {dest}...")
                     shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                    success = True
+                    firmware_success = True
                     
-    return success
+    return config_success and firmware_success
 
 def deploy_usb(user_data, artifact_type="all"):
     """Deploys the generated artifact(s) to a USB/SD card."""
@@ -503,7 +772,7 @@ def deploy_usb(user_data, artifact_type="all"):
             )
             
             if not dest:
-                return False
+                return cancelled("Removable-media deployment cancelled.")
                 
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
@@ -516,19 +785,26 @@ def deploy_usb(user_data, artifact_type="all"):
         
         if not dest or not os.path.isdir(dest):
             print(f"\033[91mDeployment failed: Invalid path or directory does not exist: {dest}\033[0m")
-            return False
+            return failed(
+                WorkflowOutcome.PRECONDITION_FAILED,
+                f"Invalid removable-media destination: {dest}",
+            )
             
         success = _copy_artifacts(user_data, dest, artifact_type)
                     
         if success:
             print("\033[92mUSB Deployment Successful!\033[0m")
+            return workflow_success("Configuration copied to removable media.")
         else:
             print("\033[93mNo requested artifacts found to copy.\033[0m")
-        return success
+            return failed(
+                WorkflowOutcome.DEPLOYMENT_FAILED,
+                "No requested artifacts were available to copy.",
+            )
             
     except Exception as e:
         print(f"\033[91mDeployment failed: {e}\033[0m")
-        return False
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Removable-media deployment failed: {e}")
 
 def deploy_local(user_data, artifact_type="all"):
     """Copies the requested artifact(s) to a local folder on the PC."""
@@ -547,7 +823,7 @@ def deploy_local(user_data, artifact_type="all"):
             )
             
             if not dest:
-                return
+                return cancelled("Local deployment cancelled.")
  
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
@@ -567,10 +843,16 @@ def deploy_local(user_data, artifact_type="all"):
                     
         if success:
             print(f"\033[92mSuccessfully saved to {dest}!\033[0m")
+            return workflow_success("Configuration copied to a local directory.")
         else:
             print("\033[93mNo requested artifacts found to copy.\033[0m")
+            return failed(
+                WorkflowOutcome.DEPLOYMENT_FAILED,
+                "No requested artifacts were available to copy.",
+            )
     except Exception as e:
         print(f"\033[91mSave failed: {e}\033[0m")
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Local deployment failed: {e}")
 
 class _MoonrakerClient:
     """Thin adapter that wraps core.moonraker functions to match the interface
@@ -609,19 +891,24 @@ class _MoonrakerClient:
         if not ok:
             raise RuntimeError(f"FIRMWARE_RESTART failed: {detail}")
 
+    def restart_moonraker(self):
+        from core.moonraker import restart_moonraker_service
+        ok, detail = restart_moonraker_service(
+            self._host, self._port, api_key=self._api_key
+        )
+        if not ok:
+            raise RuntimeError(f"Moonraker restart failed: {detail}")
+
     def download_config(self, filename: str) -> tuple:
         from core.moonraker import download_printer_cfg
         return download_printer_cfg(self._host, self._port, filename, api_key=self._api_key)
 
     def restore_snapshot(self, snapshot) -> list:
         from core.snapshot import restore_snapshot
-        failed = restore_snapshot(
+        return restore_snapshot(
             snapshot, self._host, self._port,
             api_key=self._api_key, issue_restart=False,
         )
-        if not failed:
-            self.firmware_restart()
-        return failed
 
 def _firmware_execution_context(user_data):
     """Create the interactive runtime capabilities used by deployment methods."""
@@ -659,21 +946,53 @@ def deploy_firmware_installation(user_data):
     verification, configuration upload, restart and rollback.
     """
     from core.mcu_monitor import McuPresenceMonitor
-    from core.moonraker import DEFAULT_PORT, list_config_files
+    from core.config_transaction import ConfigDeploymentTransaction, MoonrakerConfigTransport
+    from core.managed_config import build_managed_config_plan
+    from core.menu import yes_no
+    from core.moonraker import DEFAULT_PORT
     from core.power_controller import PowerControllerError, configured_power_controller
     from core.moonraker_deployer import (
-        Deployer, DeploymentManifest, DeployResult, DeployState, McuTarget,
+        ConfigArtifact, Deployer, DeploymentManifest, DeployResult, DeployState, McuTarget,
     )
-    from core.snapshot import capture_snapshot
+    from core.snapshot import create_snapshot
+    from firmware.deployment import (
+        DeploymentArtifactError,
+        DeploymentStrategyId,
+        require_deployable_artifact,
+    )
+    from firmware.identity import FirmwareBuildIdentity
 
-    expected = user_data.get("klipper_version", "")
     mcu_path = user_data.get("mcu_path", "")
     prepared = user_data.get("prepared_firmware_deployment")
     service = user_data.get("firmware_deployment_service")
     if prepared is None or service is None:
         return DeployResult(DeployState.FAILED_PRECONDITION, "prepared firmware deployment is unavailable")
-    if not expected:
-        return DeployResult(DeployState.FAILED_FLASH, "compiled firmware fingerprint is unavailable")
+    artifact = getattr(getattr(prepared, "plan", None), "artifact", None)
+    try:
+        require_deployable_artifact(artifact)
+    except DeploymentArtifactError as exc:
+        return DeployResult(
+            DeployState.FAILED_FLASH,
+            f"firmware artifact is not deployable: {exc}",
+        )
+    profile = getattr(getattr(prepared, "plan", None), "profile", None)
+    if getattr(profile, "strategy", None) is DeploymentStrategyId.PREPARE_ONLY:
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            (
+                "the selected board strategy only prepares a firmware artifact; "
+                "complete its explicit manual procedure before deploying configuration"
+            ),
+        )
+    identity = getattr(artifact, "firmware_identity", None)
+    if not isinstance(identity, FirmwareBuildIdentity):
+        return DeployResult(DeployState.FAILED_FLASH, "compiled firmware build identity is unavailable")
+    if (
+        not getattr(artifact, "sha256", "")
+        or identity.artifact_sha256 != artifact.sha256
+        or identity.artifact_sha256 != getattr(prepared, "sha256", "")
+    ):
+        return DeployResult(DeployState.FAILED_FLASH, "firmware artifact does not match its build identity")
     if not mcu_path:
         return DeployResult(DeployState.FAILED_MONITOR, "MCU device path is unavailable")
 
@@ -682,6 +1001,48 @@ def deploy_firmware_installation(user_data):
     api_key = user_data.get("moonraker_api_key") or None
     mcu_name = user_data.get("mcu_name", "mcu")
     client = _MoonrakerClient(host, port, api_key=api_key)
+
+    # Configuration is planned and backed up before any firmware action. A
+    # failed/ambiguous read is never interpreted as an empty config root.
+    try:
+        hardware_path, generated_hardware, generated_macros = _generated_config_bytes()
+        if not _preflight_check(hardware_path, user_data, yes_no):
+            return DeployResult(
+                DeployState.FAILED_PRECONDITION,
+                "generated hardware configuration failed deployment preflight",
+            )
+        config_transport = MoonrakerConfigTransport(host, port, api_key)
+        remote_files = config_transport.read_files(ConfigDeploymentTransaction.CANDIDATES)
+        config_plan = build_managed_config_plan(
+            generated_hardware, generated_macros, remote_files
+        )
+        diff = config_plan.dry_run_diff()
+        print("\n\033[96m[*]\033[0m Configuration dry-run diff:")
+        print(diff or "(no changes)")
+        for warning in config_plan.warnings:
+            print(f"\033[93m[!] {warning}\033[0m")
+        if config_plan.changed_artifacts and not yes_no(
+            "Apply this configuration diff after firmware verification?", default=False
+        ):
+            return DeployResult(DeployState.ABORTED, "configuration deployment cancelled")
+        snapshot = None
+        if config_plan.changed_artifacts:
+            snapshot = create_snapshot(
+                {
+                    artifact.remote_name: artifact.previous
+                    for artifact in config_plan.changed_artifacts
+                },
+                manifest_mcus=(mcu_name,),
+                dev_deploy=os.environ.get("KACE_DEV_DEPLOY", "0") == "1",
+                board=user_data.get("board", ""),
+                kace_version=_KACE_VERSION,
+            )
+    except Exception as exc:
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            f"configuration preflight/snapshot failed before firmware deployment: {exc}",
+        )
+
     try:
         power_controller = configured_power_controller(
             host=host, port=port, api_key=api_key
@@ -696,72 +1057,128 @@ def deploy_firmware_installation(user_data):
             f"printer power is not ready: {exc}",
         )
 
-    def _capture_backup():
-        try:
-            existing = list_config_files(host, port, api_key=api_key)
-        except Exception:
-            existing = []
-        # Always attempt the two files KACE may replace. list_config_files()
-        # returns [] both for an empty root and for a network failure; explicit
-        # downloads prevent a connectivity failure from masquerading as a valid
-        # empty backup.
-        candidates = list(dict.fromkeys([*existing, "printer.cfg", "macros.cfg"]))
-        return capture_snapshot(
-            host, port, candidates,
-            manifest_mcus=(mcu_name,),
-            api_key=api_key,
-            dev_deploy=os.environ.get("KACE_DEV_DEPLOY", "0") == "1",
-            board=user_data.get("board", ""),
-            kace_version=_KACE_VERSION,
-        )
-
     printer_cfg = os.path.expanduser("~/kace/printer.cfg")
     macros_cfg = os.path.expanduser("~/kace/macros.cfg")
+    bundle = tempfile.TemporaryDirectory(prefix="kace-config-transaction-")
+    config_artifacts = []
+    try:
+        for index, artifact in enumerate(config_plan.changed_artifacts):
+            local_path = os.path.join(bundle.name, f"{index:02d}.cfg")
+            with open(local_path, "wb") as output:
+                output.write(artifact.content)
+                output.flush()
+                os.fsync(output.fileno())
+            config_artifacts.append(ConfigArtifact(local_path, artifact.remote_name))
+    except Exception as exc:
+        bundle.cleanup()
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            f"could not stage managed configuration: {exc}",
+        )
     manifest = DeploymentManifest(
-        targets=[McuTarget(mcu_name, expected)],
+        targets=[McuTarget(mcu_name, identity.reported_version, identity.to_dict())],
         printer_cfg_path=printer_cfg,
         macros_cfg_path=macros_cfg if os.path.isfile(macros_cfg) else None,
+        config_artifacts=config_artifacts,
     )
 
     method = prepared.plan.method.value
+    profile_usb = getattr(profile, "usb", None)
+    expected_vid_pids = tuple(getattr(profile_usb, "application_vid_pids", ()))
+    bootloader_vid_pids = tuple(getattr(profile_usb, "bootloader_vid_pids", ()))
+    if not expected_vid_pids:
+        bundle.cleanup()
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            "physical firmware strategy has no post-flash application VID:PID contract",
+        )
 
     def _run_firmware_method():
         result = service.execute(prepared, _firmware_execution_context(user_data))
         print(f"\n[*] {result.detail}")
-        if result.ok and result.status.value == "ACTION_REQUIRED" and method == "USB":
-            print("[!] Complete the board-specific manual USB flash now.")
-            try:
-                input("    Press ENTER only after the controller has been flashed... ")
-            except (KeyboardInterrupt, EOFError):
-                return False
         return result
 
-    def _prompt_power_cycle():
-        print("\n\033[93m[!] Install the prepared media, then turn only the printer OFF and ON.\033[0m")
-        print("\033[93m    KACE is monitoring the physical MCU; press Ctrl+C to cancel safely.\033[0m")
+    def _confirm_power_off():
+        print("\n\033[93m[!] Firmware media is prepared.\033[0m")
+        print("\033[93m    KACE will switch the configured relay OFF before you install it.\033[0m")
+        print("\033[93m    Press Ctrl+C or answer no to cancel safely.\033[0m")
+        return bool(yes_no("May KACE power off the printer now?", default=False))
 
-    monitor = McuPresenceMonitor(mcu_path)
-    return Deployer(
-        client,
-        manifest,
-        # The physical SD workflow never bypasses identity/fingerprint safety,
-        # including when the broader CLI was started with --dev-deploy.
-        verify_firmware=True,
-        snapshot_loader=_capture_backup,
-        mcu_monitor=monitor,
-        power_cycle_prompt=(
-            _prompt_power_cycle
-            if method == "MANUAL" and power_controller is None
-            else None
-        ),
-        power_off=power_controller.power_off if power_controller is not None else None,
-        power_on=power_controller.power_on if power_controller is not None else None,
-        firmware_deploy=_run_firmware_method,
-        monitor_before_firmware=(method == "USB"),
-    ).run()
+    def _confirm_media_installation():
+        if power_controller is None:
+            print("\n\033[93m[!] Turn the printer OFF, install the prepared firmware media, then turn it ON.\033[0m")
+            prompt = "Have you completed the manual media installation and power cycle?"
+        else:
+            print("\n\033[93m[!] Printer power is confirmed OFF. Install the prepared firmware media now.\033[0m")
+            prompt = "Is the media installed and may KACE power the printer on?"
+        print("\033[93m    Press Ctrl+C or answer no to cancel safely.\033[0m")
+        return bool(yes_no(prompt, default=False))
+
+    def _confirm_ambiguous_mcu_identity(assessment):
+        baseline = assessment.baseline
+        candidate = assessment.candidate
+        print("\n\033[91m[!] KACE cannot prove that the reenumerated MCU is the same board.\033[0m")
+        for reason in assessment.reasons:
+            print(f"\033[93m    - {reason}\033[0m")
+        print(
+            "\033[93m    Captured port/by-path: "
+            f"{baseline.physical_port or baseline.physical_path or ', '.join(baseline.by_path) or 'unavailable'}"
+            "\033[0m"
+        )
+        print(
+            "\033[93m    Candidate port/by-path: "
+            f"{candidate.physical_port or candidate.physical_path or ', '.join(candidate.by_path) or 'unavailable'}"
+            "\033[0m"
+        )
+        print(
+            f"\033[93m    Candidate VID:PID: {candidate.vid_pid or 'unavailable'}; "
+            f"serial: {candidate.serial or 'unavailable'}\033[0m"
+        )
+        print(
+            f"\033[93m    Evidence score: {assessment.score}/"
+            f"{assessment.automatic_threshold} required for automatic acceptance.\033[0m"
+        )
+        print("\033[91m    Confirm only after physically tracing the cable/controller.\033[0m")
+        return bool(
+            yes_no(
+                "Did you physically verify this candidate is the intended MCU?",
+                default=False,
+            )
+        )
+
+    try:
+        monitor = McuPresenceMonitor(
+            mcu_path,
+            expected_vid_pids=expected_vid_pids,
+            bootloader_vid_pids=bootloader_vid_pids,
+        )
+        return Deployer(
+            client,
+            manifest,
+            # The physical SD workflow never bypasses identity/fingerprint safety,
+            # including when the broader CLI was started with --dev-deploy.
+            verify_firmware=True,
+            snapshot=snapshot,
+            mcu_monitor=monitor,
+            power_cycle_prompt=(
+                _confirm_power_off
+                if method == "MANUAL" and power_controller is not None
+                else None
+            ),
+            media_installation_prompt=(
+                _confirm_media_installation if method == "MANUAL" else None
+            ),
+            identity_confirmation_prompt=_confirm_ambiguous_mcu_identity,
+            power_off=power_controller.power_off if power_controller is not None else None,
+            power_on=power_controller.power_on if power_controller is not None else None,
+            firmware_deploy=_run_firmware_method,
+            monitor_before_firmware=(method == "USB"),
+        ).run()
+    finally:
+        bundle.cleanup()
 
 
-def deploy_moonraker(user_data):
+def _legacy_deploy_moonraker(user_data):
     """Deploy printer.cfg to a Klipper host via the Moonraker REST API.
 
     Workflow:
@@ -792,7 +1209,7 @@ def deploy_moonraker(user_data):
 
     if not host:
         print("\033[93mMoonraker deployment cancelled.\033[0m")
-        return
+        return cancelled("Moonraker deployment cancelled before connecting.")
 
     port_str = simple_input(
         t("moonraker.port_prompt"),
@@ -818,7 +1235,10 @@ def deploy_moonraker(user_data):
         print("\033[91m    Sending an API key over plain HTTP exposes it to any observer on the\033[0m")
         print("\033[91m    local network. Change the host to use https:// and try again.\033[0m")
         print(f"\n\033[91m[!] {t('moonraker.http_warning_cancelled')}\033[0m")
-        return
+        return failed(
+            WorkflowOutcome.PRECONDITION_FAILED,
+            "Moonraker API key cannot be sent over explicit plain HTTP.",
+        )
 
     # Persist for potential SSH fallback later
     user_data["moonraker_host"] = host
@@ -847,9 +1267,13 @@ def deploy_moonraker(user_data):
                 user_data['user']      = ssh_user
                 user_data['dest_path'] = ssh_dest
                 user_data['password']  = ssh_pass   # deploy_config pops this immediately
-                deploy_config(user_data)
+                return deploy_config(user_data)
             # ssh_pass goes out of scope here whether deploy ran or not
-        return
+            return cancelled("SSH fallback was not fully configured.")
+        return failed(
+            WorkflowOutcome.DEPLOYMENT_FAILED,
+            f"Moonraker is unreachable: {info}",
+        )
 
     print(f"\033[92m[OK] {t('moonraker.connected', version=info)}\033[0m")
 
@@ -887,12 +1311,19 @@ def deploy_moonraker(user_data):
     cfg_path = os.path.expanduser("~/kace/printer.cfg")
     if os.path.isfile(cfg_path):
         if not _preflight_check(cfg_path, user_data, yes_no):
-            return
+            return failed(
+                WorkflowOutcome.PRECONDITION_FAILED,
+                "printer.cfg failed deployment preflight.",
+            )
     else:
         print(f"\033[91m[!] Deployment aborted: printer.cfg not found at {cfg_path}\033[0m")
         print("\033[93m    Run 'Generate new config' first to create the file.\033[0m")
-        return
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, "printer.cfg is missing.")
 
+    workflow_result = failed(
+        WorkflowOutcome.DEPLOYMENT_FAILED,
+        "Moonraker deployment did not complete.",
+    )
     try:
         # ── Step 4: Upload printer.cfg & macros.cfg ────────────────────────────────
         print(f"\033[96m[*]\033[0m {t('moonraker.uploading')}")
@@ -938,10 +1369,15 @@ def deploy_moonraker(user_data):
             print(f"\033[92m[OK] {t('moonraker.restart_ok')}\033[0m")
 
         deployed_successfully = True
+        workflow_result = workflow_success("Configuration uploaded through Moonraker.")
         print(f"\n\033[92m[OK] Configuration files successfully uploaded to Klipper host!\033[0m")
         print(f"\033[92m[OK] You can now access Mainsail/Fluidd at: http://{host}:{port}/\033[0m")
 
     except Exception as e:
+        workflow_result = failed(
+            WorkflowOutcome.DEPLOYMENT_FAILED,
+            f"Moonraker deployment failed: {e}",
+        )
         print(f"\033[91mMoonraker deployment failed: {e}\033[0m")
     finally:
         # Perform rollback if a snapshot was captured and deployment failed.
@@ -952,3 +1388,5 @@ def deploy_moonraker(user_data):
                 print(f"\033[91m[!] Rollback incomplete — failed to restore: {', '.join(failed_files)}\033[0m")
             else:
                 print("\033[92m[OK] Rollback complete. Klipper configuration reverted to previous state.\033[0m")
+
+    return workflow_result
