@@ -97,6 +97,7 @@ class TestBootstrapInstallContract(unittest.TestCase):
 
     def test_installed_repository_uses_same_pinned_revision_and_launches_wizard(self):
         self.assertIn('KACE_SOURCE_REF="$KACE_INSTALL_REF"', self.script)
+        self.assertIn('KACE_EXPECTED_COMMIT="$KACE_INSTALL_REF"', self.script)
         self.assertNotIn("KACE_NO_LAUNCH=1", self.script)
         installer_index = self.script.index('bash "$tmp_script"')
         finalization_index = self.script.index(

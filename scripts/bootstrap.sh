@@ -97,8 +97,8 @@ FLUIDD_CONFIG_REF="807175d72e3a00cdc6b5e249444a4630e1e03a55"
 FLUIDD_CONFIG_URL="https://raw.githubusercontent.com/fluidd-core/fluidd-config/${FLUIDD_CONFIG_REF}/client.cfg"
 FLUIDD_CONFIG_SHA256="f5511c153c36ab21513c2f9d12d59a4e7f34fc403ea1d2c199d82d99925675c0"
 
-KACE_INSTALL_REF="592a8549a09333ae42582bd458e378f6d0ea78c3"
-KACE_INSTALL_SHA256="9b8dfb1d5121eaaf6a8d9641da06aba5a6392dafcf218b431b3a23bc9f66dcdb"
+KACE_INSTALL_REF="c9a2ee84f66b40acc5ee08f8d2529fa92815c5a4"
+KACE_INSTALL_SHA256="f116b3475684f6f242b10c53fcc3f898a8ab7b6e4e7149892a3a0e932dc1d701"
 KACE_INSTALL_URL="https://raw.githubusercontent.com/3D-uy/KACE/${KACE_INSTALL_REF}/install.sh"
 readonly KLIPPER_REPOSITORY KLIPPER_REF MOONRAKER_REPOSITORY MOONRAKER_REF
 readonly CROWSNEST_REPOSITORY CROWSNEST_REF MAINSAIL_VERSION MAINSAIL_URL MAINSAIL_SHA256
@@ -2062,6 +2062,7 @@ if [ "$(id -un)" != "$PRINTER_USER" ]; then
         KACE_INSTALL_URL="$KACE_INSTALL_URL" \
         KACE_INSTALL_SHA256="$KACE_INSTALL_SHA256" \
         KACE_SOURCE_REF="$KACE_INSTALL_REF" \
+        KACE_EXPECTED_COMMIT="$KACE_INSTALL_REF" \
         sh -c '
         tmp_script="/tmp/kace-install.sh"
         rm -f "$tmp_script"
@@ -2095,7 +2096,8 @@ else
     if curl --fail --silent --show-error --location "$KACE_INSTALL_URL" -o "$tmp_script"; then
         actual_hash=$(sha256sum "$tmp_script" | cut -d" " -f1)
         if [ "$actual_hash" = "$KACE_INSTALL_SHA256" ]; then
-            if KACE_SOURCE_REF="$KACE_INSTALL_REF" bash "$tmp_script"; then
+            if KACE_SOURCE_REF="$KACE_INSTALL_REF" \
+                KACE_EXPECTED_COMMIT="$KACE_INSTALL_REF" bash "$tmp_script"; then
                 log_ok "KACE agent installed."
                 INSTALL_OK=1
                 INSTALL_EXIT=0
