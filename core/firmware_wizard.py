@@ -292,14 +292,24 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
 
     # ── 3. Invoke Headless Compiler Orchestrator ──
     print(f"\n\033[92m[*]\033[0m {t('kace.compiling')}", flush=True)
-    result = build_firmware_orchestrator(
-        mcu_path=user_data.get('mcu_path'),
-        derived_mcu=current_mcu,
-        hint=current_hint,
-        output_dir="~/kace",
-        config_dict=config_dict,
-        build_context=BuildContext(make_command=user_data.get('make_command', 'make'))
-    )
+    try:
+        result = build_firmware_orchestrator(
+            mcu_path=user_data.get('mcu_path'),
+            derived_mcu=current_mcu,
+            hint=current_hint,
+            output_dir="~/kace",
+            config_dict=config_dict,
+            build_context=BuildContext(make_command=user_data.get('make_command', 'make'))
+        )
+    except Exception as exc:
+        message = f"Firmware build failed unexpectedly: {exc}"
+        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=message)}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
+
+    if not isinstance(result, dict):
+        message = "Firmware builder returned an invalid result."
+        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=message)}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
 
     if result.get("status") == "success":
         print(f"\033[92mSUCCESS:\033[0m {t('kace.firmware_success', path=result.get('path'))}")

@@ -143,6 +143,22 @@ class TestFirmwareWizardTerminalResult(unittest.TestCase):
     @patch("core.firmware_wizard.yes_no", return_value=True)
     @patch("core.firmware_wizard.numbered_select", return_value=None)
     @patch("core.firmware_wizard.build_firmware_orchestrator")
+    def test_build_exception_is_a_typed_firmware_failure(
+        self, mock_build, mock_select, mock_confirm
+    ):
+        mock_select.side_effect = [t("builder.compile_now")]
+        mock_build.side_effect = RuntimeError("compiler crashed")
+
+        with patch("builtins.print"):
+            result = run_firmware_wizard({"mcu_type": "rp2040", "mcu_hint": "usb"})
+
+        self.assertIsInstance(result, WorkflowResult)
+        self.assertEqual(result.outcome, WorkflowOutcome.FIRMWARE_FAILED)
+        self.assertIn("compiler crashed", result.detail)
+
+    @patch("core.firmware_wizard.yes_no", return_value=True)
+    @patch("core.firmware_wizard.numbered_select", return_value=None)
+    @patch("core.firmware_wizard.build_firmware_orchestrator")
     def test_build_failure_is_a_typed_firmware_failure(
         self, mock_build, mock_select, mock_confirm
     ):
