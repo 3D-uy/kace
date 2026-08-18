@@ -86,6 +86,38 @@ def _step_board(user_data, suggested_configs, board_configs):
 
     user_data["board"] = ans
 
+    # Phase 4A authority classification is exact and additive.  It does not
+    # build here; it makes the later firmware branch explicit and observable.
+    from firmware.boards.runtime import (
+        record_board_contract_authority_failure,
+        record_firmware_authority,
+        resolve_firmware_authority,
+    )
+    try:
+        authority = resolve_firmware_authority(
+            ans,
+            detected_mcu=user_data.get("mcu_type"),
+        )
+        record_firmware_authority(user_data, authority)
+    except Exception as exc:
+        record_board_contract_authority_failure(user_data, ans, exc)
+        raise
+
+    # Preserve the earlier shadow diagnostic while legacy boards remain in
+    # service. It observes an existing selection and never makes a decision.
+    try:
+        from firmware.boards.resolver import capture_shadow_comparison
+        capture_shadow_comparison(user_data, ans)
+    except Exception as exc:
+        user_data["board_contract_shadow"] = {
+            "legacy_board": str(ans or ""),
+            "legacy_mcu": str(user_data.get("mcu_type") or ""),
+            "board_contract_id": "",
+            "matching_variant_ids": (),
+            "divergence": "SHADOW_ERROR",
+            "detail": str(exc),
+        }
+
     # ── Load board config immediately so subsequent steps have it ─────────────
     raw = fetch_raw_config(ans)
     if raw:
@@ -138,7 +170,8 @@ def _step_fan_assignment(user_data: dict) -> str:
 
     ans_part = numbered_select(
         t("wizard.part_cooling_prompt"),
-        choices=part_choices
+        choices=part_choices,
+        require_explicit=True,
     )
 
     if ans_part is None:
@@ -184,7 +217,8 @@ def _step_fan_assignment(user_data: dict) -> str:
 
     ans_hotend = numbered_select(
         t("wizard.hotend_fan_prompt"),
-        choices=hotend_choices
+        choices=hotend_choices,
+        require_explicit=True,
     )
 
     if ans_hotend is None:

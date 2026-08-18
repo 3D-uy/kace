@@ -1966,6 +1966,11 @@ UI_STRINGS: dict = {
         "Español": "Seleccione [1-{count}]:",
         "Português": "Selecione [1-{count}]:",
     },
+    "menu.selection_required": {
+        "English": "Please select an option before continuing.",
+        "Español": "Seleccione una opción antes de continuar.",
+        "Português": "Selecione uma opção antes de continuar.",
+    },
     "wizard.hardware_discovery_start": {
         "English": "Starting Hardware Discovery...",
         "Español": "Iniciando detección de hardware...",

@@ -1,0 +1,107 @@
+schema: kace-board-contract/v1
+board_id: btt.skr-mini-e3.v3.0
+display_name: BTT SKR Mini E3 v3.0
+manufacturer: BIGTREETECH
+family_id: btt.skr-mini-e3
+revision: "3.0"
+aliases:
+  official_config_filenames: [generic-bigtreetech-skr-mini-e3-v3.0.cfg]
+  legacy_exact: [skr-mini-e3-v3.0]
+upstream:
+  source_contract: kace-klipper-source/v1
+  repository: https://github.com/Klipper3d/klipper.git
+  validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+  config_path: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg
+  config_sha256_lf: 26a86aacfab3a03e9d59e576b3382e31ba988cff27bb2b584583785e70d6e2b5
+  header_sha256_lf: 78ad49852ae876e28437658ebc9fe35dd3e79a0396bcbe4e38a33ec475afcdad
+  header_text: |+
+    # This file contains common pin mappings for the BIGTREETECH SKR mini
+    # E3 v3.0. To use this config, the firmware should be compiled for the
+    # STM32G0B1 with a "8KiB bootloader" and USB communication.
+
+    # The "make flash" command does not work on the SKR mini E3. Instead,
+    # after running "make", copy the generated "out/klipper.bin" file to a
+    # file named "firmware.bin" on an SD card and then restart the SKR
+    # mini E3 with that SD card.
+
+    # See docs/Config_Reference.md for a description of parameters.
+
+hardware_variants:
+  - id: stm32g0b1
+    processor:
+      architecture: stm32
+      architecture_kconfig: CONFIG_MACH_STM32
+      model: STM32G0B1
+      model_kconfig: CONFIG_MACH_STM32G0B1
+      resolved_mcu: stm32g0b1xx
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg, detail: Official processor choice}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_MCU, detail: Resolved MCU value}
+    bootloader:
+      label: 8KiB bootloader
+      selection: {CONFIG_STM32_FLASH_START_2000: true}
+      application_address: "0x8002000"
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg, detail: Official bootloader choice}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved application address}
+    clock:
+      label: 8 MHz crystal (Kconfig default)
+      selection: {}
+      reference_hz: 8000000
+      provenance:
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_CLOCK_REF_FREQ, detail: Default STM32 reference}
+    build_targets:
+      - id: usb-pa11-pa12
+        support_status: RUNTIME_SUPPORTED
+        transport:
+          kind: USB
+          selection: {CONFIG_STM32_USB_PA11_PA12: true}
+          endpoint: {peripheral: USB, dm_pin: PA11, dp_pin: PA12, application_vid_pid: "1d50:614e"}
+          host_connection: usb-device
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg, detail: Official USB transport}
+            - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_STM32_USB_PA11_PA12, detail: Concrete USB pins}
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_USB_VENDOR_ID/CONFIG_USB_DEVICE_ID, detail: Default Klipper application USB identity at the validated commit}
+        low_level:
+          enabled: false
+          startup_gpio: []
+          provenance:
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_LOW_LEVEL_OPTIONS, detail: No low-level option requested by header}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_MACH_STM32: true
+          CONFIG_MACH_STM32G0B1: true
+          CONFIG_STM32_FLASH_START_2000: true
+          CONFIG_STM32_USB_PA11_PA12: true
+        resolved_assertions:
+          CONFIG_MCU: stm32g0b1xx
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x8002000"
+          CONFIG_CLOCK_REF_FREQ: 8000000
+          CONFIG_CLOCK_FREQ: 64000000
+          CONFIG_USBSERIAL: true
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg, detail: Requested choices}
+          - {source: klipper-kconfig, reference: src/stm32/Kconfig, detail: Exact symbols and resolved values}
+        artifact:
+          native_path: out/klipper.bin
+          native_filename: klipper.bin
+          format: BIN
+          final_filename: {strategy: fixed, value: firmware.bin, required_suffix: .bin}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg, detail: Native and required final filenames}
+        flash:
+          strategy: SD_CARD
+          steps: [VALIDATE_ARTIFACT, ASSIGN_FINAL_FILENAME, VERIFY_FILENAME_POLICY, PREPARE_MEDIA, COPY_TO_MEDIA, VERIFY_MEDIA_CHECKSUM, SAFE_EJECT, REQUIRE_POWER_OFF, REQUIRE_MEDIA_INSERTED, REQUIRE_POWER_ON, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command: null
+          options: {destination: sd-card-root, required_filesystems: [vfat], require_removable: true, make_flash_supported: false, restart_board: true}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg, detail: Official SD-card flashing procedure}
+            - {source: kace-safety-policy, reference: firmware/boards/executor.py, detail: Phase 4B requires a removable FAT filesystem mounted at its root}
+warnings:
+  - id: make-flash-unsupported
+    severity: WARNING
+    text: make flash does not work; use firmware.bin at the SD-card root and restart the board.
+    incompatible_board_ids: []
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-mini-e3-v3.0.cfg, detail: Explicit upstream warning}
+contract_digest: d8d37112b317a29db7b40ef3194d4d6e7bc670618167c597ef5e0806beea8a37

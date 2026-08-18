@@ -37,10 +37,10 @@ _PRESERVED_OPTIONS = {
         "square_corner_velocity", "minimum_cruise_ratio",
     },
     "extruder": {
-        "control", "pid_kp", "pid_ki", "pid_kd", "pressure_advance",
+        "pid_kp", "pid_ki", "pid_kd", "pressure_advance",
         "pressure_advance_smooth_time", "nozzle_diameter", "filament_diameter",
     },
-    "heater_bed": {"control", "pid_kp", "pid_ki", "pid_kd"},
+    "heater_bed": {"pid_kp", "pid_ki", "pid_kd"},
     "force_move": {"enable_force_move"},
 }
 _PRESERVED_PREFIX_OPTIONS = {
@@ -155,11 +155,18 @@ def _replace_or_insert_option(text: str, section: str, option: str, value: str) 
 
 def _carry_user_tuning(generated: str, existing_root: str) -> str:
     existing = _section_options(existing_root)
-    generated_sections = {name.casefold() for name, _, _ in _section_spans(generated)}
+    generated_options = _section_options(generated)
+    generated_sections = set(generated_options)
     for section, options in existing.items():
         if section not in generated_sections:
             continue
         for option in _preserved_names(section):
+            if (
+                section in {"extruder", "heater_bed"}
+                and option.startswith("pid_")
+                and generated_options.get(section, {}).get("control", "").casefold() != "pid"
+            ):
+                continue
             if option in options:
                 generated = _replace_or_insert_option(generated, section, option, options[option])
     return generated

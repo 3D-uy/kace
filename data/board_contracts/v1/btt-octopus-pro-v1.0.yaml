@@ -1,0 +1,202 @@
+schema: kace-board-contract/v1
+board_id: btt.octopus-pro.v1.0
+display_name: BTT Octopus Pro v1.0
+manufacturer: BIGTREETECH
+family_id: btt.octopus-pro
+revision: "1.0"
+aliases:
+  official_config_filenames: [generic-bigtreetech-octopus-pro-v1.0.cfg]
+  legacy_exact: [octopus-pro-v1.0]
+upstream:
+  source_contract: kace-klipper-source/v1
+  repository: https://github.com/Klipper3d/klipper.git
+  validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+  config_path: config/generic-bigtreetech-octopus-pro-v1.0.cfg
+  config_sha256_lf: 059491cc40df909403b4a6bafb715d6b112c9d5e5e996468a1e20df76ef7c71d
+  header_sha256_lf: bd9e04ca4876f2d91e4edfd348e9dc4f6ea73fb6258548aea531ff544fe2af29
+  header_text: |+
+    # This file contains common pin mappings for the BigTreeTech Octopus
+    # Pro v1.0 board.
+
+    # Important! Do not use this config with an Octopus Pro v1.1 board as
+    # doing so could result in a heater being inadvertently enabled.
+
+    # To use this config, start by identifying the micro-controller on the
+    # board - it may be an STM32F446, STM32F429, or an STM32H723.  Select
+    # the appropriate micro-controller in "make menuconfig" and select
+    # "Enable low-level configuration options". For STM32F446 boards the
+    # firmware should be compiled with a "32KiB bootloader" and a "12MHz
+    # crystal" clock reference. For STM32F429 boards use a "32KiB
+    # bootloader" and an "8MHz crystal". For STM32H723 boards use a
+    # "128KiB bootloader" and a "25Mhz crystal".
+
+    # See docs/Config_Reference.md for a description of parameters.
+
+hardware_variants:
+  - id: stm32f446
+    processor:
+      architecture: stm32
+      architecture_kconfig: CONFIG_MACH_STM32
+      model: STM32F446
+      model_kconfig: CONFIG_MACH_STM32F446
+      resolved_mcu: stm32f446xx
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: One of three physical MCU variants}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_MCU, detail: Resolved MCU value}
+    bootloader:
+      label: 32KiB bootloader
+      selection: {CONFIG_STM32_FLASH_START_8000: true}
+      application_address: "0x8008000"
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Variant-specific offset}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved address}
+    clock:
+      label: 12 MHz crystal
+      selection: {CONFIG_STM32_CLOCK_REF_12M: true}
+      reference_hz: 12000000
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Variant-specific clock}
+    build_targets:
+      - id: usb-pa11-pa12
+        support_status: CONFIG_ONLY
+        transport: &octopus_usb
+          kind: USB
+          selection: {CONFIG_STM32_USB_PA11_PA12: true}
+          endpoint: {peripheral: USB, dm_pin: PA11, dp_pin: PA12}
+          host_connection: usb-device
+          provenance:
+            - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_STM32_USB_PA11_PA12, detail: Default concrete transport; the official board header does not state one}
+        low_level: &octopus_low_level
+          enabled: true
+          startup_gpio: []
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Low-level options explicitly required; no startup GPIO stated}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: true
+          CONFIG_MACH_STM32: true
+          CONFIG_MACH_STM32F446: true
+          CONFIG_STM32_FLASH_START_8000: true
+          CONFIG_STM32_CLOCK_REF_12M: true
+          CONFIG_STM32_USB_PA11_PA12: true
+        resolved_assertions:
+          CONFIG_MCU: stm32f446xx
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x8008000"
+          CONFIG_CLOCK_REF_FREQ: 12000000
+          CONFIG_USBSERIAL: true
+        kconfig_provenance: &octopus_kconfig_provenance
+          - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: MCU-specific build choices}
+          - {source: klipper-kconfig, reference: src/stm32/Kconfig, detail: Exact symbols and resolved values}
+        artifact: &octopus_artifact
+          native_path: out/klipper.bin
+          native_filename: klipper.bin
+          format: BIN
+          final_filename: {strategy: native, required_suffix: .bin}
+          provenance:
+            - {source: klipper-build-system, reference: src/stm32/Makefile, detail: Native STM32 build artifact; filename is not specified by board header}
+        flash: &octopus_flash
+          strategy: PREPARE_ONLY
+          steps: [VALIDATE_ARTIFACT, OPERATOR_ACTION_REQUIRED]
+          command: null
+          options: {reason: official-config-header-omits-flashing-procedure}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: No flashing method or command is supplied}
+  - id: stm32f429
+    processor:
+      architecture: stm32
+      architecture_kconfig: CONFIG_MACH_STM32
+      model: STM32F429
+      model_kconfig: CONFIG_MACH_STM32F429
+      resolved_mcu: stm32f429xx
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: One of three physical MCU variants}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_MCU, detail: Resolved MCU value}
+    bootloader:
+      label: 32KiB bootloader
+      selection: {CONFIG_STM32_FLASH_START_8000: true}
+      application_address: "0x8008000"
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Variant-specific offset}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved address}
+    clock:
+      label: 8 MHz crystal
+      selection: {CONFIG_STM32_CLOCK_REF_8M: true}
+      reference_hz: 8000000
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Variant-specific clock}
+    build_targets:
+      - id: usb-pa11-pa12
+        support_status: CONFIG_ONLY
+        transport: *octopus_usb
+        low_level: *octopus_low_level
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: true
+          CONFIG_MACH_STM32: true
+          CONFIG_MACH_STM32F429: true
+          CONFIG_STM32_FLASH_START_8000: true
+          CONFIG_STM32_CLOCK_REF_8M: true
+          CONFIG_STM32_USB_PA11_PA12: true
+        resolved_assertions:
+          CONFIG_MCU: stm32f429xx
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x8008000"
+          CONFIG_CLOCK_REF_FREQ: 8000000
+          CONFIG_USBSERIAL: true
+        kconfig_provenance: *octopus_kconfig_provenance
+        artifact: *octopus_artifact
+        flash: *octopus_flash
+  - id: stm32h723
+    processor:
+      architecture: stm32
+      architecture_kconfig: CONFIG_MACH_STM32
+      model: STM32H723
+      model_kconfig: CONFIG_MACH_STM32H723
+      resolved_mcu: stm32h723xx
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: One of three physical MCU variants}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_MCU, detail: Resolved MCU value}
+    bootloader:
+      label: 128KiB bootloader
+      selection: {CONFIG_STM32_FLASH_START_20000: true}
+      application_address: "0x8020000"
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Variant-specific offset}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved address}
+    clock:
+      label: 25 MHz crystal
+      selection: {CONFIG_STM32_CLOCK_REF_25M: true}
+      reference_hz: 25000000
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Variant-specific clock}
+    build_targets:
+      - id: usb-pa11-pa12
+        support_status: CONFIG_ONLY
+        transport: *octopus_usb
+        low_level: *octopus_low_level
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: true
+          CONFIG_MACH_STM32: true
+          CONFIG_MACH_STM32H723: true
+          CONFIG_STM32_FLASH_START_20000: true
+          CONFIG_STM32_CLOCK_REF_25M: true
+          CONFIG_STM32_USB_PA11_PA12: true
+        resolved_assertions:
+          CONFIG_MCU: stm32h723xx
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x8020000"
+          CONFIG_CLOCK_REF_FREQ: 25000000
+          CONFIG_USBSERIAL: true
+        kconfig_provenance: *octopus_kconfig_provenance
+        artifact: *octopus_artifact
+        flash: *octopus_flash
+warnings:
+  - id: incompatible-with-v1.1
+    severity: CRITICAL
+    text: Do not use this v1.0 contract or official pin config with Octopus Pro v1.1; a heater may be inadvertently enabled.
+    incompatible_board_ids: [btt.octopus-pro.v1.1]
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Explicit safety warning}
+  - id: flashing-procedure-unknown
+    severity: WARNING
+    text: The official config header does not define a flashing procedure, filename, or restart sequence; targets are CONFIG_ONLY.
+    incompatible_board_ids: []
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-bigtreetech-octopus-pro-v1.0.cfg, detail: Information absent from reviewed upstream header}
+contract_digest: fb5cec4f73c214af86b6b8eb4b47834ba21cfab93ae8bb74aafe5456f0c20c04

@@ -808,6 +808,33 @@ class TestGenerateConfigThermistors(unittest.TestCase):
         self.assertIn("sensor_type: NTC 100K beta 3950", output)
 
 
+@_skip_no_jinja2
+class TestGenerateConfigControlAndCalibration(unittest.TestCase):
+
+    def test_watermark_bed_omits_pid_values_and_probe_calibration(self):
+        output = _generate(_parsed(), _user(bed_control="watermark", probe="None"))
+        bed = output.split("[heater_bed]", 1)[1].split("[", 1)[0]
+        self.assertIn("control: watermark", bed)
+        self.assertNotIn("pid_Kp", bed)
+        self.assertNotIn("pid_Ki", bed)
+        self.assertNotIn("pid_Kd", bed)
+        self.assertNotIn("PROBE_CALIBRATE", output)
+        self.assertIn("Z_ENDSTOP_CALIBRATE", output)
+
+    def test_pid_bed_keeps_pid_values(self):
+        output = _generate(_parsed(), _user(bed_control="pid"))
+        bed = output.split("[heater_bed]", 1)[1].split("[", 1)[0]
+        self.assertIn("control: pid", bed)
+        self.assertIn("pid_Kp", bed)
+        self.assertIn("PID_CALIBRATE for heater bed", output)
+
+    def test_probe_configuration_uses_probe_calibrate(self):
+        parsed = _parsed(bltouch={"sensor_pin": "^PB2", "control_pin": "PB3"})
+        output = _generate(parsed, _user(probe="BLTouch"))
+        self.assertIn("PROBE_CALIBRATE", output)
+        self.assertNotIn("Z_ENDSTOP_CALIBRATE", output)
+
+
 # ── generate_config() — advanced section passthrough ─────────────────────────
 
 @_skip_no_jinja2

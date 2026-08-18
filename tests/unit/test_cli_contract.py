@@ -28,6 +28,20 @@ class TestCliContract(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("unrecognized arguments: --not-a-kace-option", result.stderr)
 
+    def test_physical_board_contract_flag_is_explicit_and_not_auto_compatible(self):
+        source = (ROOT / "kace.py").read_text(encoding="utf-8")
+        self.assertIn('"--board-contract-sd-deploy"', source)
+        self.assertIn('os.environ["KACE_BOARD_CONTRACT_SD_DEPLOY"] = "1"', source)
+        result = subprocess.run(
+            [
+                sys.executable, str(ROOT / "kace.py"),
+                "--auto", "--board-contract-sd-deploy",
+            ],
+            cwd=ROOT, capture_output=True, text=True, timeout=10, check=False,
+        )
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertIn("cannot be combined with --auto", result.stderr)
+
     def test_cli_does_not_use_parse_known_args(self):
         source = (ROOT / "kace.py").read_text(encoding="utf-8")
         self.assertNotIn("parse_known_args", source)

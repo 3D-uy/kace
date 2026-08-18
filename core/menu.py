@@ -8,8 +8,10 @@ reliably in any environment: true TTY, bridged PTY, xterm.js SSH, pipes.
 import sys
 import os
 import getpass
+import shutil
+import textwrap
 from core.exceptions import WizardExit
-from core.terminal import ERROR, INPUT, QUESTION, RESET
+from core.terminal import ERROR, INPUT, QUESTION, RESET, WARNING
 from core.translations import t
 
 class Choice:
@@ -155,12 +157,35 @@ def _check_questionary_mock(helper_name, prompt):
     return _MOCK_DEFAULT
 
 
-def numbered_select(prompt, choices, default=0):
+def _wrapped_prompt_lines(prompt, indent="  "):
+    """Wrap a menu question to the visible terminal width.
+
+    Wrapping happens before ANSI styling is applied so colour escape sequences
+    do not count toward the visible width.  Long Klipper identifiers are kept
+    intact whenever the terminal is wide enough to display them.
+    """
+    columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    width = max(20, columns - len(indent))
+    lines = []
+    for source_line in str(prompt).splitlines() or [""]:
+        lines.extend(textwrap.wrap(
+            source_line,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""])
+    return lines
+
+
+def numbered_select(prompt, choices, default=0, require_explicit=False):
     """
     Replace questionary.select().
     choices: list of str, list of (label, value) tuples, list of dicts, or Separators.
     Returns the selected value (str or tuple value).
     default: 0-based index used on empty input.
+    require_explicit: when true, an empty input re-prompts instead of silently
+        accepting the default.  Automatic/non-interactive mode still uses the
+        default because it cannot request input.
     """
     mock_val = _check_questionary_mock("numbered_select", prompt)
     if mock_val is not _MOCK_DEFAULT:
@@ -176,7 +201,9 @@ def numbered_select(prompt, choices, default=0):
     if _is_auto():
         return selectable_choices[default][1]
         
-    print(f"\n  {QUESTION}{prompt}{RESET}")
+    print()
+    for prompt_line in _wrapped_prompt_lines(prompt):
+        print(f"  {QUESTION}{prompt_line}{RESET}")
     
     selectable_idx = 1
     selectable_map = {}
@@ -205,6 +232,10 @@ def numbered_select(prompt, choices, default=0):
             # handler in kace.py gets a chance to clean up and log before exit.
             raise WizardExit
             
+        if not val and require_explicit:
+            print(f"  {WARNING}{t('menu.selection_required')}{RESET}")
+            continue
+
         if not val:
             return default_val
             
@@ -274,7 +305,10 @@ def yes_no(prompt, default=False):
         return default
         
     prompt = prompt.rstrip(" :")
-    indicator = "[Y/n]" if default else "[y/N]"
+    from core.translations import get_lang
+    language = get_lang()
+    affirmative = "s" if language in ("Español", "Português") else "y"
+    indicator = f"[{affirmative.upper()}/n]" if default else f"[{affirmative}/N]"
     full_prompt = f"  {prompt} {indicator}: "
     while True:
         try:
@@ -287,12 +321,13 @@ def yes_no(prompt, default=False):
         if not val:
             return default
             
-        if val in ('y', 'yes'):
+        if val in ('y', 'yes', 's', 'si', 'sí', 'sim'):
             return True
-        if val in ('n', 'no'):
+        if val in ('n', 'no', 'não', 'nao'):
             return False
             
-        print(f"  {ERROR}Please enter 'y' or 'n'.{RESET}")
+        expected = "'s' o 'n'" if language == "Español" else ("'s' ou 'n'" if language == "Português" else "'y' or 'n'")
+        print(f"  {ERROR}Please enter {expected}.{RESET}")
 
 def autocomplete_select(prompt, choices, default=0):
     """

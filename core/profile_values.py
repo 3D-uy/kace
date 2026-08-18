@@ -13,6 +13,7 @@ class ValueProvenance(str, Enum):
     PROFILE = "PROFILE"
     USER_OVERRIDE = "USER_OVERRIDE"
     SAFE_DEFAULT = "SAFE_DEFAULT"
+    INFERRED = "INFERRED"
     UNRESOLVED = "UNRESOLVED"
 
 
@@ -153,6 +154,30 @@ def mark_profile_values(user_data: dict, parsed_profile: Mapping[str, object]) -
     user_data["_value_provenance"] = provenance
 
 
+def infer_homing_positive_dir(position_endstop, position_min, position_max) -> Optional[str]:
+    """Infer Klipper's homing direction when the endstop is nearer one limit.
+
+    A midpoint endstop is deliberately ambiguous.  Returning ``None`` makes
+    the wizard request an explicit answer instead of guessing a motion-safety
+    setting.
+    """
+    try:
+        endstop = float(position_endstop)
+        minimum = float(position_min)
+        maximum = float(position_max)
+    except (TypeError, ValueError):
+        return None
+    if not minimum < maximum:
+        return None
+    distance_to_min = abs(endstop - minimum)
+    distance_to_max = abs(maximum - endstop)
+    if distance_to_min < distance_to_max:
+        return "False"
+    if distance_to_max < distance_to_min:
+        return "True"
+    return None
+
+
 def resolve_generation_values(
     parsed_data: Mapping[str, object], user_data: Mapping[str, object]
 ) -> tuple[dict[str, str], dict[str, str]]:
@@ -182,6 +207,12 @@ def resolve_generation_values(
                 provenance[key] = ValueProvenance.PROFILE.value
             else:
                 provenance[key] = ValueProvenance.UNRESOLVED.value
+        elif explicit_source == ValueProvenance.INFERRED.value:
+            if supplied not in (None, ""):
+                resolved[key] = str(supplied).strip()
+                provenance[key] = ValueProvenance.INFERRED.value
+            else:
+                provenance[key] = ValueProvenance.UNRESOLVED.value
         elif explicit_source == ValueProvenance.UNRESOLVED.value:
             provenance[key] = ValueProvenance.UNRESOLVED.value
         elif not explicit_provenance and supplied not in (None, ""):
@@ -206,6 +237,19 @@ def resolve_generation_values(
         if provenance.get(maximum_key) == ValueProvenance.SAFE_DEFAULT.value:
             resolved[maximum_key] = resolved[size_key]
 
+    for axis in ("x", "y", "z"):
+        direction_key = f"homing_positive_dir_{axis}"
+        if provenance.get(direction_key) != ValueProvenance.UNRESOLVED.value:
+            continue
+        inferred = infer_homing_positive_dir(
+            resolved.get(f"{axis}_position_endstop"),
+            resolved.get(f"{axis}_position_min"),
+            resolved.get(f"{axis}_position_max"),
+        )
+        if inferred is not None:
+            resolved[direction_key] = inferred
+            provenance[direction_key] = ValueProvenance.INFERRED.value
+
     return resolved, provenance
 
 
@@ -218,4 +262,21 @@ def require_resolved_safety_values(provenance: Mapping[str, str]) -> None:
     if unresolved:
         raise GenerationError(
             "Safety-critical configuration values are unresolved: " + ", ".join(unresolved) + "."
+        )
+
+
+def require_resolved_homing_values(
+    provenance: Mapping[str, str], *, uses_virtual_z_endstop: bool
+) -> None:
+    axes = ("x", "y") if uses_virtual_z_endstop else ("x", "y", "z")
+    unresolved = [
+        f"homing_positive_dir_{axis}"
+        for axis in axes
+        if provenance.get(f"homing_positive_dir_{axis}") == ValueProvenance.UNRESOLVED.value
+    ]
+    if unresolved:
+        raise GenerationError(
+            "Homing direction cannot be inferred safely; answer the wizard question for: "
+            + ", ".join(unresolved)
+            + "."
         )

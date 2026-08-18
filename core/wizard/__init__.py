@@ -64,6 +64,7 @@ from core.wizard.steps.motion import (
     _step_x_limits,
     _step_y_limits,
     _step_z_limits,
+    _step_homing_directions,
     _get_printer_profiles,
     _load_printer_profiles,
     print_detected_profile_summary,
@@ -369,6 +370,7 @@ def run_wizard(user_data_arg=None):
         "x_limits",
         "y_limits",
         "z_limits",
+        "homing_directions",
         "probe",
         "custom_probe",
         "custom_probe_offset_preview",
@@ -416,7 +418,7 @@ def run_wizard(user_data_arg=None):
         "profile_review": {
             "prompt": lambda ud: _step_profile_review(ud),
             # After review always continue to the next authoritative-skip steps.
-            "next":   lambda ans, ud: "probe" if ans == "confirm" else _BACK
+            "next":   lambda ans, ud: "homing_directions" if ans == "confirm" else _BACK
         },
         "kinematics": {
             "prompt": lambda ud: _step_kinematics(ud)
@@ -438,6 +440,9 @@ def run_wizard(user_data_arg=None):
         },
         "z_limits": {
             "prompt": lambda ud: _step_z_limits(ud)
+        },
+        "homing_directions": {
+            "prompt": lambda ud: _step_homing_directions(ud)
         },
         "probe": {
             "prompt": lambda ud: _step_probe(ud),

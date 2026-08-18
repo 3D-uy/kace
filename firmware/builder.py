@@ -364,3 +364,28 @@ def build_firmware_orchestrator(
                 wrapper_dir_obj.cleanup()
             except Exception:
                 pass
+
+
+def build_board_contract_experimental(
+    board_alias,
+    hardware_variant_id,
+    build_target_id,
+    *,
+    context,
+    catalog=None,
+):
+    """Opt-in BoardContract build path; unused by normal runtime decisions.
+
+    Importing lazily keeps the legacy builder and its existing callers
+    unchanged. The experimental implementation always creates an isolated
+    checkout and returns an immutable BuildProof.
+    """
+    from .boards.kconfig import build_board_contract_shadow
+
+    return build_board_contract_shadow(
+        board_alias,
+        hardware_variant_id,
+        build_target_id,
+        context=context,
+        catalog=catalog,
+    )

@@ -208,6 +208,15 @@ def run_yaml_check(verbose=False):
     except Exception as exc:
         errors.append(f"firmware_deployments.yaml is invalid: {exc}")
 
+    # BoardContract is runtime-authoritative for explicitly activated targets;
+    # malformed or ambiguous catalog data must fail the same integrity check.
+    board_contracts = []
+    try:
+        from firmware.boards.catalog import load_default_catalog
+        board_contracts = load_default_catalog(refresh=True).contracts
+    except Exception as exc:
+        errors.append(f"BoardContract catalog is invalid: {exc}")
+
     if errors:
         print(f"\033[91m[FAIL]\033[0m boards.yaml has {len(errors)} error(s):")
         for err in errors:
@@ -219,7 +228,8 @@ def run_yaml_check(verbose=False):
     print(f"\033[92m[PASS]\033[0m boards.yaml is valid.")
     print(
         f"       {n_boards} board entries, {n_firmware} firmware patterns, "
-        f"{len(deployment_profiles)} deployment profiles."
+        f"{len(deployment_profiles)} deployment profiles, "
+        f"{len(board_contracts)} versioned board contracts."
     )
     print("=" * 50)
     return True

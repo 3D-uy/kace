@@ -4,6 +4,9 @@ The configured device name is persisted by bootstrap. Runtime state always
 comes from Moonraker's Power API; this module never accesses GPIO directly.
 """
 
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
 import re
 import time
 
@@ -18,6 +21,33 @@ _DEVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 class PowerControllerError(RuntimeError):
     """Raised when Moonraker cannot provide a safe, verified power result."""
+
+
+class PrinterPowerState(str, Enum):
+    ON = "ON"
+    OFF = "OFF"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class ManualPowerResult:
+    """One operator-initiated observation or relay command result."""
+
+    state: PrinterPowerState
+    timestamp: str
+    detail: str
+    requested_action: str = ""
+    confirmed: bool = False
+
+    @property
+    def display(self) -> str:
+        return f"Printer power: {self.state.value}"
+
+
+def _power_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z"
+    )
 
 
 def load_power_config(path: str = DEFAULT_CONFIG_PATH) -> dict:
@@ -124,6 +154,71 @@ class MoonrakerPowerController:
         return self._set_and_confirm("off", timeout)
 
 
+class ManualRelayControl:
+    """Operator-only façade over the existing Moonraker controller.
+
+    Merely constructing or refreshing this object cannot switch the relay.
+    The two mutating methods are deliberately named ``request_*`` and are
+    intended to be called only from direct UI actions.
+    """
+
+    def __init__(self, controller: MoonrakerPowerController):
+        if not isinstance(controller, MoonrakerPowerController):
+            raise TypeError("manual relay control requires MoonrakerPowerController")
+        self.controller = controller
+
+    @staticmethod
+    def _state(value: str) -> PrinterPowerState:
+        return {
+            "on": PrinterPowerState.ON,
+            "off": PrinterPowerState.OFF,
+        }.get(str(value or "").lower(), PrinterPowerState.UNKNOWN)
+
+    def refresh(self) -> ManualPowerResult:
+        try:
+            raw = self.controller.get_status()
+            state = self._state(raw)
+            detail = (
+                f"Moonraker confirmed {raw}"
+                if state is not PrinterPowerState.UNKNOWN
+                else f"Moonraker reported non-terminal state {raw!r}"
+            )
+        except (PowerControllerError, OSError, TimeoutError) as exc:
+            state = PrinterPowerState.UNKNOWN
+            detail = str(exc)
+        return ManualPowerResult(state, _power_timestamp(), detail)
+
+    def _request(self, action: str, timeout: float) -> ManualPowerResult:
+        expected = PrinterPowerState.ON if action == "ON" else PrinterPowerState.OFF
+        command = self.controller.power_on if action == "ON" else self.controller.power_off
+        try:
+            command(timeout=timeout)
+            # Do not trust command completion alone: perform a fresh read and
+            # report success only when Moonraker confirms the requested state.
+            observed = self.controller.get_status()
+            state = self._state(observed)
+            confirmed = state is expected
+            detail = (
+                f"Moonraker confirmed relay {action}"
+                if confirmed
+                else f"relay command returned but Moonraker reports {observed!r}"
+            )
+        except (PowerControllerError, OSError, TimeoutError) as exc:
+            state = PrinterPowerState.UNKNOWN
+            confirmed = False
+            detail = str(exc)
+        return ManualPowerResult(
+            state, _power_timestamp(), detail,
+            requested_action=action, confirmed=confirmed,
+        )
+
+    def request_on(self, timeout: float = 30.0) -> ManualPowerResult:
+        return self._request("ON", timeout)
+
+    def request_off(self, timeout: float = 30.0) -> ManualPowerResult:
+        return self._request("OFF", timeout)
+
+
 def configured_power_controller(
     host: str = "localhost",
     port: int = DEFAULT_PORT,
@@ -137,3 +232,9 @@ def configured_power_controller(
     return MoonrakerPowerController(
         config["device"], host=host, port=port, api_key=api_key
     )
+
+
+def configured_manual_relay_control(**kwargs):
+    """Return the operator façade for the already configured controller."""
+    controller = configured_power_controller(**kwargs)
+    return ManualRelayControl(controller) if controller is not None else None

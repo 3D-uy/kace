@@ -77,6 +77,18 @@ class TestBootstrapInstallContract(unittest.TestCase):
         self.assertIn('INSTALL_REF="${KACE_SOURCE_REF:-}"', installer)
         self.assertNotRegex(installer, r'KACE_SOURCE_REF:-(?:main|master)')
 
+    def test_installer_version_comes_only_from_published_version_file(self):
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertNotRegex(
+            installer,
+            r'(?m)^(?:KACE_)?VERSION="v\d+\.\d+\.\d+(?:[^"]*)"$',
+        )
+        self.assertIn(
+            'KACE_VERSION="v$(tr -d \'\\r\\n\' < "$INSTALL_DIR/VERSION")"',
+            installer,
+        )
+        self.assertIn("KACE ${KACE_VERSION} installed successfully", installer)
+
     def test_pinned_git_revision_matches_contract_hash(self):
         result = subprocess.run(
             ["git", "show", f"{self.install_ref}:install.sh"],
@@ -89,10 +101,10 @@ class TestBootstrapInstallContract(unittest.TestCase):
 
     def test_failed_install_is_a_terminal_bootstrap_error(self):
         failure_block = self.script.split('if [ "$INSTALL_OK" -ne 1 ]; then', 1)[1]
-        failure_block = failure_block.split("fi", 1)[0]
+        failure_block = failure_block.split("\nfi\n", 1)[0]
         self.assertIn("=== KACE_BOOTSTRAP_ERROR: KACE_INSTALL ===", failure_block)
         self.assertIn('exit "$INSTALL_EXIT"', failure_block)
-        for exit_code in (2, 10, 20, 30, 40):
+        for exit_code in (2, 10, 20, 30, 40, 41):
             self.assertRegex(failure_block, rf"(?m)^\s*{exit_code}\)\s*$")
 
     def test_installed_repository_uses_same_pinned_revision_and_launches_wizard(self):

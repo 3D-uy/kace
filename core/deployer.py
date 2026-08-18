@@ -525,6 +525,37 @@ def _config_result_to_workflow(result):
     return failed(WorkflowOutcome.DEPLOYMENT_FAILED, result.detail)
 
 
+def _interactive_configuration_review(review, yes_no_fn, *, destination=False) -> bool:
+    from core.configuration_review import render_configuration_review
+    from core.translations import get_lang
+
+    language = get_lang()
+    print("\n" + render_configuration_review(review, language=language))
+    if review.diff:
+        advanced_prompt = {
+            "English": "Show full technical diff?",
+            "Español": "¿Mostrar el diff técnico completo?",
+            "Português": "Mostrar o diff técnico completo?",
+        }.get(language, "Show full technical diff?")
+        if yes_no_fn(advanced_prompt, default=False):
+            print("\n--- Technical diff ---")
+            print(review.diff)
+    if not review.validation.valid:
+        return False
+    if not review.changed_files:
+        return True
+    prompts = {
+        "English": "Write this managed configuration to the selected destination?" if destination else "Apply this configuration to Klipper?",
+        "Español": "¿Escribir esta configuración gestionada en el destino seleccionado?" if destination else "¿Aplicar esta configuración a Klipper?",
+        "Português": "Gravar esta configuração gerenciada no destino selecionado?" if destination else "Aplicar esta configuração ao Klipper?",
+    }
+    return bool(yes_no_fn(prompts.get(language, prompts["English"]), default=False))
+
+
+def _review_configuration_export(review, yes_no_fn) -> bool:
+    return _interactive_configuration_review(review, yes_no_fn, destination=True)
+
+
 def _run_config_transaction(transport, user_data, activation, generated=None):
     from core.config_transaction import ConfigDeploymentTransaction
     from core.menu import yes_no
@@ -536,17 +567,15 @@ def _run_config_transaction(transport, user_data, activation, generated=None):
             "generated hardware configuration failed deployment preflight.",
         )
 
-    def _show_diff(diff):
-        print("\n\033[96m[*]\033[0m Configuration dry-run diff:")
-        print(diff or "(no changes)")
+    def _review_configuration(review):
+        return _interactive_configuration_review(review, yes_no)
 
     transaction = ConfigDeploymentTransaction(
         transport,
         hardware,
         macros,
         activation=activation,
-        confirm=lambda _diff: bool(yes_no("Apply this configuration diff?", default=False)),
-        output=_show_diff,
+        review=_review_configuration,
         board=user_data.get("board", ""),
         kace_version=_KACE_VERSION,
     )
@@ -715,14 +744,7 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
                 hardware,
                 macros,
                 activation="none",
-                confirm=lambda _diff: bool(yes_no(
-                    "Write this managed configuration to the selected destination?",
-                    default=False,
-                )),
-                output=lambda diff: print(
-                    "\n\033[96m[*]\033[0m Configuration dry-run diff:\n"
-                    + (diff or "(no changes)")
-                ),
+                review=lambda review: _review_configuration_export(review, yes_no),
                 board=user_data.get("board", ""),
                 kace_version=_KACE_VERSION,
             )
@@ -1016,13 +1038,16 @@ def deploy_firmware_installation(user_data):
         config_plan = build_managed_config_plan(
             generated_hardware, generated_macros, remote_files
         )
-        diff = config_plan.dry_run_diff()
-        print("\n\033[96m[*]\033[0m Configuration dry-run diff:")
-        print(diff or "(no changes)")
-        for warning in config_plan.warnings:
-            print(f"\033[93m[!] {warning}\033[0m")
-        if config_plan.changed_artifacts and not yes_no(
-            "Apply this configuration diff after firmware verification?", default=False
+        from core.configuration_review import build_configuration_review
+        configuration_review = build_configuration_review(config_plan)
+        if not configuration_review.validation.valid:
+            _interactive_configuration_review(configuration_review, yes_no)
+            return DeployResult(
+                DeployState.FAILED_PRECONDITION,
+                "semantic configuration validation failed before firmware deployment",
+            )
+        if config_plan.changed_artifacts and not _interactive_configuration_review(
+            configuration_review, yes_no
         ):
             return DeployResult(DeployState.ABORTED, "configuration deployment cancelled")
         snapshot = None

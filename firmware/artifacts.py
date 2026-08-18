@@ -7,6 +7,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass
 from enum import Enum
+import re
 from typing import Optional
 
 from .identity import FirmwareBuildIdentity, FirmwareBuildInputs
@@ -60,6 +61,33 @@ class BuildArtifact:
     provenance: BuildProvenance
     flashable: bool
     firmware_identity: Optional[FirmwareBuildIdentity] = None
+    # BoardContract identity is additive and empty for every legacy build.
+    # A populated tuple is only produced after a BuildProof has been checked.
+    board_id: str = ""
+    hardware_variant_id: str = ""
+    build_target_id: str = ""
+    board_contract_digest: str = ""
+    klipper_commit: str = ""
+    build_proof_digest: str = ""
+
+    def __post_init__(self) -> None:
+        identity = (
+            self.board_id,
+            self.hardware_variant_id,
+            self.build_target_id,
+            self.board_contract_digest,
+            self.klipper_commit,
+            self.build_proof_digest,
+        )
+        if any(identity) and not all(identity):
+            raise ValueError("BoardContract artifact identity must be complete or absent")
+        if all(identity):
+            if not re.fullmatch(r"[0-9a-f]{64}", self.board_contract_digest):
+                raise ValueError("board_contract_digest must be a lowercase SHA-256")
+            if not re.fullmatch(r"[0-9a-f]{40}", self.klipper_commit):
+                raise ValueError("klipper_commit must be an exact lowercase Git SHA")
+            if not re.fullmatch(r"[0-9a-f]{64}", self.build_proof_digest):
+                raise ValueError("build_proof_digest must be a lowercase SHA-256")
 
     @classmethod
     def create(
@@ -73,6 +101,12 @@ class BuildArtifact:
         mock_build: bool,
         size_warning: bool,
         build_identity: Optional[FirmwareBuildInputs] = None,
+        board_id: str = "",
+        hardware_variant_id: str = "",
+        build_target_id: str = "",
+        board_contract_digest: str = "",
+        klipper_commit: str = "",
+        build_proof_digest: str = "",
     ) -> "BuildArtifact":
         provenance = BuildProvenance.MOCK if mock_build else BuildProvenance.REAL
         digest = _sha256(path)
@@ -98,6 +132,12 @@ class BuildArtifact:
             provenance=provenance,
             flashable=bool(not mock_build and not size_warning and digest and identity is not None),
             firmware_identity=identity,
+            board_id=board_id,
+            hardware_variant_id=hardware_variant_id,
+            build_target_id=build_target_id,
+            board_contract_digest=board_contract_digest,
+            klipper_commit=klipper_commit,
+            build_proof_digest=build_proof_digest,
         )
 
     def to_dict(self) -> dict:

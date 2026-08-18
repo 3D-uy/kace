@@ -1,0 +1,108 @@
+schema: kace-board-contract/v1
+board_id: mks.robin-nano.v3
+display_name: MKS Robin Nano V3
+manufacturer: Makerbase
+family_id: mks.robin-nano
+revision: "3"
+aliases:
+  official_config_filenames: [generic-mks-robin-nano-v3.cfg]
+  legacy_exact: [mks-robin-nano-v3]
+upstream:
+  source_contract: kace-klipper-source/v1
+  repository: https://github.com/Klipper3d/klipper.git
+  validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+  config_path: config/generic-mks-robin-nano-v3.cfg
+  config_sha256_lf: b0e32b9838ae416778ae6024e290544c2c33d33bb47649432f95faee711b270d
+  header_sha256_lf: b3808059edb36cc9c826224fe3e9a81c0babfe8edc7699f709a658f04f453bf2
+  header_text: |+
+    # This file contains common pin mappings for MKS Robin Nano V3
+    # boards. To use this config, the firmware should be compiled for the
+    # stm32f407. When running "make menuconfig", select the 48KiB
+    # bootloader, and enable "USB for communication".
+
+    # The "make flash" command does not work on the MKS Robin. Instead,
+    # after running "make", copy the generated "out/klipper.bin" file to a
+    # file named "Robin_nano_v3.bin" on an SD card and then restart the
+    # MKS Robin with that SD card.
+
+    # See docs/Config_Reference.md for a description of parameters.
+
+hardware_variants:
+  - id: stm32f407
+    processor:
+      architecture: stm32
+      architecture_kconfig: CONFIG_MACH_STM32
+      model: STM32F407
+      model_kconfig: CONFIG_MACH_STM32F407
+      resolved_mcu: stm32f407xx
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-mks-robin-nano-v3.cfg, detail: Official processor choice}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_MCU, detail: Resolved MCU value}
+    bootloader:
+      label: 48KiB bootloader
+      selection: {CONFIG_STM32_FLASH_START_C000: true}
+      application_address: "0x800C000"
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-mks-robin-nano-v3.cfg, detail: Official bootloader choice}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved application address}
+    clock:
+      label: 8 MHz crystal (Kconfig default)
+      selection: {}
+      reference_hz: 8000000
+      provenance:
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_CLOCK_REF_FREQ, detail: Default reference when low-level options are not enabled}
+    build_targets:
+      - id: usb-pa11-pa12
+        support_status: RUNTIME_SUPPORTED
+        transport:
+          kind: USB
+          selection: {CONFIG_STM32_USB_PA11_PA12: true}
+          endpoint: {peripheral: USB, dm_pin: PA11, dp_pin: PA12, application_vid_pid: "1d50:614e"}
+          host_connection: usb-device
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-mks-robin-nano-v3.cfg, detail: Official USB transport}
+            - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_STM32_USB_PA11_PA12, detail: Concrete USB pins}
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_USB_VENDOR_ID/CONFIG_USB_DEVICE_ID, detail: Default Klipper application USB identity at the validated commit}
+        low_level:
+          enabled: false
+          startup_gpio: []
+          provenance:
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_LOW_LEVEL_OPTIONS, detail: Header does not request low-level options}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_MACH_STM32: true
+          CONFIG_MACH_STM32F407: true
+          CONFIG_STM32_FLASH_START_C000: true
+          CONFIG_STM32_USB_PA11_PA12: true
+        resolved_assertions:
+          CONFIG_MCU: stm32f407xx
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x800C000"
+          CONFIG_CLOCK_REF_FREQ: 8000000
+          CONFIG_CLOCK_FREQ: 168000000
+          CONFIG_USBSERIAL: true
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-mks-robin-nano-v3.cfg, detail: Requested choices}
+          - {source: klipper-kconfig, reference: src/stm32/Kconfig, detail: Exact symbols and resolved values}
+        artifact:
+          native_path: out/klipper.bin
+          native_filename: klipper.bin
+          format: BIN
+          final_filename: {strategy: fixed, value: Robin_nano_v3.bin, required_suffix: .bin}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-mks-robin-nano-v3.cfg, detail: Native and required final filenames}
+        flash:
+          strategy: SD_CARD
+          steps: [VALIDATE_ARTIFACT, ASSIGN_FINAL_FILENAME, VERIFY_FILENAME_POLICY, PREPARE_MEDIA, COPY_TO_MEDIA, VERIFY_MEDIA_CHECKSUM, SAFE_EJECT, REQUIRE_POWER_OFF, REQUIRE_MEDIA_INSERTED, REQUIRE_POWER_ON, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command: null
+          options: {destination: sd-card-root, required_filesystems: [vfat], require_removable: true, make_flash_supported: false, restart_board: true}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-mks-robin-nano-v3.cfg, detail: Official SD-card flashing procedure}
+            - {source: kace-safety-policy, reference: firmware/boards/executor.py, detail: Phase 4B requires a removable FAT filesystem mounted at its root}
+warnings:
+  - id: make-flash-unsupported
+    severity: WARNING
+    text: make flash does not work; rename to Robin_nano_v3.bin and flash from SD card.
+    incompatible_board_ids: []
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-mks-robin-nano-v3.cfg, detail: Explicit upstream warning}
+contract_digest: d6a0b25ddb56e5448899cf9c7383f8782b7a65ed07da3933f279d98a27e91fb3

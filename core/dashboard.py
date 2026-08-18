@@ -18,9 +18,6 @@ from core.exceptions import WizardExit
 from core.translations import t, set_lang, set_mode
 from core.banner import print_kace_banner
 
-from core.loader import read_version as _read_version
-_KACE_VERSION = _read_version()
-
 # ── Detection path constants (KACE / Klipper defaults) ──────────
 # Centralised here so future configurability is one-line change.
 _PATH_KLIPPER     = os.path.expanduser("~/klipper")
@@ -284,7 +281,7 @@ def run_dashboard(state: dict) -> str:
     # Draw banner + status panel once, then ask for language.
     # The language selection happens BEFORE the action menu so all
     # subsequent prompts are in the user's chosen language.
-    print_kace_banner("Klipper Automated Configuration Ecosystem", _KACE_VERSION)
+    print_kace_banner("Klipper Automated Configuration Ecosystem")
     _render_status_panel(state)
 
     _select_language()
@@ -294,15 +291,6 @@ def run_dashboard(state: dict) -> str:
     _render_suggestions(suggestions)
 
     while True:
-        # Redraw banner + status on every loop iteration so the screen
-        # stays fresh after returning from the manage view.
-        print_kace_banner("Klipper Automated Configuration Ecosystem", _KACE_VERSION)
-
-        _render_status_panel(state)
-        suggestions = get_suggestions(state)
-        _render_suggestions(suggestions)
-        print("")
-
         ACTIONS = {"1": "generate", "2": "quit"}
         print(f"\n  {_C}{t('dashboard.action_prompt')}{_R}")
         print(f"    1) {t('dashboard.action_generate')}")
@@ -319,7 +307,12 @@ def run_dashboard(state: dict) -> str:
 
         if action == "manage":
             _show_manage_view(state)
-            continue    # loop back to redraw dashboard
+            # Keep the process-wide banner unique even when returning from a
+            # future manage action; only the changing dashboard data redraws.
+            _render_status_panel(state)
+            suggestions = get_suggestions(state)
+            _render_suggestions(suggestions)
+            continue
 
         # "generate" or "reconfigure" — return to kace.py
         return action

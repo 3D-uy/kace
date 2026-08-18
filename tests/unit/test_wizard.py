@@ -1,4 +1,6 @@
 import unittest
+import queue
+import threading
 from unittest.mock import patch, MagicMock
 from core.wizard import run_wizard
 from core.exceptions import WizardExit
@@ -501,6 +503,72 @@ class TestWizardFanAssignment(unittest.TestCase):
         self.assertEqual(res, "success")
         self.assertEqual(user_data["fan_part_cooling_pin"], "default")
         self.assertEqual(user_data["fan_hotend_pin"], "none")
+        self.assertEqual(mock_input.call_count, 2)
+
+    def test_step_fan_assignment_waits_for_each_selection(self):
+        """The hotend menu must not open until the layer-fan answer exists."""
+        from core.wizard import _step_fan_assignment
+
+        raw_cfg = "[fan]\npin: PA8\n"
+        user_data = {"board_raw_config": raw_cfg}
+        responses = queue.Queue()
+        prompts = queue.Queue()
+        result = []
+        errors = []
+
+        def blocking_input(prompt):
+            prompts.put(prompt)
+            return responses.get(timeout=2)
+
+        def run_step():
+            try:
+                result.append(_step_fan_assignment(user_data))
+            except BaseException as exc:  # Surface thread failures in the test.
+                errors.append(exc)
+
+        with patch("core.menu._MOCK_PROMPTS_ACTIVE", False), \
+             patch("builtins.input", side_effect=blocking_input), \
+             patch.dict("os.environ", {"KACE_AUTO": "0"}):
+            worker = threading.Thread(target=run_step, daemon=True)
+            worker.start()
+
+            first_prompt = prompts.get(timeout=1)
+            self.assertIn("[1-5]", first_prompt)
+            self.assertTrue(worker.is_alive())
+            self.assertNotIn("fan_part_cooling_pin", user_data)
+
+            responses.put("1")
+            second_prompt = prompts.get(timeout=1)
+            self.assertIn("[1-4]", second_prompt)
+            self.assertTrue(worker.is_alive())
+            self.assertNotIn("fan_hotend_pin", user_data)
+
+            responses.put("1")
+            worker.join(timeout=1)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(result, ["success"])
+        self.assertTrue(prompts.empty())
+        self.assertEqual(user_data["fan_part_cooling_pin"], "default")
+        self.assertEqual(user_data["fan_hotend_pin"], "none")
+
+    @patch("builtins.input", side_effect=["", "1", "1"])
+    def test_step_fan_assignment_rejects_empty_buffered_line(self, mock_input):
+        """An empty line cannot silently accept a fan default and advance."""
+        from core.wizard import _step_fan_assignment
+
+        user_data = {"board_raw_config": "[fan]\npin: PA8\n"}
+        with patch("core.menu._MOCK_PROMPTS_ACTIVE", False), \
+             patch.dict("os.environ", {"KACE_AUTO": "0"}):
+            res = _step_fan_assignment(user_data)
+
+        self.assertEqual(res, "success")
+        self.assertEqual(mock_input.call_count, 3)
+        prompts = [call.args[0] for call in mock_input.call_args_list]
+        self.assertIn("[1-5]", prompts[0])
+        self.assertIn("[1-5]", prompts[1])
+        self.assertIn("[1-4]", prompts[2])
 
     @patch("builtins.input")
     def test_step_fan_assignment_custom(self, mock_input):

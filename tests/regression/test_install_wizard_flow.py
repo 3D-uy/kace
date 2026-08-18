@@ -62,7 +62,7 @@ class TestInstallWizardFlow(unittest.TestCase):
         (home / ".local" / "bin").mkdir(parents=True)
         fake_bin.mkdir()
         (install_dir / ".git").mkdir()
-        (install_dir / "VERSION").write_text("0.0-test\n", encoding="utf-8")
+        (install_dir / "VERSION").write_text("0.0.0-test\n", encoding="utf-8")
         (install_dir / "requirements.txt").write_text("", encoding="utf-8")
         (install_dir / "kace.py").write_text("print('old runtime')\n", encoding="utf-8")
         (install_dir / "venv").mkdir()
@@ -114,7 +114,7 @@ class TestInstallWizardFlow(unittest.TestCase):
                 -c)
                     mkdir -p "$repo/core" "$repo/firmware" "$repo/data" \
                         "$repo/templates" "$repo/scripts"
-                    printf '0.0-new\n' > "$repo/VERSION"
+                    printf '0.0.0-new\n' > "$repo/VERSION"
                     printf '' > "$repo/requirements.txt"
                     printf '' > "$repo/requirements-ssh.txt"
                     printf 'print(\"new runtime\")\n' > "$repo/kace.py"

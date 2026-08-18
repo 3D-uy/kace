@@ -31,6 +31,12 @@ _ap.add_argument("--dev-deploy", action="store_true", dest="dev_deploy", help="E
 _ap.add_argument("--debug", action="store_true", help="Enable KACE_DEBUG verbose output")
 _ap.add_argument("--real-build", action="store_true", dest="real_build", help="Use the real system make binary")
 _ap.add_argument(
+    "--board-contract-sd-deploy",
+    action="store_true",
+    dest="board_contract_sd_deploy",
+    help="Explicitly enable the interactive BoardContract SD-card executor",
+)
+_ap.add_argument(
     "--power",
     choices=("status", "on", "off", "wait"),
     help="Run one non-interactive Moonraker power operation and return JSON",
@@ -48,6 +54,10 @@ if _known.debug:
     os.environ["KACE_DEBUG"] = "1"
 if _known.real_build:
     os.environ["KACE_REAL_BUILD"] = "1"
+if _known.board_contract_sd_deploy:
+    if _known.auto:
+        _ap.error("--board-contract-sd-deploy cannot be combined with --auto")
+    os.environ["KACE_BOARD_CONTRACT_SD_DEPLOY"] = "1"
 
 if _known.power:
     from core.power_controller import PowerControllerError, configured_power_controller
@@ -118,8 +128,10 @@ from core.workflow_outcome import (
     WorkflowResult,
     cancelled,
     failed,
+    pending_activation,
     success,
 )
+from core.outcome_renderer import print_workflow_result
 
 # print_summary has been refactored into core.summary to improve testability.
 
@@ -127,27 +139,29 @@ from core.workflow_outcome import (
 
 
 def _finish(result: WorkflowResult) -> None:
-    """Emit the stable machine-readable outcome and terminate the CLI."""
-    print(result.marker(), flush=True)
+    """Render the terminal outcome and preserve its stable exit-code contract."""
+    print_workflow_result(result)
     raise SystemExit(result.exit_code)
 
 
 def main():
-    print_kace_banner("Klipper Automated Configuration Ecosystem", __version__)
-    
     # ── Dashboard (bypassed in CI / auto / dev modes) ─────────
     _bypassed = os.environ.get("KACE_AUTO") == "1"
     if not _bypassed:
+        # The interactive dashboard owns the complete landing-screen render,
+        # including the sole banner for this execution.
         # Deferred import to optimize startup performance on slow Raspberry Pi hardware
         from core.dashboard import detect_system_state, run_dashboard
         try:
             _state = detect_system_state()
             _action = run_dashboard(_state)
         except WizardExit:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             _finish(cancelled("Dashboard cancelled."))
         if _action == "quit":
             _finish(cancelled("Dashboard closed by the user."))
+    else:
+        # Headless/automatic execution has no dashboard renderer.
+        print_kace_banner("Klipper Automated Configuration Ecosystem")
     
     # Interactive Wizard & Phase 1 Execution Loop
     user_data = {"make_command": _make_command}
@@ -155,10 +169,8 @@ def main():
     try:
         user_data = run_wizard(user_data)
     except WizardExit:
-        print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
         _finish(cancelled("Wizard cancelled."))
     except (KeyboardInterrupt, EOFError):
-        print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
         _finish(cancelled("Wizard interrupted."))
     except ImportError as e:
         print(f"\n\033[91mERROR:\033[0m {t('kace.missing_dep', error=e)}")
@@ -236,7 +248,6 @@ def main():
         if _display_findings:
             _should_continue = print_display_warning(_display_findings)
             if not _should_continue:
-                print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
                 _finish(cancelled("Display compatibility warning was declined."))
 
     time.sleep(0.5)
@@ -322,9 +333,9 @@ def main():
             if result.state is DeployState.DONE:
                 print("\n\033[92m[OK] Installation completed and validated.\033[0m")
                 _finish(success("Firmware and configuration installation validated."))
-            print(f"\n\033[91m[!] Installation did not complete: {result.state.name}: {result.detail}\033[0m")
             if result.state in (DeployState.CANCELLED, DeployState.ABORTED):
                 _finish(cancelled(result.detail or "Firmware installation cancelled."))
+            print(f"\n\033[91m[!] Installation did not complete: {result.state.name}: {result.detail}\033[0m")
             if result.state is DeployState.FAILED_PRECONDITION:
                 _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, result.detail))
             _finish(failed(WorkflowOutcome.FIRMWARE_FAILED, result.detail or result.state.name))
@@ -340,6 +351,10 @@ def main():
             ))
         if deployment_result.status.value == "CANCELLED":
             _finish(cancelled(deployment_result.detail or "Firmware deployment cancelled."))
+        if deployment_result.status.value in ("ACTION_REQUIRED", "MEDIA_PREPARED"):
+            _finish(pending_activation(
+                deployment_result.detail or "Firmware deployment requires operator action."
+            ))
         if not deployment_result.ok:
             print(f"\n\033[91m[!] Firmware deployment did not complete: {deployment_result.detail}\033[0m")
             _finish(failed(WorkflowOutcome.FIRMWARE_FAILED, deployment_result.detail))
@@ -359,7 +374,6 @@ def main():
     )
 
     if deploy_cfg is None:
-        print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
         _finish(cancelled("Configuration deployment selection cancelled."))
 
     deployment_result = None
@@ -370,7 +384,6 @@ def main():
     elif deploy_cfg == "ssh":
         host = simple_input(t("kace.ssh_host_prompt"))
         if host is None or not host:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             _finish(cancelled("SSH host entry cancelled."))
         # Default SSH user is overridable via KACE_SSH_USER (e.g. "kace" for
         # KACE-installed Klipper). Falls back to the historical default "pi".
@@ -379,15 +392,12 @@ def main():
             default=os.environ.get("KACE_SSH_USER", "kace")
         )
         if user is None or not user:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             _finish(cancelled("SSH user entry cancelled."))
         password = password_input(t("kace.ssh_pass_prompt"))
         if password is None:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             _finish(cancelled("SSH password entry cancelled."))
         dest_path = simple_input(t("kace.ssh_dest_prompt"), default="~/printer_data/config/")
         if dest_path is None or not dest_path:
-            print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
             _finish(cancelled("SSH destination entry cancelled."))
 
         user_data['host'] = host

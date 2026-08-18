@@ -1,0 +1,166 @@
+schema: kace-board-contract/v1
+board_id: creality.v4.2.7
+display_name: Creality v4.2.7
+manufacturer: Creality
+family_id: creality.v4
+revision: "4.2.7"
+aliases:
+  official_config_filenames:
+    - generic-creality-v4.2.7.cfg
+  legacy_exact:
+    - creality-v4.2.7
+upstream:
+  source_contract: kace-klipper-source/v1
+  repository: https://github.com/Klipper3d/klipper.git
+  validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+  config_path: config/generic-creality-v4.2.7.cfg
+  config_sha256_lf: 62dcc6271b8e3f6846eceddffea8036097520536a6c4d819bcdd71621c22ba4c
+  header_sha256_lf: beaeb1ff2e928e5cb5010e6d9d273b7adc5883889898f10dc07e3d54c3e86242
+  header_text: |+
+    # This file contains pin mappings for the Creality "v4.2.7" board. To
+    # use this config, during "make menuconfig" select the STM32F103 with
+    # a "28KiB bootloader" and serial (on USART1 PA10/PA9) communication.
+
+    # If you prefer a direct serial connection, in "make menuconfig"
+    # select "Enable extra low-level configuration options" and select
+    # serial (on USART3 PB11/PB10), which is broken out on the 10 pin IDC
+    # cable used for the LCD module as follows:
+    # 3: Tx, 4: Rx, 9: GND, 10: VCC
+
+    # Flash this firmware by copying "out/klipper.bin" to a SD card and
+    # turning on the printer with the card inserted. The firmware
+    # filename must end in ".bin" and must not match the last filename
+    # that was flashed.
+
+    # See docs/Config_Reference.md for a description of parameters.
+
+hardware_variants:
+  - id: stm32f103-ret6
+    processor:
+      architecture: stm32
+      architecture_kconfig: CONFIG_MACH_STM32
+      model: STM32F103
+      model_kconfig: CONFIG_MACH_STM32F103
+      resolved_mcu: stm32f103xe
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Processor named by official header}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_MCU, detail: Resolved MCU value for STM32F103}
+    bootloader:
+      label: 28KiB bootloader
+      selection: {CONFIG_STM32_FLASH_START_7000: true}
+      application_address: "0x8007000"
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Required bootloader offset}
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Address resolved from selected offset}
+    clock:
+      label: 8 MHz crystal (Kconfig default)
+      selection: {}
+      reference_hz: 8000000
+      provenance:
+        - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_CLOCK_REF_FREQ, detail: Default STM32 clock reference}
+    build_targets:
+      - id: uart-usart1-pa10-pa9
+        support_status: RUNTIME_SUPPORTED
+        transport:
+          kind: UART
+          selection: {CONFIG_STM32_SERIAL_USART1: true}
+          endpoint: {peripheral: USART1, rx_pin: PA10, tx_pin: PA9}
+          host_connection: lcd-idc-cable
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Default serial transport and pins}
+        low_level:
+          enabled: false
+          startup_gpio: []
+          provenance:
+            - {source: klipper-kconfig, reference: src/stm32/Kconfig:CONFIG_STM32_SERIAL_USART1, detail: USART1 is selectable without low-level options}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_MACH_STM32: true
+          CONFIG_MACH_STM32F103: true
+          CONFIG_STM32_FLASH_START_7000: true
+          CONFIG_STM32_SERIAL_USART1: true
+        resolved_assertions:
+          CONFIG_MCU: stm32f103xe
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x8007000"
+          CONFIG_CLOCK_REF_FREQ: 8000000
+          CONFIG_CLOCK_FREQ: 72000000
+          CONFIG_SERIAL: true
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Requested menuconfig choices}
+          - {source: klipper-kconfig, reference: src/stm32/Kconfig, detail: Symbols and resolved values}
+        artifact:
+          native_path: out/klipper.bin
+          native_filename: klipper.bin
+          format: BIN
+          final_filename:
+            strategy: build-id
+            template: kace-{build_id_short}.bin
+            required_suffix: .bin
+            must_differ_from_last_successful_flash: true
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Native artifact and filename restrictions}
+        flash:
+          strategy: SD_CARD
+          steps: [VALIDATE_ARTIFACT, ASSIGN_FINAL_FILENAME, VERIFY_FILENAME_POLICY, PREPARE_MEDIA, COPY_TO_MEDIA, VERIFY_MEDIA_CHECKSUM, SAFE_EJECT, REQUIRE_POWER_OFF, REQUIRE_MEDIA_INSERTED, REQUIRE_POWER_ON, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command: null
+          options: {destination: sd-card-root, required_filesystems: [vfat], require_removable: true, make_flash_supported: false}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Official SD-card flashing procedure}
+            - {source: kace-safety-policy, reference: firmware/boards/executor.py, detail: Phase 4B requires a removable FAT filesystem mounted at its root}
+      - id: uart-usart3-pb11-pb10
+        support_status: PROVISIONAL
+        transport:
+          kind: UART
+          selection: {CONFIG_STM32_SERIAL_USART3: true}
+          endpoint: {peripheral: USART3, rx_pin: PB11, tx_pin: PB10, lcd_idc_pins: "3:Tx,4:Rx,9:GND,10:VCC"}
+          host_connection: lcd-idc-cable-direct
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Alternative direct serial transport and connector pins}
+        low_level:
+          enabled: true
+          startup_gpio: []
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Alternative requires extra low-level options}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: true
+          CONFIG_MACH_STM32: true
+          CONFIG_MACH_STM32F103: true
+          CONFIG_STM32_FLASH_START_7000: true
+          CONFIG_STM32_CLOCK_REF_8M: true
+          CONFIG_STM32_SERIAL_USART3: true
+        resolved_assertions:
+          CONFIG_MCU: stm32f103xe
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x8007000"
+          CONFIG_CLOCK_REF_FREQ: 8000000
+          CONFIG_CLOCK_FREQ: 72000000
+          CONFIG_SERIAL: true
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Requested menuconfig choices}
+          - {source: klipper-kconfig, reference: src/stm32/Kconfig, detail: Symbols and resolved values}
+        artifact:
+          native_path: out/klipper.bin
+          native_filename: klipper.bin
+          format: BIN
+          final_filename:
+            strategy: build-id
+            template: kace-{build_id_short}.bin
+            required_suffix: .bin
+            must_differ_from_last_successful_flash: true
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Native artifact and filename restrictions}
+        flash:
+          strategy: SD_CARD
+          steps: [VALIDATE_ARTIFACT, ASSIGN_FINAL_FILENAME, VERIFY_FILENAME_POLICY, PREPARE_MEDIA, COPY_TO_MEDIA, VERIFY_MEDIA_CHECKSUM, SAFE_EJECT, REQUIRE_POWER_OFF, REQUIRE_MEDIA_INSERTED, REQUIRE_POWER_ON, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command: null
+          options: {destination: sd-card-root, required_filesystems: [vfat], require_removable: true, make_flash_supported: false}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Official SD-card flashing procedure}
+            - {source: kace-safety-policy, reference: firmware/boards/executor.py, detail: Phase 4B requires a removable FAT filesystem mounted at its root}
+warnings:
+  - id: filename-must-change
+    severity: CRITICAL
+    text: The .bin filename must differ from the filename used for the last successful flash.
+    incompatible_board_ids: []
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Bootloader filename restriction}
+contract_digest: f324c88c658494196e8f826cf7692c7b383794d6a89f775b76698797807e37ff

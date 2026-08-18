@@ -10,7 +10,13 @@ from data.profiles import THERMISTOR_PRESETS
 from core.wizard.runner import _BACK, _QUIT
 from core.wizard.ui import _back_choice, _quit_choice
 from core.capabilities import finite_number, normalize_and_validate_configuration, supported_kinematics
-from core.profile_values import mark_profile_values, mark_user_override, safe_defaults
+from core.profile_values import (
+    ValueProvenance,
+    infer_homing_positive_dir,
+    mark_profile_values,
+    mark_user_override,
+    safe_defaults,
+)
 
 _PRINTER_PROFILES_DB = None
 _INTERACTIVE_MODE = True
@@ -664,4 +670,54 @@ def _step_z_limits(user_data):
             user_data["z_position_endstop"] = val.strip()
             mark_user_override(user_data, "z_position_endstop")
             idx += 1
+    return "done"
+
+
+def _step_homing_directions(user_data):
+    """Infer homing directions and ask only when geometry is ambiguous."""
+    from core.translations import get_lang
+
+    language = get_lang()
+    prompts = {
+        "English": "Does axis {axis} home toward position_max?",
+        "Español": "¿El eje {axis} hace homing hacia position_max?",
+        "Português": "O eixo {axis} faz homing em direção a position_max?",
+    }
+    positive = {"English": "Yes, toward maximum", "Español": "Sí, hacia el máximo", "Português": "Sim, em direção ao máximo"}
+    negative = {"English": "No, toward minimum", "Español": "No, hacia el mínimo", "Português": "Não, em direção ao mínimo"}
+    provenance = dict(user_data.get("_value_provenance") or {})
+
+    for axis in ("x", "y", "z"):
+        key = f"homing_positive_dir_{axis}"
+        if user_data.get(key) not in (None, ""):
+            continue
+        inferred = infer_homing_positive_dir(
+            user_data.get(f"{axis}_position_endstop"),
+            user_data.get(f"{axis}_position_min"),
+            user_data.get(f"{axis}_position_max"),
+        )
+        if inferred is not None:
+            user_data[key] = inferred
+            provenance[key] = ValueProvenance.INFERRED.value
+            continue
+        if os.environ.get("KACE_AUTO") == "1":
+            raise GenerationError(
+                f"Cannot infer {key}; run the interactive wizard or provide it explicitly."
+            )
+        answer = numbered_select(
+            prompts.get(language, prompts["English"]).format(axis=axis.upper()),
+            choices=[
+                {"name": positive.get(language, positive["English"]), "value": "True"},
+                {"name": negative.get(language, negative["English"]), "value": "False"},
+                _back_choice(),
+            ],
+            default=1,
+        )
+        if answer == _BACK:
+            return _BACK
+        user_data[key] = answer
+        mark_user_override(user_data, key)
+        provenance = dict(user_data.get("_value_provenance") or {})
+
+    user_data["_value_provenance"] = provenance
     return "done"

@@ -1,6 +1,9 @@
 import os
+from core.loader import read_version
 
-def print_kace_banner(subtitle="Klipper Automated Configuration Ecosystem", version="main"):
+def print_kace_banner(subtitle="Klipper Automated Configuration Ecosystem"):
+    """Render the KACE banner using the authoritative VERSION file."""
+    version = read_version()
     os.system('clear' if os.name == 'posix' else 'cls')
 
     # ANSI Escape Codes
@@ -44,9 +47,6 @@ def print_kace_banner(subtitle="Klipper Automated Configuration Ecosystem", vers
 if __name__ == '__main__':
     import sys
     subtitle = "Klipper Automated Configuration Ecosystem"
-    version = "main"
     if len(sys.argv) > 1:
         subtitle = sys.argv[1]
-    if len(sys.argv) > 2:
-        version = sys.argv[2]
-    print_kace_banner(subtitle, version)
+    print_kace_banner(subtitle)

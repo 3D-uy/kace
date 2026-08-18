@@ -1,0 +1,12 @@
+schema: kace-klipper-source/v1
+repository: https://github.com/Klipper3d/klipper.git
+validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+header_extraction_version: 1
+line_endings: LF
+
+# Runtime and release validation use only validated_commit. A scheduled,
+# read-only drift job may compare it with upstream master, but must never
+# update this file or a board contract automatically.
+upstream_monitor:
+  ref: refs/heads/master
+  mutation_allowed: false

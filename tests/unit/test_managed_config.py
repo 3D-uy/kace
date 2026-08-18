@@ -59,6 +59,30 @@ gcode:
         self.assertIn("enable_force_move: False", hardware)
         self.assertIn(MACROS_REMOTE, root)
 
+    def test_watermark_control_does_not_restore_old_pid_tuning(self):
+        generated = GENERATED.replace(
+            b"control: pid\npid_Kp: 22.2\npid_Ki: 1.0\npid_Kd: 100\n",
+            b"control: watermark\n",
+        )
+        existing = b"""[extruder]
+control: pid
+pid_Kp: 31.5
+pid_Ki: 2.2
+pid_Kd: 140
+"""
+        plan = build_managed_config_plan(
+            generated,
+            None,
+            {ROOT_REMOTE: existing, HARDWARE_REMOTE: None, "moonraker.conf": None},
+        )
+        hardware = next(
+            item.content.decode() for item in plan.artifacts if item.remote_name == HARDWARE_REMOTE
+        )
+        self.assertIn("control: watermark", hardware)
+        self.assertNotIn("pid_Kp", hardware)
+        self.assertNotIn("pid_Ki", hardware)
+        self.assertNotIn("pid_Kd", hardware)
+
     def test_reconciliation_is_idempotent(self):
         first = build_managed_config_plan(
             GENERATED, b"# macros\n", {name: None for name in (

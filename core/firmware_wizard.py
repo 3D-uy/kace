@@ -1,3 +1,5 @@
+import os
+
 from core.menu import simple_input, yes_no, numbered_select
 from core.validators import (
     questionary_arch_validator,
@@ -19,6 +21,14 @@ from firmware.configuration import (
 )
 from firmware.builder import build_firmware_orchestrator, BuildContext
 from firmware.artifacts import BuildArtifact
+from firmware.boards.runtime import (
+    BoardContractRuntimeBundle,
+    FirmwareAuthority,
+    build_board_contract_runtime,
+    record_board_contract_authority_failure,
+    record_firmware_authority,
+    resolve_firmware_authority,
+)
 from firmware.deployment import (
     DeploymentMethodId,
     DeploymentTarget,
@@ -124,8 +134,96 @@ def _resolve_firmware_configuration(current_mcu, current_hint, resolved_flash=No
                     _cancel_firmware_configuration()
                 current_hint = answer.lower()
 
+
+def _run_board_contract_firmware(user_data, decision):
+    """Build verified evidence only; never invoke legacy deployment/flashing."""
+    prompt_mcu = f"{decision.board_id} / {decision.hardware_variant_id}"
+    if not yes_no(t("kace.compile_prompt", mcu=prompt_mcu)):
+        print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
+        return success("BoardContract firmware compilation was explicitly skipped.")
+
+    print(f"\n\033[92m[*]\033[0m {t('kace.compiling')}", flush=True)
+    try:
+        bundle = build_board_contract_runtime(decision, user_data)
+        if not isinstance(bundle, BoardContractRuntimeBundle):
+            raise TypeError("BoardContract runtime returned invalid evidence")
+    except Exception as exc:
+        message = f"BoardContract firmware workflow blocked: {exc}"
+        print(f"\n\033[91mERROR:\033[0m {t('kace.firmware_error', message=message)}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
+
+    proof = bundle.proof
+    artifact = bundle.artifact
+    plan = bundle.deployment_plan
+    user_data["board_contract_build_proof"] = proof
+    user_data["firmware_artifact"] = artifact
+    user_data["board_contract_deployment_plan"] = plan
+    user_data["mcu_type"] = artifact.mcu
+    user_data["firmware_path"] = plan.transformation.final_path
+    user_data["firmware_identity"] = artifact.firmware_identity
+    user_data["klipper_version"] = (
+        artifact.firmware_identity.reported_version
+        if artifact.firmware_identity is not None
+        else proof.klipper_commit
+    )
+    user_data["mcu_name"] = user_data.get("mcu_name", "mcu")
+    # Phase 4A creates a non-executing DeploymentPlan.  The existing top-level
+    # deployer must never mistake it for a prepared legacy flashing strategy.
+    user_data["pending_firmware_deployment"] = False
+
+    print(
+        f"\033[92mSUCCESS:\033[0m "
+        f"{t('kace.firmware_success', path=plan.transformation.final_path)}"
+    )
+    if (
+        os.environ.get("KACE_BOARD_CONTRACT_SD_DEPLOY") == "1"
+        and plan.strategy.value == "SD_CARD"
+        and yes_no(
+            "Execute this verified BoardContract SD-card DeploymentPlan now?",
+            default=False,
+        )
+    ):
+        from core.board_contract_deployment import (
+            BoardContractPhysicalDeploymentError,
+            run_sd_card_contract_deployment,
+        )
+        try:
+            deployment_proof = run_sd_card_contract_deployment(user_data, plan)
+        except BoardContractPhysicalDeploymentError as exc:
+            message = f"BoardContract physical deployment failed: {exc}"
+            print(f"\n\033[91mERROR:\033[0m {message}")
+            return failed(WorkflowOutcome.DEPLOYMENT_FAILED, message)
+        if deployment_proof.final_state.value != "VERIFIED":
+            message = "BoardContract physical deployment did not reach VERIFIED"
+            return failed(WorkflowOutcome.DEPLOYMENT_FAILED, message)
+        print(
+            "\033[92mSUCCESS:\033[0m physical BoardContract deployment "
+            f"verified; proof={deployment_proof.digest}"
+        )
+        return success("BoardContract firmware and physical SD deployment verified.")
+    return success(
+        "BoardContract firmware built and a non-executing DeploymentPlan was created."
+    )
+
 def run_firmware_wizard(user_data: dict) -> WorkflowResult:
     """Configure/build firmware and always return a typed terminal decision."""
+    try:
+        authority = resolve_firmware_authority(
+            user_data.get("board"),
+            detected_mcu=user_data.get("mcu_type"),
+        )
+        record_firmware_authority(user_data, authority)
+    except Exception as exc:
+        # A malformed/ambiguous catalog is a contract-system failure, never a
+        # reason to let a potentially migrated board fall through to legacy.
+        record_board_contract_authority_failure(user_data, user_data.get("board"), exc)
+        message = f"BoardContract authority resolution blocked: {exc}"
+        print(f"\n\033[91mERROR:\033[0m {message}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
+
+    if authority.authority is FirmwareAuthority.BOARD_CONTRACT:
+        return _run_board_contract_firmware(user_data, authority)
+
     mcu = user_data.get('mcu_type')
     hint = user_data.get('mcu_hint')
     if not (mcu or hint == "manual"):

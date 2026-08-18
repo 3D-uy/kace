@@ -256,6 +256,42 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             kace.main()
         self.assertEqual(ctx.exception.code, 2)
+        printed = " ".join(str(call) for call in mock_print.call_args_list)
+        self.assertIn("Installation cancelled", printed)
+        self.assertNotIn("KACE_RESULT", printed)
+        self.assertNotIn("failed", printed.casefold())
+        mock_banner.assert_called_once_with(
+            "Klipper Automated Configuration Ecosystem"
+        )
+
+    def test_interactive_dashboard_owns_the_only_banner_render(self):
+        """Studio's interactive PTY receives one KACE initialisation banner."""
+        import kace
+        state = {
+            "klipper": True,
+            "moonraker": True,
+            "mainsail": True,
+            "fluidd": False,
+            "crowsnest": False,
+            "printer_cfg": True,
+            "mcu": None,
+            "mcu_path": None,
+        }
+
+        with patch.dict(os.environ, {"KACE_AUTO": "0"}), \
+             patch("core.dashboard.detect_system_state", return_value=state), \
+             patch("core.dashboard.print_kace_banner") as dashboard_banner, \
+             patch("kace.print_kace_banner") as entry_banner, \
+             patch("builtins.input", side_effect=["1", "1", "2"]), \
+             patch("kace.print_workflow_result"):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 2)
+        entry_banner.assert_not_called()
+        dashboard_banner.assert_called_once_with(
+            "Klipper Automated Configuration Ecosystem"
+        )
 
     # ── KeyboardInterrupt ─────────────────────────────────────────────────────
 
@@ -747,6 +783,69 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 2)
         deploy_menu.assert_not_called()
+
+    def test_standalone_firmware_action_required_is_pending_activation(self):
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
+        user_data["pending_firmware_deployment"] = True
+        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=None)
+        deployment_result = SimpleNamespace(
+            status=SimpleNamespace(value="ACTION_REQUIRED"),
+            detail="insert the prepared SD card and restart the board",
+            ok=False,
+        )
+
+        with patch('kace.print_kace_banner'), \
+             patch('kace.run_wizard', return_value=user_data), \
+             patch('kace.check_display_compatibility', return_value=[]), \
+             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.has_todo_pins', return_value=[]), \
+             patch('kace.print_summary'), \
+             patch('kace.time.sleep'), \
+             patch('builtins.print') as mock_print, \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select') as deploy_menu, \
+             patch('kace.execute_firmware_deployment', return_value=deployment_result):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 41)
+        printed = " ".join(str(call) for call in mock_print.call_args_list)
+        self.assertIn("pending activation", printed)
+        self.assertNotIn("did not complete", printed)
+        deploy_menu.assert_not_called()
+
+    def test_standalone_prepared_media_is_pending_activation(self):
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
+        user_data["pending_firmware_deployment"] = True
+        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=None)
+        deployment_result = SimpleNamespace(
+            status=SimpleNamespace(value="MEDIA_PREPARED"),
+            detail="firmware copied to removable media",
+            ok=False,
+        )
+
+        with patch('kace.print_kace_banner'), \
+             patch('kace.run_wizard', return_value=user_data), \
+             patch('kace.check_display_compatibility', return_value=[]), \
+             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.has_todo_pins', return_value=[]), \
+             patch('kace.print_summary'), \
+             patch('kace.time.sleep'), \
+             patch('builtins.print') as mock_print, \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select'), \
+             patch('kace.execute_firmware_deployment', return_value=deployment_result):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 41)
+        printed = " ".join(str(call) for call in mock_print.call_args_list)
+        self.assertIn("pending activation", printed)
+        self.assertNotIn("Firmware deployment did not complete", printed)
 
 
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────

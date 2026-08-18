@@ -1,0 +1,5 @@
+-r requirements.in
+
+# Full BoardContract schema and test suite.
+jsonschema==4.25.1
+pytest==9.1.1

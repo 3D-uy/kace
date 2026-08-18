@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -31,7 +32,7 @@ def _events(output):
 
 @unittest.skipIf(_bash() is None, "bash is unavailable")
 class TestBootstrapProtocol(unittest.TestCase):
-    def _run(self, body):
+    def _run(self, body, extra_arg=""):
         command = f"""
 export KACE_BOOTSTRAP_LIB_ONLY=1
 export KACE_BOOTSTRAP_WORKFLOW_ID=test-flow
@@ -39,7 +40,14 @@ source "$1"
 {body}
 """
         return subprocess.run(
-            [_bash(), "-c", command, "bootstrap-protocol-test", BOOTSTRAP.as_posix()],
+            [
+                _bash(),
+                "-c",
+                command,
+                "bootstrap-protocol-test",
+                BOOTSTRAP.as_posix(),
+                extra_arg,
+            ],
             capture_output=True,
             text=True,
         )
@@ -82,9 +90,37 @@ emit_bootstrap_terminal workflow_failed SHOULD_NOT_APPEAR 1
         script = BOOTSTRAP.read_text(encoding="utf-8")
         for code, outcome in ((2, "CANCELLED"), (10, "PRECONDITION_FAILED"),
                               (20, "GENERATION_FAILED"), (30, "FIRMWARE_FAILED"),
-                              (40, "DEPLOYMENT_FAILED")):
+                              (40, "DEPLOYMENT_FAILED"), (41, "PENDING_ACTIVATION")):
             self.assertIn(f"{code})", script)
             self.assertIn(f'"{outcome}" "$INSTALL_EXIT"', script)
+
+    def test_normal_terminal_hides_protocol_unless_streaming_is_requested(self):
+        script = BOOTSTRAP.read_text(encoding="utf-8")
+        self.assertIn('BOOTSTRAP_EVENT_STREAM="${KACE_BOOTSTRAP_EVENT_STREAM:-0}"', script)
+        self.assertIn('[ "$BOOTSTRAP_EVENT_STREAM" = "1" ]', script)
+        self.assertIn('printf \'%s\\n\' "$marker" >> "$LOG_FILE"', script)
+
+    def test_non_streamed_events_are_preserved_in_log_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = (Path(directory) / "bootstrap.log").as_posix()
+            result = self._run("""
+unset KACE_BOOTSTRAP_LIB_ONLY
+LOG_FILE="$2"
+BOOTSTRAP_EVENT_STREAM=0
+emit_bootstrap_event workflow_started INIT
+""", log_path)
+            logged = Path(directory, "bootstrap.log").read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(PREFIX, result.stdout)
+        self.assertIn(PREFIX, logged)
+        self.assertIn('"event":"workflow_started"', logged)
+
+    def test_cancel_and_pending_activation_are_handled_before_failure_output(self):
+        script = BOOTSTRAP.read_text(encoding="utf-8")
+        block = script.split('if [ "$INSTALL_OK" -ne 1 ]; then', 1)[1].split("\nfi\n", 1)[0]
+        self.assertLess(block.index("2)"), block.index("KACE agent installation failed"))
+        self.assertLess(block.index("41)"), block.index("KACE agent installation failed"))
+        self.assertNotIn("Pinned installer:", block.split("log_err", 1)[1])
 
 
 if __name__ == "__main__":

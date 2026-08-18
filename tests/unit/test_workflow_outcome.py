@@ -1,11 +1,17 @@
 import json
+import os
+from io import StringIO
 import unittest
+from unittest.mock import patch
 
+from core.outcome_renderer import print_workflow_result, render_workflow_result
+from core.translations import get_lang, set_lang
 from core.workflow_outcome import (
     WorkflowOutcome,
     WorkflowResult,
     cancelled,
     failed,
+    pending_activation,
     success,
 )
 
@@ -57,6 +63,45 @@ class TestWorkflowOutcomeContract(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 failed(outcome, "invalid")
+
+    def test_cancelled_has_friendly_localized_human_output_without_protocol(self):
+        previous = get_lang()
+        try:
+            set_lang("Español")
+            rendered = render_workflow_result(cancelled("internal detail"), color=False)
+        finally:
+            set_lang(previous)
+        self.assertIn("⚠ Instalación cancelada", rendered)
+        self.assertIn("No se aplicaron cambios en la configuración.", rendered)
+        self.assertIn("KACE finalizó de forma segura.", rendered)
+        self.assertNotIn("internal detail", rendered)
+        self.assertNotIn("KACE_RESULT", rendered)
+
+    def test_pending_activation_is_a_warning_not_a_failure(self):
+        rendered = render_workflow_result(pending_activation("restart needed"), color=False)
+        self.assertIn("⚠ Installation pending activation", rendered)
+        self.assertNotIn("failed", rendered.casefold())
+
+    def test_real_failure_has_human_error_without_machine_protocol(self):
+        rendered = render_workflow_result(
+            failed(WorkflowOutcome.DEPLOYMENT_FAILED, "upload verification failed"),
+            color=False,
+        )
+        self.assertIn("✖ Installation failed", rendered)
+        self.assertIn("upload verification failed", rendered)
+        self.assertNotIn("KACE_RESULT", rendered)
+
+    def test_machine_marker_is_opt_in_and_contract_is_unchanged(self):
+        result = cancelled("deployment cancelled after dry-run diff")
+        with patch.dict(os.environ, {}, clear=True):
+            human = StringIO()
+            print_workflow_result(result, stream=human)
+            self.assertNotIn("KACE_RESULT", human.getvalue())
+
+        with patch.dict(os.environ, {"KACE_MACHINE_OUTPUT": "1"}, clear=True):
+            diagnostic = StringIO()
+            print_workflow_result(result, stream=diagnostic)
+        self.assertIn(result.marker(), diagnostic.getvalue())
 
 
 if __name__ == "__main__":

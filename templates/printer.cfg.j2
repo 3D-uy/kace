@@ -5,7 +5,7 @@
 # Probe: {{ user.probe_configuration.display_name }}
 # Z Drivers: {{ user.z_motors }}
 {% if user.emit_value_provenance %}
-# Value provenance (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | UNRESOLVED):
+# Value provenance (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | INFERRED | UNRESOLVED):
 {% for key, source in user.value_provenance | dictsort %}
 #   {{ key }}={{ source }}
 {% endfor %}
@@ -71,7 +71,7 @@ position_endstop: {{ user.x_position_endstop | default(0) }} # Location of the e
 position_min: {{ user.x_position_min | default(0) }} # Minimum valid X position
 position_max: {{ user.x_position_max | default(user.x_size) }} # Maximum valid X position
 homing_speed: {{ user.homing_speed_x }} # Maximum velocity (in mm/s) of the stepper when homing
-{%- if user.homing_positive_dir_x %}
+{%- if user.homing_positive_dir_x and user.value_provenance.get('homing_positive_dir_x') != 'INFERRED' %}
 homing_positive_dir: {{ user.homing_positive_dir_x }} # Preserve profile homing direction
 {%- endif %}
 
@@ -91,7 +91,7 @@ position_endstop: {{ user.y_position_endstop | default(0) }} # Location of the e
 position_min: {{ user.y_position_min | default(0) }} # Minimum valid Y position
 position_max: {{ user.y_position_max | default(user.y_size) }} # Maximum valid Y position
 homing_speed: {{ user.homing_speed_y }} # Maximum velocity (in mm/s) of the stepper when homing
-{%- if user.homing_positive_dir_y %}
+{%- if user.homing_positive_dir_y and user.value_provenance.get('homing_positive_dir_y') != 'INFERRED' %}
 homing_positive_dir: {{ user.homing_positive_dir_y }} # Preserve profile homing direction
 {%- endif %}
 
@@ -114,7 +114,7 @@ position_endstop: {{ user.z_position_endstop | default(0) }} # Location of the e
 {%- endif %}
 position_min: {{ user.z_position_min | default(0) }} # Minimum valid Z position
 position_max: {{ user.z_position_max | default(user.z_size) }} # Maximum valid Z position
-{%- if user.homing_positive_dir_z %}
+{%- if user.homing_positive_dir_z and user.value_provenance.get('homing_positive_dir_z') != 'INFERRED' %}
 homing_positive_dir: {{ user.homing_positive_dir_z }} # Preserve profile homing direction
 {%- endif %}
 
@@ -186,9 +186,11 @@ nozzle_diameter: {{ user.nozzle_diameter }} # Diameter of the installed nozzle i
 filament_diameter: {{ user.filament_diameter }} # Diameter of the filament being used
 sensor_type: {{ user.hotend_thermistor | default('EPCOS 100K B57560G104F') }} # Type of thermistor used for the hotend
 control: {{ user.hotend_control }} # Temperature control algorithm
+{%- if user.hotend_control | lower == 'pid' %}
 pid_Kp: {{ user.hotend_pid_kp }} # PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=extruder TARGET=200)
 pid_Ki: {{ user.hotend_pid_ki }} # PID integral --- manual configuration --- (run PID_CALIBRATE)
 pid_Kd: {{ user.hotend_pid_kd }} # PID derivative --- manual configuration --- (run PID_CALIBRATE)
+{%- endif %}
 min_temp: {{ user.hotend_min_temp }} # Minimum safe temperature
 max_temp: {{ user.hotend_max_temp }} # Maximum safe temperature
 
@@ -342,9 +344,11 @@ sensor_pin: {{ pins['heater_bed'].get('sensor_pin', 'TODO') }} # Pin connected t
 {%- endif %}
 sensor_type: {{ user.bed_thermistor | default('EPCOS 100K B57560G104F') }} # Type of thermistor used for the heated bed
 control: {{ user.bed_control }} # Temperature control algorithm
+{%- if user.bed_control | lower == 'pid' %}
 pid_Kp: {{ user.bed_pid_kp }} # bed PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=heater_bed TARGET=60)
 pid_Ki: {{ user.bed_pid_ki }} # bed PID integral --- manual configuration --- (run PID_CALIBRATE)
 pid_Kd: {{ user.bed_pid_kd }} # bed PID derivative --- manual configuration --- (run PID_CALIBRATE)
+{%- endif %}
 min_temp: {{ user.bed_min_temp }} # Minimum safe temperature
 max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 
@@ -583,9 +587,18 @@ aliases: {{ pins['board_pins'].get('aliases', '\\n    EXP1_1=TODO, EXP1_2=TODO')
 # REQUIRED CALIBRATION STEPS
 # ==============================
 # 1. Calibrate extruder (rotation_distance)
-# 2. Run PID_CALIBRATE for hotend and bed
-# 3. Calibrate Z offset (PROBE_CALIBRATE)
-# 4. Verify endstops and axis directions
+{%- if user.hotend_control | lower == 'pid' %}
+# 2. Run PID_CALIBRATE for hotend
+{%- endif %}
+{%- if user.bed_control | lower == 'pid' %}
+# 3. Run PID_CALIBRATE for heater bed
+{%- endif %}
+{%- if user.probe_configuration.uses_virtual_z_endstop %}
+# 4. Calibrate Z offset (PROBE_CALIBRATE)
+{%- else %}
+# 4. Calibrate the physical Z endstop (Z_ENDSTOP_CALIBRATE)
+{%- endif %}
+# 5. Verify endstops and axis directions
 {% if pins._advanced_sections %}
 
 # ==================================================

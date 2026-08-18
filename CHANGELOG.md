@@ -9,6 +9,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.9.3.5] — Unreleased
 
 ### Added
+- **Versioned Board Contracts**: Added schema-validated, board-specific firmware build and deployment contracts with reproducible Kconfig generation, shadow builds, artifact promotion, and runtime verification.
+- **Structured Configuration Review**: Added a semantic validation model for homing, probes, Z endstops, heater control modes, generated macros, and calibration guidance before configuration apply.
 - **Reusable Moonraker Power Controller**: Added one configured-device controller for real power status, readiness, verified ON/OFF operations, Studio's Power button, and firmware deployment power cycles without direct GPIO access.
 - **Pre-KACE Relay Power Gate**: When Studio requests GPIO relay control, the bootstrap now waits for Moonraker, validates the configured power device, explicitly confirms it on, and requires an MCU device node before launching KACE.
 - **Interactive Terminal Simulation**: Expanded the Docker development testbed with selectable mocked Pi environments, Klipper/Moonraker service state, simulated MCU serial paths, and a Moonraker API mock for exercising the wizard without physical hardware.
@@ -20,12 +22,19 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **SD Firmware Flash Follow-up**: Added firmware-artifact preparation and a Moonraker-backed post-flash workflow that expects the temporary MCU disconnect, waits for Klipper to return, and verifies the compiled firmware fingerprint with recovery guidance on timeout.
 
 ### Changed
+- **User-Focused Dry Run**: Replaced the default unified diff wall with a concise configuration summary, affected files, important changes, actionable warnings, validation status, and an optional advanced technical diff.
+- **Authoritative Version Display**: Banner, CLI, installer, bootstrap, and packaged output now read the repository `VERSION` file (`0.9.3.5`) instead of maintaining hardcoded display versions.
 - **Consistent Interactive Presentation**: Standardized questionnaire colors across the wizard, display selection, firmware summaries, and probe guidance. Step frames and headings now use cyan, while selection, success, warning, error, and hint colors retain their semantic roles.
 - **Probe Offset Visualizer Localization**: Localized the full preview diagram, orientation guidance, reachability warnings, and confirmation text for English, Spanish, and Portuguese; removed ambiguous vertical LEFT/RIGHT labels from the diagram.
 - **Guided Probe Review and Defaults**: Centralized conservative defaults for custom probes (`speed=10`, `samples=2`, `samples_tolerance=0.5`, `samples_tolerance_retries=3`, `samples_result=median`, and `sample_retract_dist=5`) and added EN/ES/PT guidance for every question.
 - **Installation Documentation**: Kept the one-line installer as the quick-start path while documenting its trust tradeoff and a download, SHA-256 verification, then execution alternative in the README and installation guides.
 
 ### Fixed
+- **Safe Cancellation Outcome**: A user declining the final apply is now rendered as `CANCELLED` with a short neutral message; machine-readable outcome events remain available to Studio without being presented as installation failures.
+- **Sequential Fan Prompts**: Part-cooling and hotend-fan menus now require and consume one explicit answer each, and long prompt text wraps cleanly on narrow terminals.
+- **Single Interactive Banner**: Removed the duplicate initialization path so an interactive KACE execution renders its banner exactly once.
+- **Homing and Calibration Coherence**: Inferable homing directions no longer reach the dry run as `UNRESOLVED`; ambiguous directions require wizard input, physical Z endstops no longer show `PROBE_CALIBRATE`, and configured probes receive the appropriate calibration guidance.
+- **Heater Control Coherence**: Watermark-controlled beds no longer emit PID constants or a `PID_BED` macro; PID calibration content now follows the selected heater control mode.
 - **Locale Fallback and Recovery Flows**: Removed silent fallback to English after language selection, kept the selected locale authoritative in wizard state, and translated the dashboard selector plus the no-MCU diagnostics, retry, and manual serial-path flow.
 - **Display Selection Noise**: Removed the redundant detected-board/MCU block from the display-selection screen.
 - **Custom Probe Wizard Transition**: Fixed linear wizard transitions declared as static step identifiers; the runner now accepts both static transitions and answer-dependent callbacks, preventing `TypeError: 'str' object is not callable`.

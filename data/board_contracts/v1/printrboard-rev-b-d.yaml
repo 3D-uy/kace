@@ -1,0 +1,106 @@
+schema: kace-board-contract/v1
+board_id: printrboard.rev-b-d
+display_name: Printrboard rev B-D
+manufacturer: Printrbot
+family_id: printrboard
+revision: B-D
+aliases:
+  official_config_filenames: [generic-printrboard.cfg]
+  legacy_exact: [printrboard]
+upstream:
+  source_contract: kace-klipper-source/v1
+  repository: https://github.com/Klipper3d/klipper.git
+  validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+  config_path: config/generic-printrboard.cfg
+  config_sha256_lf: 93edf301dd3f6f91a45cdcca9189864c7493750344346d677dd5477328d0ade5
+  header_sha256_lf: f8987e306ceeab39325b20cf5384360b98f457c76826498a104470dcc357a296
+  header_text: |+
+    # This file contains common pin mappings for Printrboard boards (rev B
+    # through D). To use this config the firmware should be compiled for
+    # the AVR at90usb1286.
+
+    # Note that the "make flash" command will not work for Printrboard!
+    # To flash:
+    # - Connect the "BOOT" jumper.
+    # - Press the reset button (on board) to enter into DFU mode.
+    # - Connect via USB and run:
+    # avrdude -c flip1 -p usb1286 -U flash:w:out/klipper.elf.hex
+
+    # See docs/Config_Reference.md for a description of parameters.
+
+hardware_variants:
+  - id: at90usb1286
+    processor:
+      architecture: avr
+      architecture_kconfig: CONFIG_MACH_AVR
+      model: at90usb1286
+      model_kconfig: CONFIG_MACH_at90usb1286
+      resolved_mcu: at90usb1286
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-printrboard.cfg, detail: Official architecture and processor}
+        - {source: klipper-kconfig, reference: src/avr/Kconfig:CONFIG_MCU, detail: Resolved MCU value}
+    bootloader:
+      label: On-board DFU bootloader (offset selected outside Klipper Kconfig)
+      selection: {}
+      application_address: null
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-printrboard.cfg, detail: BOOT jumper enters the existing DFU bootloader}
+    clock:
+      label: 16 MHz
+      selection: {CONFIG_AVR_FREQ_16000000: true}
+      reference_hz: 16000000
+      provenance:
+        - {source: klipper-kconfig, reference: src/avr/Kconfig:CONFIG_AVR_FREQ_16000000, detail: Default at90usb1286 processor speed}
+    build_targets:
+      - id: usb-native
+        support_status: PROVISIONAL
+        transport:
+          kind: USB
+          selection: {CONFIG_AVR_USB: true}
+          endpoint: {peripheral: native-usb}
+          host_connection: usb-device
+          provenance:
+            - {source: klipper-kconfig, reference: src/avr/Kconfig:CONFIG_AVR_USB, detail: Native USB communication for at90usb1286}
+        low_level:
+          enabled: false
+          startup_gpio: []
+          provenance:
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_LOW_LEVEL_OPTIONS, detail: No low-level option required by official header}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_MACH_AVR: true
+          CONFIG_MACH_at90usb1286: true
+          CONFIG_AVR_FREQ_16000000: true
+          CONFIG_AVR_USB: true
+        resolved_assertions:
+          CONFIG_MCU: at90usb1286
+          CONFIG_CLOCK_FREQ: 16000000
+          CONFIG_USBSERIAL: true
+          CONFIG_AVR_BUILD_MCU: at90usb1286
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-printrboard.cfg, detail: Required processor}
+          - {source: klipper-kconfig, reference: src/avr/Kconfig, detail: Exact symbols and defaults}
+        artifact:
+          native_path: out/klipper.elf.hex
+          native_filename: klipper.elf.hex
+          format: IHEX
+          final_filename: {strategy: native, required_suffix: .hex}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-printrboard.cfg, detail: Artifact consumed by official avrdude command}
+        flash:
+          strategy: AVRDUDE
+          steps: [VALIDATE_ARTIFACT, CONNECT_BOOT_JUMPER, PRESS_RESET, ENTER_DFU, RUN_BACKEND, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command:
+            backend: avrdude
+            argv: [-c, flip1, -p, usb1286, -U, "flash:w:{artifact}"]
+          options: {make_flash_supported: false, connection: USB, boot_jumper_required: true}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-printrboard.cfg, detail: Typed representation of exact upstream procedure and argv}
+warnings:
+  - id: make-flash-unsupported
+    severity: WARNING
+    text: make flash does not work; enter DFU with BOOT and reset, then use the allow-listed avrdude backend.
+    incompatible_board_ids: []
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-printrboard.cfg, detail: Explicit upstream warning}
+contract_digest: 9e028352c6c23164e269ad2fc0b57782bf781b7dc64af5475d80ea46558903fd

@@ -9,7 +9,13 @@ from core.translations import t
 def _format_coordinate(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
 
-def generate_starter_macros(output_dir: str, motion_space=None) -> str:
+def generate_starter_macros(
+    output_dir: str,
+    motion_space=None,
+    *,
+    hotend_control: str = "pid",
+    bed_control: str = "pid",
+) -> str:
     """Generates a beginner-friendly macros.cfg file."""
     if motion_space is None:
         from core.motion_model import PrinterMotionSpace
@@ -18,21 +24,27 @@ def generate_starter_macros(output_dir: str, motion_space=None) -> str:
     center_x, center_y, center_z = positions["center"]
     park_x, park_y, park_z = positions["park"]
     test_x, test_y, test_z = positions["test"]
-    macros_content = f"""# ==============================================================================
-# KACE Starter Macros
-# ==============================================================================
-# {t('macro.pid_hotend.desc')}
+    calibration_macros = ""
+    if str(hotend_control).strip().casefold() == "pid":
+        calibration_macros += f"""# {t('macro.pid_hotend.desc')}
 [gcode_macro PID_HOTEND]
 description: {t('macro.pid_hotend.desc')}
 gcode:
     PID_CALIBRATE HEATER=extruder TARGET=200
 
-# {t('macro.pid_bed.desc')}
+"""
+    if str(bed_control).strip().casefold() == "pid":
+        calibration_macros += f"""# {t('macro.pid_bed.desc')}
 [gcode_macro PID_BED]
 description: {t('macro.pid_bed.desc')}
 gcode:
     PID_CALIBRATE HEATER=heater_bed TARGET=60
 
+"""
+    macros_content = f"""# ==============================================================================
+# KACE Starter Macros
+# ==============================================================================
+{calibration_macros}
 # {t('macro.test_movement.desc')}
 [gcode_macro TEST_MOVEMENT]
 description: {t('macro.test_movement.desc')}

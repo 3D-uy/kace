@@ -23,6 +23,7 @@ PHASE_MAP = {
     "x_limits": "Motion",
     "y_limits": "Motion",
     "z_limits": "Motion",
+    "homing_directions": "Motion",
     "probe": "Sensors",
     "bltouch_pins": "Sensors",
     "probe_offsets": "Sensors",

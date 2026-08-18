@@ -1,0 +1,105 @@
+schema: kace-board-contract/v1
+board_id: btt.skr-pico.v1.0
+display_name: BTT SKR Pico v1.0
+manufacturer: BIGTREETECH
+family_id: btt.skr-pico
+revision: "1.0"
+aliases:
+  official_config_filenames: [generic-bigtreetech-skr-pico-v1.0.cfg]
+  legacy_exact: [skr-pico]
+upstream:
+  source_contract: kace-klipper-source/v1
+  repository: https://github.com/Klipper3d/klipper.git
+  validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+  config_path: config/generic-bigtreetech-skr-pico-v1.0.cfg
+  config_sha256_lf: 1e428585029f05803e270ca5faef51ad351798b41413344aabffc3f622d37b1b
+  header_sha256_lf: 6e113660c4af17775379af496435739b206bd83d130476ea7948e1f968ef5ada
+  header_text: |+
+    # This file contains common pin mappings for the BIGTREETECH SKR Pico V1.0
+    # To use this config, the firmware should be compiled for the RP2040 with
+    # USB communication.
+
+    # The "make flash" command does not work on the SKR Pico V1.0. Instead,
+    # after running "make", copy the generated "out/klipper.uf2" file
+    # to the mass storage device in RP2040 boot mode
+
+    # See docs/Config_Reference.md for a description of parameters.
+
+hardware_variants:
+  - id: rp2040
+    processor:
+      architecture: rpxxxx
+      architecture_kconfig: CONFIG_MACH_RPXXXX
+      model: RP2040
+      model_kconfig: CONFIG_MACH_RP2040
+      resolved_mcu: rp2040
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-pico-v1.0.cfg, detail: Official processor choice}
+        - {source: klipper-kconfig, reference: src/rp2040/Kconfig:CONFIG_MCU, detail: Resolved MCU value}
+    bootloader:
+      label: No bootloader (RP2040 stage2 at 0x10000100)
+      selection: {CONFIG_RPXXXX_FLASH_START_0100: true}
+      application_address: "0x10000100"
+      provenance:
+        - {source: klipper-kconfig, reference: src/rp2040/Kconfig:CONFIG_RPXXXX_FLASH_START_0100, detail: RP2040 default no-bootloader/stage2 selection}
+        - {source: klipper-kconfig, reference: src/rp2040/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved application address}
+    clock:
+      label: 12 MHz RP2040 reference
+      selection: {}
+      reference_hz: 12000000
+      provenance:
+        - {source: klipper-kconfig, reference: src/rp2040/Kconfig:CONFIG_CLOCK_FREQ, detail: RP2040 Kconfig reference value}
+    build_targets:
+      - id: usb-native
+        support_status: RUNTIME_SUPPORTED
+        transport:
+          kind: USB
+          selection: {CONFIG_RPXXXX_USB: true}
+          endpoint: {peripheral: native-usb}
+          host_connection: usb-device
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-pico-v1.0.cfg, detail: Official USB transport}
+            - {source: klipper-kconfig, reference: src/rp2040/Kconfig:CONFIG_RPXXXX_USB, detail: Exact communication symbol}
+        low_level:
+          enabled: false
+          startup_gpio: []
+          provenance:
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_LOW_LEVEL_OPTIONS, detail: Header does not request low-level options}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_MACH_RPXXXX: true
+          CONFIG_MACH_RP2040: true
+          CONFIG_RPXXXX_FLASH_START_0100: true
+          CONFIG_RPXXXX_USB: true
+        resolved_assertions:
+          CONFIG_MCU: rp2040
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x10000100"
+          CONFIG_CLOCK_FREQ: 12000000
+          CONFIG_RP2040_STAGE2_FILE: boot2_w25q080.S
+          CONFIG_RP2040_STAGE2_CLKDIV: 2
+          CONFIG_USBSERIAL: true
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-pico-v1.0.cfg, detail: Processor and communication choices}
+          - {source: klipper-kconfig, reference: src/rp2040/Kconfig, detail: "Exact symbols, hidden defaults, and resolved values"}
+        artifact:
+          native_path: out/klipper.uf2
+          native_filename: klipper.uf2
+          format: UF2
+          final_filename: {strategy: native, required_suffix: .uf2}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-pico-v1.0.cfg, detail: Official generated artifact}
+        flash:
+          strategy: RP2040_BOOTSEL
+          steps: [VALIDATE_ARTIFACT, ASSIGN_FINAL_FILENAME, VERIFY_FILENAME_POLICY, PREPARE_MEDIA, ENTER_BOOTSEL, COPY_TO_MEDIA, VERIFY_MEDIA_CHECKSUM, SAFE_EJECT, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command: null
+          options: {destination: rp2040-mass-storage-root, make_flash_supported: false}
+          provenance:
+            - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-pico-v1.0.cfg, detail: Official RP2040 mass-storage procedure}
+warnings:
+  - id: make-flash-unsupported
+    severity: WARNING
+    text: make flash does not work; copy klipper.uf2 to the RP2040 boot-mode mass-storage device.
+    incompatible_board_ids: []
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-pico-v1.0.cfg, detail: Explicit upstream warning}
+contract_digest: bed30c6c3facd65d1c26a104214873716a0f4e8b494beb32c1e534812e84297c

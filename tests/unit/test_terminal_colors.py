@@ -1,3 +1,5 @@
+import os
+import re
 import unittest
 from unittest.mock import patch
 
@@ -31,6 +33,35 @@ class TestTerminalColorSemantics(unittest.TestCase):
     def test_yes_no_invalid_answer_is_an_error(self, stdout, _input):
         self.assertTrue(yes_no("Continue?"))
         self.assertIn(terminal.ERROR, stdout.getvalue())
+
+    @patch("core.menu.shutil.get_terminal_size", return_value=os.terminal_size((42, 24)))
+    @patch("builtins.input", return_value="1")
+    @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
+    def test_long_menu_prompt_wraps_to_terminal_width(self, stdout, _input, _size):
+        prompt = (
+            "Seleccione la salida para el Ventilador del Fusor "
+            "([heater_fan hotend_fan]) (Opcional):"
+        )
+
+        self.assertEqual(
+            numbered_select(prompt, ["Sin ventilador"], require_explicit=True),
+            "Sin ventilador",
+        )
+
+        ansi = re.compile(r"\x1b\[[0-9;]*m")
+        visible_lines = [
+            ansi.sub("", line)
+            for line in stdout.getvalue().splitlines()
+            if line.strip()
+        ]
+        self.assertTrue(all(len(line) <= 42 for line in visible_lines))
+        prompt_lines = []
+        for line in visible_lines:
+            if re.match(r"\s*\d+\)", line):
+                break
+            prompt_lines.append(line.strip())
+        rendered_prompt = " ".join(prompt_lines)
+        self.assertIn(prompt, rendered_prompt)
 
 
 if __name__ == "__main__":

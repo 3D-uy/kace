@@ -132,6 +132,10 @@ class TestDashboard(unittest.TestCase):
         self.assertEqual(result, "generate")
         self.assertEqual(mock_show_manage.call_count, 0)
         self.assertEqual(mock_input.call_count, 3)
+        mock_banner.assert_called_once_with(
+            "Klipper Automated Configuration Ecosystem"
+        )
+        mock_render_status.assert_called_once_with(state)
 
     @patch("core.dashboard._show_manage_view")
     @patch("core.dashboard.print_kace_banner")

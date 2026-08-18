@@ -127,12 +127,13 @@ trap 'exit 143' TERM
 # ── Banner ───────────────────────────────────────────────────
 clear 2>/dev/null || true
 SUBTITLE="KACE Installer"
-VERSION="v0.9.3.3"
 
-# Cosmetic fallback banner for early install phase
+# The runtime has not been verified yet, so this early installer heading must
+# not manufacture a KACE version. The success banner below reads VERSION from
+# the published immutable runtime.
 echo ""
 echo -e "  ${C}──────────────────────────────────────────${R}"
-echo -e "  ${B}${C}  $SUBTITLE $VERSION${R}"
+echo -e "  ${B}${C}  $SUBTITLE${R}"
 echo -e "  ${C}──────────────────────────────────────────${R}"
 echo ""
 
@@ -330,8 +331,12 @@ if ! "$INSTALL_DIR/venv/bin/python" -c 'import jinja2, questionary, yaml'; then
     exit 1
 fi
 
-# Load actual version dynamically from the published immutable runtime.
-VERSION="v$(tr -d '\r\n' < "$INSTALL_DIR/VERSION")"
+# Load and validate the actual version from the published immutable runtime.
+KACE_VERSION="v$(tr -d '\r\n' < "$INSTALL_DIR/VERSION")"
+if [[ ! "$KACE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?([.-][0-9A-Za-z.-]+)?$ ]]; then
+    echo -e "${E}  Published runtime contains an invalid VERSION: ${KACE_VERSION}.${R}" >&2
+    exit 1
+fi
 echo -e "${G}  ✔ Permissions applied${R}"
 
 # ── Step 5: Create global wrapper ────────────────────────────
@@ -373,7 +378,7 @@ BACKUP_DIR=""
 # ── Done ─────────────────────────────────────────────────────
 echo ""
 echo -e "  ${G}══════════════════════════════════════════${R}"
-echo -e "  ${B}${G}  ✅ KACE installed successfully!${R}"
+echo -e "  ${B}${G}  ✅ KACE ${KACE_VERSION} installed successfully!${R}"
 echo -e "  ${G}══════════════════════════════════════════${R}"
 echo ""
 if [ "${KACE_NO_LAUNCH:-0}" = "1" ]; then

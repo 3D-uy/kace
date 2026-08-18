@@ -12,6 +12,7 @@ from core.capabilities import (
 )
 from core.profile_values import (
     ValueProvenance,
+    require_resolved_homing_values,
     require_resolved_safety_values,
     resolve_generation_values,
 )
@@ -244,6 +245,10 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     probe_configuration = resolve_probe_configuration(user_ctx)
     apply_probe_compatibility_context(user_ctx, probe_configuration)
     user_ctx["probe_configuration"] = probe_configuration
+    require_resolved_homing_values(
+        value_provenance,
+        uses_virtual_z_endstop=probe_configuration.uses_virtual_z_endstop,
+    )
     if (
         user_ctx.get("probe_uses_virtual_z_endstop")
         and value_provenance.get("z_position_min") == ValueProvenance.SAFE_DEFAULT.value
@@ -358,7 +363,12 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
 
     if include_macros or user_data.get("macros_generated"):
         output_dir = os.path.dirname(cfg_file)
-        generate_starter_macros(output_dir, motion_space=space)
+        generate_starter_macros(
+            output_dir,
+            motion_space=space,
+            hotend_control=user_ctx.get("hotend_control", "pid"),
+            bed_control=user_ctx.get("bed_control", "pid"),
+        )
 
     return {
         "content": final_output,

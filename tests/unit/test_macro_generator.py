@@ -50,5 +50,20 @@ class TestMacroGenerator(unittest.TestCase):
         self.assertGreaterEqual(positions["center"][2], 30)
         self.assertGreaterEqual(positions["test"][2], 30)
 
+    def test_pid_control_keeps_both_pid_macros(self):
+        macros_path = generate_starter_macros(
+            self.test_dir, hotend_control="pid", bed_control="pid"
+        )
+        with open(macros_path, "r", encoding="utf-8") as macros_file:
+            content = macros_file.read()
+        self.assertIn("[gcode_macro PID_HOTEND]", content)
+        self.assertIn("[gcode_macro PID_BED]", content)
+
+    def test_watermark_bed_omits_pid_bed_macro(self):
+        macros_path = generate_starter_macros(self.test_dir, bed_control="watermark")
+        with open(macros_path, "r", encoding="utf-8") as macros_file:
+            content = macros_file.read()
+        self.assertNotIn("[gcode_macro PID_BED]", content)
+
 if __name__ == "__main__":
     unittest.main()

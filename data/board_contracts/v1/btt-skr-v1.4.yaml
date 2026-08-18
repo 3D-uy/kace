@@ -1,0 +1,182 @@
+schema: kace-board-contract/v1
+board_id: btt.skr-v1.4
+display_name: BIGTREETECH SKR V1.4 / V1.4 Turbo
+manufacturer: BIGTREETECH
+family_id: btt.skr
+revision: "1.4"
+aliases:
+  official_config_filenames: [generic-bigtreetech-skr-v1.4.cfg]
+  legacy_exact: [skr-v1.4, btt-skr-v1.4]
+upstream:
+  source_contract: kace-klipper-source/v1
+  repository: https://github.com/Klipper3d/klipper.git
+  validated_commit: fe4eb8650bd7de4c2100a14eaf09b0965c430e29
+  config_path: config/generic-bigtreetech-skr-v1.4.cfg
+  config_sha256_lf: 79c1e9f86ad355e9264ba52332262ac319aa083fd6379d0c860d49ff34156165
+  header_sha256_lf: ca7d0a5aa0a89cc05b7236d994f3ac6c937801c8ee9c2a40b5c38079ff6b2dcd
+  header_text: |+
+    # This file contains common pin mappings for the BIGTREETECH SKR V1.4
+    # board. To use this config, the firmware should be compiled for the
+    # LPC1768 or LPC1769(Turbo).
+
+    # See docs/Config_Reference.md for a description of parameters.
+
+hardware_variants:
+  - id: lpc1768
+    processor:
+      architecture: lpc176x
+      architecture_kconfig: CONFIG_MACH_LPC176X
+      model: LPC1768
+      model_kconfig: CONFIG_MACH_LPC1768
+      resolved_mcu: lpc1768
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-v1.4.cfg, detail: Official non-Turbo processor choice}
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_MCU, detail: Exact resolved MCU value}
+    bootloader:
+      label: 16KiB bootloader
+      selection: {CONFIG_LPC_FLASH_START_4000: true}
+      application_address: "0x4000"
+      provenance:
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_LPC_FLASH_START_4000, detail: Default LPC176x bootloader selection at the validated commit}
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved application address}
+    clock:
+      label: 100 MHz processor clock
+      selection: {}
+      reference_hz: 100000000
+      provenance:
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_CLOCK_FREQ, detail: LPC1768 resolved clock}
+    build_targets:
+      - id: usb-native
+        support_status: RUNTIME_SUPPORTED
+        transport:
+          kind: USB
+          selection: {CONFIG_LPC_USB: true}
+          endpoint: {peripheral: USB, dm_pin: P0.30, dp_pin: P0.29, connect_pin: P2.9, application_vid_pid: "1d50:614e"}
+          host_connection: usb-device
+          provenance:
+            - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_LPC_USB, detail: Default LPC176x communication interface}
+            - {source: klipper-source, reference: src/lpc176x/usbserial.c:RESERVE_PINS_USB, detail: Concrete USB and connect pins}
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_USB_VENDOR_ID/CONFIG_USB_DEVICE_ID, detail: Default Klipper application USB identity at the validated commit}
+        low_level:
+          enabled: false
+          startup_gpio: []
+          provenance:
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_LOW_LEVEL_OPTIONS, detail: No low-level option is required for the default USB target}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_MACH_LPC176X: true
+          CONFIG_MACH_LPC1768: true
+          CONFIG_LPC_FLASH_START_4000: true
+          CONFIG_LPC_USB: true
+        resolved_assertions:
+          CONFIG_MCU: lpc1768
+          CONFIG_CLOCK_FREQ: 100000000
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x4000"
+          CONFIG_USBSERIAL: true
+          CONFIG_USB_VENDOR_ID: "0x1d50"
+          CONFIG_USB_DEVICE_ID: "0x614e"
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-v1.4.cfg, detail: LPC1768 hardware compatibility}
+          - {source: klipper-kconfig, reference: src/lpc176x/Kconfig, detail: "Exact processor, bootloader, clock and USB symbols"}
+        artifact:
+          native_path: out/klipper.bin
+          native_filename: klipper.bin
+          format: BIN
+          final_filename: {strategy: fixed, value: firmware.bin, required_suffix: .bin}
+          provenance:
+            - {source: klipper-build, reference: src/lpc176x/Makefile, detail: Native Klipper binary artifact}
+            - {source: bigtreetech-docs, reference: https://github.com/bigtreetech/docs/blob/master/docs/SKR%20V1.4.md, detail: Manufacturer SD update filename and case restriction}
+        flash:
+          strategy: SD_CARD
+          steps: [VALIDATE_ARTIFACT, ASSIGN_FINAL_FILENAME, VERIFY_FILENAME_POLICY, PREPARE_MEDIA, COPY_TO_MEDIA, VERIFY_MEDIA_CHECKSUM, SAFE_EJECT, REQUIRE_POWER_OFF, REQUIRE_MEDIA_INSERTED, REQUIRE_POWER_ON, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command: null
+          options: {destination: sd-card-root, required_filesystems: [vfat], require_removable: true, make_flash_supported: false, restart_board: true}
+          provenance:
+            - {source: bigtreetech-docs, reference: https://github.com/bigtreetech/docs/blob/master/docs/SKR%20V1.4.md, detail: Manufacturer SD-card update and reset procedure}
+            - {source: kace-safety-policy, reference: firmware/boards/executor.py, detail: Phase 4B requires an explicitly selected removable FAT filesystem mounted at its root and a manual power cycle}
+  - id: lpc1769-turbo
+    processor:
+      architecture: lpc176x
+      architecture_kconfig: CONFIG_MACH_LPC176X
+      model: LPC1769
+      model_kconfig: CONFIG_MACH_LPC1769
+      resolved_mcu: lpc1769
+      provenance:
+        - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-v1.4.cfg, detail: Official Turbo processor choice}
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_MCU, detail: Exact resolved MCU value}
+    bootloader:
+      label: 16KiB bootloader
+      selection: {CONFIG_LPC_FLASH_START_4000: true}
+      application_address: "0x4000"
+      provenance:
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_LPC_FLASH_START_4000, detail: Default LPC176x bootloader selection at the validated commit}
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_FLASH_APPLICATION_ADDRESS, detail: Resolved application address}
+    clock:
+      label: 120 MHz processor clock
+      selection: {}
+      reference_hz: 120000000
+      provenance:
+        - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_CLOCK_FREQ, detail: LPC1769 resolved clock}
+    build_targets:
+      - id: usb-native
+        support_status: RUNTIME_SUPPORTED
+        transport:
+          kind: USB
+          selection: {CONFIG_LPC_USB: true}
+          endpoint: {peripheral: USB, dm_pin: P0.30, dp_pin: P0.29, connect_pin: P2.9, application_vid_pid: "1d50:614e"}
+          host_connection: usb-device
+          provenance:
+            - {source: klipper-kconfig, reference: src/lpc176x/Kconfig:CONFIG_LPC_USB, detail: Default LPC176x communication interface}
+            - {source: klipper-source, reference: src/lpc176x/usbserial.c:RESERVE_PINS_USB, detail: Concrete USB and connect pins}
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_USB_VENDOR_ID/CONFIG_USB_DEVICE_ID, detail: Default Klipper application USB identity at the validated commit}
+        low_level:
+          enabled: false
+          startup_gpio: []
+          provenance:
+            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_LOW_LEVEL_OPTIONS, detail: No low-level option is required for the default USB target}
+        requested_kconfig:
+          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_MACH_LPC176X: true
+          CONFIG_MACH_LPC1769: true
+          CONFIG_LPC_FLASH_START_4000: true
+          CONFIG_LPC_USB: true
+        resolved_assertions:
+          CONFIG_MCU: lpc1769
+          CONFIG_CLOCK_FREQ: 120000000
+          CONFIG_FLASH_APPLICATION_ADDRESS: "0x4000"
+          CONFIG_USBSERIAL: true
+          CONFIG_USB_VENDOR_ID: "0x1d50"
+          CONFIG_USB_DEVICE_ID: "0x614e"
+        kconfig_provenance:
+          - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-v1.4.cfg, detail: LPC1769 Turbo hardware compatibility}
+          - {source: klipper-kconfig, reference: src/lpc176x/Kconfig, detail: "Exact processor, bootloader, clock and USB symbols"}
+        artifact:
+          native_path: out/klipper.bin
+          native_filename: klipper.bin
+          format: BIN
+          final_filename: {strategy: fixed, value: firmware.bin, required_suffix: .bin}
+          provenance:
+            - {source: klipper-build, reference: src/lpc176x/Makefile, detail: Native Klipper binary artifact}
+            - {source: bigtreetech-docs, reference: https://github.com/bigtreetech/docs/blob/master/docs/SKR%20V1.4.md, detail: Manufacturer SD update filename and case restriction}
+        flash:
+          strategy: SD_CARD
+          steps: [VALIDATE_ARTIFACT, ASSIGN_FINAL_FILENAME, VERIFY_FILENAME_POLICY, PREPARE_MEDIA, COPY_TO_MEDIA, VERIFY_MEDIA_CHECKSUM, SAFE_EJECT, REQUIRE_POWER_OFF, REQUIRE_MEDIA_INSERTED, REQUIRE_POWER_ON, WAIT_FOR_MCU_REENUMERATION, VERIFY_KLIPPER_BUILD_ID]
+          command: null
+          options: {destination: sd-card-root, required_filesystems: [vfat], require_removable: true, make_flash_supported: false, restart_board: true}
+          provenance:
+            - {source: bigtreetech-docs, reference: https://github.com/bigtreetech/docs/blob/master/docs/SKR%20V1.4.md, detail: Manufacturer SD-card update and reset procedure}
+            - {source: kace-safety-policy, reference: firmware/boards/executor.py, detail: Phase 4B requires an explicitly selected removable FAT filesystem mounted at its root and a manual power cycle}
+warnings:
+  - id: exact-mcu-variant-required
+    severity: CRITICAL
+    text: LPC1768 and LPC1769/Turbo firmware are not interchangeable; runtime selection requires an exact MCU identity from KACE detection.
+    incompatible_board_ids: []
+    provenance:
+      - {source: klipper-config-header, reference: config/generic-bigtreetech-skr-v1.4.cfg, detail: Upstream declares two distinct processor variants}
+  - id: firmware-filename-case-sensitive
+    severity: WARNING
+    text: The SD firmware filename must remain firmware.bin with the exact case.
+    incompatible_board_ids: []
+    provenance:
+      - {source: bigtreetech-docs, reference: https://github.com/bigtreetech/docs/blob/master/docs/SKR%20V1.4.md, detail: "Manufacturer states that SD firmware filenames cannot be changed, including case"}
+contract_digest: d9cceb84f77568b508b0855a476020341c001a8a82695a8cb9f2a12c525c5f95

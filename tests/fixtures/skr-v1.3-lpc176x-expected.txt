@@ -156,6 +156,7 @@ max_temp: 130                                   # Maximum safe temperature
 # REQUIRED CALIBRATION STEPS
 # ==============================
 # 1. Calibrate extruder (rotation_distance)
-# 2. Run PID_CALIBRATE for hotend and bed
-# 3. Calibrate Z offset (PROBE_CALIBRATE)
-# 4. Verify endstops and axis directions
+# 2. Run PID_CALIBRATE for hotend
+# 3. Run PID_CALIBRATE for heater bed
+# 4. Calibrate the physical Z endstop (Z_ENDSTOP_CALIBRATE)
+# 5. Verify endstops and axis directions

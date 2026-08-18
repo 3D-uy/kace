@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Callable, Mapping, Optional
 
+from core.configuration_review import ConfigurationReview, build_configuration_review
+
 from core.managed_config import (
     HARDWARE_REMOTE,
     LEGACY_MACROS_REMOTE,
@@ -79,6 +81,7 @@ class ConfigDeploymentTransaction:
         activation: str,
         confirm: Optional[Callable[[str], bool]] = None,
         output: Optional[Callable[[str], None]] = None,
+        review: Optional[Callable[[ConfigurationReview], bool]] = None,
         snapshot_root: Optional[str] = None,
         board: str = "",
         kace_version: str = "unknown",
@@ -93,6 +96,7 @@ class ConfigDeploymentTransaction:
         self.activation = activation
         self.confirm = confirm or (lambda _diff: True)
         self.output = output or (lambda _line: None)
+        self.review = review
         self.snapshot_root = snapshot_root
         self.board = board
         self.kace_version = kace_version
@@ -209,13 +213,27 @@ class ConfigDeploymentTransaction:
                 self.generated_hardware, self.generated_macros, remote
             )
             diff = self.plan.dry_run_diff()
-            self.output(diff or "No configuration changes are required.")
-            for warning in self.plan.warnings:
-                self.output(f"WARNING: {warning}")
+            configuration_review = build_configuration_review(self.plan)
+            if self.review is None:
+                self.output(diff or "No configuration changes are required.")
+                for warning in configuration_review.validation.warnings:
+                    self.output(f"WARNING: {warning.message}")
+                for error in configuration_review.validation.errors:
+                    self.output(f"ERROR: {error.message}")
+            else:
+                accepted = self.review(configuration_review)
         except Exception as exc:
             return ConfigTransactionResult(
                 ConfigTransactionState.PRECONDITION_FAILED,
                 f"configuration preflight failed: {exc}",
+                self.transaction_id,
+            )
+
+        if not configuration_review.validation.valid:
+            return ConfigTransactionResult(
+                ConfigTransactionState.PRECONDITION_FAILED,
+                "semantic configuration validation failed: "
+                + "; ".join(item.message for item in configuration_review.validation.errors),
                 self.transaction_id,
             )
 
@@ -227,7 +245,7 @@ class ConfigDeploymentTransaction:
             )
 
         try:
-            if not self.confirm(diff):
+            if not (accepted if self.review is not None else self.confirm(diff)):
                 return ConfigTransactionResult(
                     ConfigTransactionState.CANCELLED,
                     "deployment cancelled after dry-run diff",
