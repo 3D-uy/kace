@@ -7,6 +7,7 @@ machine.
 """
 
 import os
+import io
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -17,8 +18,11 @@ from core.deployer import (
     _copy_artifacts,
     deploy_config,
     deploy_firmware_installation,
+    deploy_local,
     deploy_moonraker,
+    deploy_usb,
 )
+from core.translations import set_lang
 from core.moonraker_deployer import DeployState
 from core.workflow_outcome import WorkflowOutcome, success
 from firmware.artifacts import BuildProvenance
@@ -148,6 +152,9 @@ class MoonrakerBoundaryTests(unittest.TestCase):
 
 
 class LocalExportBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        set_lang("English")
+
     @patch("core.menu.yes_no", return_value=True)
     def test_config_export_preserves_existing_root_through_real_transaction(self, _yes):
         generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"
@@ -173,6 +180,40 @@ class LocalExportBoundaryTests(unittest.TestCase):
             self.assertTrue(_copy_artifacts({"firmware_path": firmware}, destination, "firmware"))
             with open(os.path.join(destination, "firmware.uf2"), "rb") as copied:
                 self.assertEqual(copied.read(), b"firmware")
+
+    @patch("core.deployer.platform.system", return_value="Linux")
+    @patch("core.menu.simple_input", side_effect=["E:\\", None])
+    def test_linux_removable_prompt_does_not_offer_windows_drive_and_explains_boundary(
+        self, prompt, _platform
+    ):
+        with patch("sys.stdout", new_callable=io.StringIO) as output:
+            result = deploy_usb({}, artifact_type="config")
+
+        self.assertEqual(WorkflowOutcome.CANCELLED, result.outcome)
+        first_prompt = prompt.call_args_list[0].args[0]
+        self.assertIn("/media/kace/CARD", first_prompt)
+        self.assertNotIn("E:\\", first_prompt)
+        self.assertIn("not visible to KACE on Linux", output.getvalue())
+
+    @patch("core.deployer.platform.system", return_value="Windows")
+    @patch("core.menu.simple_input", return_value=None)
+    def test_windows_removable_prompt_offers_a_windows_drive(self, prompt, _platform):
+        result = deploy_usb({}, artifact_type="firmware")
+
+        self.assertEqual(WorkflowOutcome.CANCELLED, result.outcome)
+        self.assertIn("E:\\", prompt.call_args.args[0])
+
+    @patch("core.deployer.platform.system", return_value="Linux")
+    @patch("core.menu.simple_input", side_effect=[r"C:\output", None])
+    def test_linux_local_export_explains_that_destination_is_not_the_pc(
+        self, prompt, _platform
+    ):
+        with patch("sys.stdout", new_callable=io.StringIO) as output:
+            result = deploy_local({}, artifact_type="config")
+
+        self.assertEqual(WorkflowOutcome.CANCELLED, result.outcome)
+        self.assertIn("device running KACE", prompt.call_args_list[0].args[0])
+        self.assertIn("not visible to KACE on Linux", output.getvalue())
 
 
 class FirmwareInstallationPreconditionTests(unittest.TestCase):

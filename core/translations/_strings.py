@@ -778,9 +778,9 @@ UI_STRINGS: dict = {
         "Português": "Nenhum (Concluído)",
     },
     "kace.deploy_local": {
-        "English":   "Local Folder (PC)",
-        "Español":   "Carpeta Local (PC)",
-        "Português": "Pasta Local (PC)",
+        "English":   "Local Folder (device running KACE)",
+        "Español":   "Carpeta local (equipo que ejecuta KACE)",
+        "Português": "Pasta local (dispositivo executando KACE)",
     },
     "kace.deploy_usb": {
         "English":   "USB / SD Card",
@@ -1105,6 +1105,51 @@ UI_STRINGS: dict = {
         "Español":   "🛠  Resumen de Destino del Firmware de Klipper",
         "Português": "🛠  Resumo do Alvo do Firmware do Klipper",
     },
+    "builder.contract_board": {
+        "English":   "Board Contract",
+        "Español":   "Contrato de Placa",
+        "Português": "Contrato da Placa",
+    },
+    "builder.hardware_variant": {
+        "English":   "Hardware Variant",
+        "Español":   "Variante de Hardware",
+        "Português": "Variante de Hardware",
+    },
+    "builder.build_target": {
+        "English":   "Verified Build Target",
+        "Español":   "Destino de Compilación Verificado",
+        "Português": "Alvo de Compilação Verificado",
+    },
+    "builder.artifact_filename": {
+        "English":   "Required Firmware Filename",
+        "Español":   "Nombre Requerido del Firmware",
+        "Português": "Nome Obrigatório do Firmware",
+    },
+    "builder.flash_method": {
+        "English":   "Flash Method",
+        "Español":   "Método de Flasheo",
+        "Português": "Método de Gravação",
+    },
+    "builder.kconfig_selections": {
+        "English":   "Exact Kconfig selections:",
+        "Español":   "Selecciones exactas de Kconfig:",
+        "Português": "Seleções exatas do Kconfig:",
+    },
+    "builder.contract_warnings": {
+        "English":   "Board warnings:",
+        "Español":   "Advertencias de la placa:",
+        "Português": "Avisos da placa:",
+    },
+    "builder.contract_locked": {
+        "English":   "These settings are verified by the board contract and cannot be edited in this workflow.",
+        "Español":   "Estos ajustes están verificados por el contrato de placa y no pueden editarse en este flujo.",
+        "Português": "Estas configurações são verificadas pelo contrato da placa e não podem ser editadas neste fluxo.",
+    },
+    "builder.contract_artifact_note": {
+        "English":   "Firmware is prepared at {path}. The later configuration deployment menu copies printer.cfg, not this firmware file.",
+        "Español":   "El firmware quedó preparado en {path}. El menú posterior de despliegue de configuración copia printer.cfg, no este archivo de firmware.",
+        "Português": "O firmware foi preparado em {path}. O menu posterior de deploy da configuração copia printer.cfg, não este arquivo de firmware.",
+    },
     "builder.architecture": {
         "English":   "Architecture",
         "Español":   "Arquitectura",
@@ -1249,6 +1294,56 @@ UI_STRINGS: dict = {
         "English":   "Enter Clock Frequency in Hz (e.g. 120000000):",
         "Español":   "Ingrese la Frecuencia de Reloj en Hz (ej. 120000000):",
         "Português": "Digite a Frequência de Clock em Hz (ex. 120000000):",
+    },
+    "deployment.artifact_config": {
+        "English":   "configuration (printer.cfg)",
+        "Español":   "la configuración (printer.cfg)",
+        "Português": "a configuração (printer.cfg)",
+    },
+    "deployment.artifact_firmware": {
+        "English":   "firmware",
+        "Español":   "el firmware",
+        "Português": "o firmware",
+    },
+    "deployment.artifact_all": {
+        "English":   "configuration and firmware",
+        "Español":   "la configuración y el firmware",
+        "Português": "a configuração e o firmware",
+    },
+    "deployment.removable_prompt_windows": {
+        "English":   "Enter the USB/SD mount path on this Windows computer for {artifact} (e.g. E:\\):",
+        "Español":   "Ingrese la ruta de la USB/SD en este equipo Windows para {artifact} (ej. E:\\):",
+        "Português": "Digite o caminho da USB/SD neste computador Windows para {artifact} (ex. E:\\):",
+    },
+    "deployment.removable_prompt_posix": {
+        "English":   "Enter the USB/SD mount path on the device running KACE for {artifact} (e.g. /media/kace/CARD):",
+        "Español":   "Ingrese la ruta montada de la USB/SD en el equipo que ejecuta KACE para {artifact} (ej. /media/kace/TARJETA):",
+        "Português": "Digite o caminho montado da USB/SD no dispositivo que executa KACE para {artifact} (ex. /media/kace/CARTAO):",
+    },
+    "deployment.removable_prompt_docker": {
+        "English":   "Enter the mounted container path for {artifact} (e.g. /workspace/outputs):",
+        "Español":   "Ingrese la ruta montada dentro del contenedor para {artifact} (ej. /workspace/outputs):",
+        "Português": "Digite o caminho montado dentro do contêiner para {artifact} (ex. /workspace/outputs):",
+    },
+    "deployment.windows_path_posix_error": {
+        "English":   "That Windows drive belongs to the PC and is not visible to KACE on Linux. Connect and mount the card on the device running KACE, then use its Linux path (for example /media/kace/CARD), or transfer the generated file to the PC with SFTP.",
+        "Español":   "Esa unidad de Windows pertenece al PC y KACE no puede verla desde Linux. Conecte y monte la tarjeta en el equipo que ejecuta KACE y use su ruta Linux (por ejemplo /media/kace/TARJETA), o transfiera el archivo generado al PC mediante SFTP.",
+        "Português": "Essa unidade do Windows pertence ao PC e não é visível para o KACE no Linux. Conecte e monte o cartão no dispositivo que executa o KACE e use o caminho Linux (por exemplo /media/kace/CARTAO), ou transfira o arquivo gerado ao PC via SFTP.",
+    },
+    "deployment.windows_path_docker_error": {
+        "English":   "Windows drive paths are not visible inside the container. Use a directory mounted into the container (for example /workspace/outputs).",
+        "Español":   "Las unidades de Windows no son visibles dentro del contenedor. Use un directorio montado en el contenedor (por ejemplo /workspace/outputs).",
+        "Português": "As unidades do Windows não são visíveis dentro do contêiner. Use um diretório montado no contêiner (por exemplo /workspace/outputs).",
+    },
+    "deployment.local_prompt_windows": {
+        "English":   "Enter a destination folder on this Windows computer for {artifact} (e.g. C:\\3DPrinter):",
+        "Español":   "Ingrese una carpeta de destino en este equipo Windows para {artifact} (ej. C:\\3DPrinter):",
+        "Português": "Digite uma pasta de destino neste computador Windows para {artifact} (ex. C:\\3DPrinter):",
+    },
+    "deployment.local_prompt_posix": {
+        "English":   "Enter a destination folder on the device running KACE for {artifact} (e.g. ~/Documents):",
+        "Español":   "Ingrese una carpeta de destino en el equipo que ejecuta KACE para {artifact} (ej. ~/Documentos):",
+        "Português": "Digite uma pasta de destino no dispositivo que executa KACE para {artifact} (ex. ~/Documentos):",
     },
     "builder.derivation_failed": {
         "English":   "Configuration derivation failed: {error}",

@@ -1,4 +1,3 @@
-import os
 from core.translations import t
 from core.motion_model import PrinterMotionSpace
 from core.bed_mesh import generate_bed_mesh_config
@@ -163,7 +162,9 @@ def print_summary(user_data: dict, parsed_data: dict = None):
     if user_data.get("macros_generated"):
         print("    ~/kace/macros.cfg")
     if user_data.get("firmware_path"):
-        print(f"    ~/kace/{os.path.basename(user_data['firmware_path'])}")
+        # BoardContract artifacts live in an identity-specific nested directory.
+        # Preserve the real path instead of suggesting a non-existent ~/kace copy.
+        print(f"    {user_data['firmware_path']}")
     print("")
 
     print(f"  {t('summary.next_steps')}")

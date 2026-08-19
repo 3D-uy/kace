@@ -321,6 +321,30 @@ class BoardContractRuntimeTests(unittest.TestCase):
         legacy_boards.assert_not_called()
         legacy_profiles.assert_not_called()
 
+    @patch("core.firmware_wizard.build_board_contract_runtime")
+    @patch("core.firmware_wizard.yes_no", return_value=False)
+    def test_contract_target_is_fully_reviewed_before_build_confirmation(
+        self, _confirm, contract_build
+    ):
+        user_data = {
+            "board": "generic-creality-v4.2.7.cfg",
+            "mcu_type": "stm32f103",
+            "mcu_hint": "uart",
+        }
+
+        with patch("sys.stdout", new_callable=io.StringIO) as output:
+            result = run_firmware_wizard(user_data)
+
+        self.assertEqual(WorkflowOutcome.SUCCESS, result.outcome)
+        contract_build.assert_not_called()
+        rendered = output.getvalue()
+        self.assertIn("creality.v4.2.7", rendered)
+        self.assertIn("stm32f103-ret6", rendered)
+        self.assertIn("28KiB bootloader", rendered)
+        self.assertIn("uart-usart1-pa10-pa9", rendered)
+        self.assertIn("kace-{build_id_short}.bin", rendered)
+        self.assertIn("CONFIG_MACH_STM32=y", rendered)
+
     @patch("core.firmware_wizard.FirmwareDeploymentService")
     @patch("core.firmware_wizard.build_firmware_orchestrator")
     @patch("core.firmware_wizard._resolve_firmware_configuration")

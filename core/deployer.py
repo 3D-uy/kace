@@ -781,16 +781,23 @@ def deploy_usb(user_data, artifact_type="all"):
     """Deploys the generated artifact(s) to a USB/SD card."""
     try:
         from core.menu import simple_input
+        from core.translations import t
         
-        name_prompt = "Configuration (printer.cfg)" if artifact_type == "config" else \
-                      "Firmware (klipper.bin/.uf2)" if artifact_type == "firmware" else "Configuration and Firmware"
+        artifact_key = "deployment.artifact_config" if artifact_type == "config" else \
+                       "deployment.artifact_firmware" if artifact_type == "firmware" else "deployment.artifact_all"
+        name_prompt = t(artifact_key)
                       
         is_non_windows = platform.system() != "Windows"
         is_docker = os.path.exists('/.dockerenv') or os.environ.get('KACE_DOCKER') == '1'
         
         while True:
+            prompt_key = "deployment.removable_prompt_windows"
+            if is_docker:
+                prompt_key = "deployment.removable_prompt_docker"
+            elif is_non_windows:
+                prompt_key = "deployment.removable_prompt_posix"
             dest = simple_input(
-                f"Enter USB/SD Card mount path for {name_prompt} (e.g. D:\\ or /media/usb)"
+                t(prompt_key, artifact=name_prompt)
             )
             
             if not dest:
@@ -798,10 +805,9 @@ def deploy_usb(user_data, artifact_type="all"):
                 
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
-                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not accessible inside Docker.\033[0m")
-                    print("\033[93m        To write to your Windows machine, please use /workspace (e.g., /workspace/outputs).\033[0m\n")
+                    print(f"\033[91m[Error] {t('deployment.windows_path_docker_error')}\033[0m\n")
                 else:
-                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not supported on non-Windows platforms.\033[0m\n")
+                    print(f"\033[91m[Error] {t('deployment.windows_path_posix_error')}\033[0m\n")
                 continue
             break
         
@@ -829,19 +835,22 @@ def deploy_usb(user_data, artifact_type="all"):
         return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Removable-media deployment failed: {e}")
 
 def deploy_local(user_data, artifact_type="all"):
-    """Copies the requested artifact(s) to a local folder on the PC."""
+    """Copy artifacts to a folder local to the device running KACE."""
     try:
         from core.menu import simple_input
+        from core.translations import t
         
-        name_prompt = "Configuration (printer.cfg)" if artifact_type == "config" else \
-                      "Firmware (klipper.bin/.uf2)" if artifact_type == "firmware" else "Configuration and Firmware"
+        artifact_key = "deployment.artifact_config" if artifact_type == "config" else \
+                       "deployment.artifact_firmware" if artifact_type == "firmware" else "deployment.artifact_all"
+        name_prompt = t(artifact_key)
                       
         is_non_windows = platform.system() != "Windows"
         is_docker = os.path.exists('/.dockerenv') or os.environ.get('KACE_DOCKER') == '1'
         
         while True:
+            prompt_key = "deployment.local_prompt_windows" if not is_non_windows else "deployment.local_prompt_posix"
             dest = simple_input(
-                f"Enter local destination folder path for {name_prompt} (e.g. C:\\3DPrinter or ~/Documents)"
+                t(prompt_key, artifact=name_prompt)
             )
             
             if not dest:
@@ -849,10 +858,9 @@ def deploy_local(user_data, artifact_type="all"):
  
             if is_non_windows and (dest.strip().startswith(tuple(f"{c}:" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")) or '\\' in dest):
                 if is_docker:
-                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not accessible inside Docker.\033[0m")
-                    print("\033[93m        To write to your Windows machine, please use /workspace (e.g., /workspace/outputs).\033[0m\n")
+                    print(f"\033[91m[Error] {t('deployment.windows_path_docker_error')}\033[0m\n")
                 else:
-                    print("\033[91m[Error] Windows drive paths (containing '\\' or drive letters) are not supported on non-Windows platforms.\033[0m\n")
+                    print(f"\033[91m[Error] {t('deployment.windows_path_posix_error')}\033[0m\n")
                 continue
             break
  

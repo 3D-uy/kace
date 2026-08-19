@@ -79,5 +79,14 @@ class TestSummaryPrinter(unittest.TestCase):
         self.assertIn("BLTouch", output)
         self.assertIn("X = -44.0   Y = -9.0", output)
 
+    def test_contract_firmware_summary_preserves_the_real_nested_path(self):
+        firmware_path = "/home/kace/kace/board-contract-plans/board-proof/firmware.bin"
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            print_summary({"probe": "None", "firmware_path": firmware_path})
+
+        self.assertIn(firmware_path, captured.getvalue())
+        self.assertNotIn("    ~/kace/firmware.bin", captured.getvalue())
+
 if __name__ == '__main__':
     unittest.main()

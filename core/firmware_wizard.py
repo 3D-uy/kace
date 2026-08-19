@@ -21,6 +21,7 @@ from firmware.configuration import (
 )
 from firmware.builder import build_firmware_orchestrator, BuildContext
 from firmware.artifacts import BuildArtifact
+from firmware.boards.catalog import load_default_catalog
 from firmware.boards.runtime import (
     BoardContractRuntimeBundle,
     FirmwareAuthority,
@@ -59,6 +60,59 @@ def _read_deployment_usb_identity(device_path):
 def _cancel_firmware_configuration():
     print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
     raise WizardExit()
+
+
+def _board_contract_filename_preview(artifact_policy) -> str:
+    """Describe the exact filename policy before an artifact exists."""
+    policy = artifact_policy.final_filename
+    strategy = policy.get("strategy")
+    if strategy == "fixed":
+        return str(policy.get("value") or artifact_policy.native_filename)
+    if strategy == "native":
+        return artifact_policy.native_filename
+    if strategy == "build-id":
+        return str(policy.get("template") or artifact_policy.native_filename)
+    return artifact_policy.native_filename
+
+
+def _print_board_contract_firmware_review(decision) -> None:
+    """Render the immutable BoardContract target before starting a slow build."""
+    catalog = load_default_catalog()
+    contract = catalog.by_id(decision.board_id)
+    variant = contract.variant(decision.hardware_variant_id) if contract else None
+    target = variant.target(decision.build_target_id) if variant else None
+    if contract is None or variant is None or target is None:
+        raise RuntimeError("selected BoardContract target is no longer available")
+
+    separator = "═" * 55
+
+    def row(label, value):
+        padding = " " * max(0, 30 - len(label))
+        print(f"  {BOLD}{INFO}{label}{RESET}{padding}: {WARNING}{value}{RESET}")
+
+    print(f"\n  {INFO}{separator}{RESET}")
+    print(f"  {BOLD}{INFO}  {t('builder.summary_title')}{RESET}")
+    print(f"  {INFO}{separator}{RESET}")
+    row(t("builder.contract_board"), contract.board_id)
+    row(t("builder.hardware_variant"), variant.id)
+    row(t("builder.build_target"), target.id)
+    row(t("builder.architecture"), variant.processor.architecture.upper())
+    row(t("builder.processor"), variant.processor.resolved_mcu.upper())
+    row(t("builder.bootloader"), variant.bootloader.label)
+    row(t("builder.clock"), variant.clock.label)
+    row(t("builder.comm_interface"), target.transport.kind.value)
+    row(t("builder.artifact_filename"), _board_contract_filename_preview(target.artifact))
+    row(t("builder.flash_method"), target.flash.strategy.value)
+    print(f"\n  {BOLD}{INFO}{t('builder.kconfig_selections')}{RESET}")
+    for symbol, value in sorted(target.requested_kconfig.items()):
+        rendered = "y" if value is True else "n" if value is False else value
+        print(f"    {symbol}={rendered}")
+    if contract.warnings:
+        print(f"\n  {BOLD}{WARNING}{t('builder.contract_warnings')}{RESET}")
+        for warning in contract.warnings:
+            print(f"    - [{warning.severity.value}] {warning.text}")
+    print(f"\n  {WARNING}{t('builder.contract_locked')}{RESET}")
+    print(f"  {INFO}{separator}{RESET}\n")
 
 
 def _is_back(value):
@@ -138,6 +192,12 @@ def _resolve_firmware_configuration(current_mcu, current_hint, resolved_flash=No
 def _run_board_contract_firmware(user_data, decision):
     """Build verified evidence only; never invoke legacy deployment/flashing."""
     prompt_mcu = f"{decision.board_id} / {decision.hardware_variant_id}"
+    try:
+        _print_board_contract_firmware_review(decision)
+    except Exception as exc:
+        message = f"BoardContract firmware review blocked: {exc}"
+        print(f"\n\033[91mERROR:\033[0m {message}")
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
     if not yes_no(t("kace.compile_prompt", mcu=prompt_mcu)):
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
         return success("BoardContract firmware compilation was explicitly skipped.")
@@ -174,6 +234,10 @@ def _run_board_contract_firmware(user_data, decision):
     print(
         f"\033[92mSUCCESS:\033[0m "
         f"{t('kace.firmware_success', path=plan.transformation.final_path)}"
+    )
+    print(
+        f"\033[96m[*]\033[0m "
+        f"{t('builder.contract_artifact_note', path=plan.transformation.final_path)}"
     )
     if (
         os.environ.get("KACE_BOARD_CONTRACT_SD_DEPLOY") == "1"
