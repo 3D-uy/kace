@@ -9,9 +9,10 @@ from the Docker development environment.
 BoardContract builds create their disposable Klipper clone, checkout, compiler
 wrappers, and build output under `~/.cache/kace/workspaces/` by default, rather
 than under `/tmp`. Set `KACE_CACHE_HOME` (or the standard `XDG_CACHE_HOME`) to
-place that workspace on another persistent filesystem. KACE checks that the
-workspace has at least 1 GiB free before cloning and 2 GiB before checkout or
-compilation; every per-run workspace is removed after the build.
+place that workspace on another persistent filesystem. KACE rejects a cache or
+explicit staging parent mounted as `tmpfs`, `ramfs`, or `devtmpfs`, checks that
+the workspace has at least 1 GiB free before cloning and 2 GiB before checkout
+or compilation, and removes every per-run workspace after the build.
 
 ---
 

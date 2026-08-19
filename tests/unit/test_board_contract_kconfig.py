@@ -38,7 +38,7 @@ from firmware.boards.kconfig import (
     verify_resolved_assertions,
     artifact_contains_firmware_fingerprint,
 )
-from core.workspace import WorkspaceSpaceError
+from core.workspace import WorkspaceSpaceError, WorkspaceStorageError
 
 
 TARGETS = (
@@ -317,6 +317,14 @@ class BuildProofPipelineTests(unittest.TestCase):
                 1024 ** 3, 900 * 1024 ** 2, 124 * 1024 ** 2,
             )
             with self.assertRaisesRegex(WorkspaceSpaceError, "Klipper clone"):
+                builder.build(*TARGETS[0], context=self._context())
+        self.assertEqual([], builder.checkouts)
+
+    def test_tmpfs_staging_parent_is_rejected_before_clone(self):
+        contract, variant, target = self._parts(*TARGETS[0])
+        builder = _FixtureBuilder(contract, variant, target)
+        with patch("core.workspace._filesystem_type", return_value="tmpfs"):
+            with self.assertRaisesRegex(WorkspaceStorageError, "volatile tmpfs"):
                 builder.build(*TARGETS[0], context=self._context())
         self.assertEqual([], builder.checkouts)
 

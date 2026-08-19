@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import errno
 import os
 from pathlib import Path
+import re
 import shutil
 import uuid
 from typing import Iterator
@@ -21,10 +22,54 @@ _NO_SPACE_MARKERS = (
     "out of diskspace",
     "disk full",
 )
+_MEMORY_FILESYSTEMS = frozenset({"tmpfs", "ramfs", "devtmpfs"})
 
 
 class WorkspaceSpaceError(RuntimeError):
     """Raised before a heavy operation cannot fit in its workspace."""
+
+
+class WorkspaceStorageError(RuntimeError):
+    """Raised when a heavy workspace is placed on volatile storage."""
+
+
+def _unescape_mount_path(value: str) -> str:
+    return re.sub(
+        r"\\([0-7]{3})",
+        lambda match: chr(int(match.group(1), 8)),
+        value,
+    )
+
+
+def _filesystem_type(path: Path) -> str | None:
+    """Return the Linux filesystem type for the most-specific mount of path."""
+    mounts = Path("/proc/mounts")
+    if not mounts.is_file():
+        return None
+    try:
+        resolved = str(path.resolve())
+        matches: list[tuple[int, str]] = []
+        for line in mounts.read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            if len(fields) < 3:
+                continue
+            mount_point = _unescape_mount_path(fields[1])
+            if resolved == mount_point or resolved.startswith(mount_point.rstrip("/") + "/"):
+                matches.append((len(mount_point), fields[2]))
+        return max(matches)[1] if matches else None
+    except OSError:
+        return None
+
+
+def ensure_disk_backed_workspace(directory: Path | str) -> None:
+    """Reject workspaces mounted on volatile memory filesystems such as `/tmp`."""
+    path = Path(directory).expanduser().resolve()
+    filesystem = _filesystem_type(path)
+    if filesystem in _MEMORY_FILESYSTEMS:
+        raise WorkspaceStorageError(
+            f"Heavy KACE workspace {path} is on volatile {filesystem} storage. "
+            "Use ~/.cache/kace on disk or set KACE_CACHE_HOME to a disk-backed path."
+        )
 
 
 def is_no_space_error(detail: object) -> bool:
@@ -63,6 +108,7 @@ def heavy_workspace(prefix: str, *, parent: Path | str | None = None) -> Iterato
     """Create and safely remove an isolated disk-backed KACE workspace."""
     root = Path(parent).expanduser().resolve() if parent else kace_cache_directory() / "workspaces"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ensure_disk_backed_workspace(root)
     workspace = root / f"{prefix}{uuid.uuid4().hex}"
     workspace.mkdir(mode=0o700)
     try:
