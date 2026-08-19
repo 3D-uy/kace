@@ -31,6 +31,7 @@ class TestInstallRuntimeContract(unittest.TestCase):
         )
         self.assertIsNotNone(wrapper_reference)
         self.assertIn("/scripts/cc_wrapper.py", self.script)
+        self.assertIn("/scripts/board_contract_cc_wrapper.py", self.script)
 
     def test_source_revision_can_be_pinned_to_a_commit(self):
         self.assertIn('INSTALL_REF="${KACE_SOURCE_REF:-}"', self.script)
@@ -75,6 +76,12 @@ class TestInstallRuntimeContract(unittest.TestCase):
         self.assertRegex(self.script, r'mktemp .*KACE_BIN')
         self.assertRegex(self.script, r'mv .*KACE_BIN')
         self.assertNotIn('sudo tee "$KACE_BIN"', self.script)
+
+    def test_launcher_is_bound_to_the_bootstrap_commit(self):
+        self.assertIn('RUNTIME_COMMIT_FILE=".kace-runtime-commit"', self.script)
+        self.assertIn('actual_commit=$(git -C "$install_dir" rev-parse --verify HEAD', self.script)
+        self.assertIn('"$actual_commit" != "$expected_commit"', self.script)
+        self.assertIn('"$ACTIVE_KACE_BIN"', self.script)
 
     def test_unattended_install_can_finish_without_launching_wizard(self):
         guard_index = self.script.index('${KACE_NO_LAUNCH:-0}')

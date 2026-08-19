@@ -50,6 +50,8 @@ class TestInstallWizardFlow(unittest.TestCase):
         fetched_commit: str = "0123456789abcdef0123456789abcdef01234567",
         pip_exit_code: int = 0,
         wrapper_fail: bool = False,
+        no_launch: bool = False,
+        execute_runtime: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -149,6 +151,9 @@ class TestInstallWizardFlow(unittest.TestCase):
             if [ "$1" = "-c" ]; then
                 exit 0
             fi
+            if [ "$KACE_TEST_EXECUTE_RUNTIME" = "1" ]; then
+                exec "$KACE_TEST_REAL_PYTHON" "$@"
+            fi
             echo WIZARD_STARTED
             touch "$KACE_TEST_WIZARD_MARKER"
             echo WIZARD_FINISHED
@@ -173,6 +178,8 @@ class TestInstallWizardFlow(unittest.TestCase):
                 "KACE_TEST_FETCHED_COMMIT": fetched_commit,
                 "KACE_TEST_PIP_EXIT": str(pip_exit_code),
                 "KACE_TEST_WRAPPER_FAIL": "1" if wrapper_fail else "0",
+                "KACE_NO_LAUNCH": "1" if no_launch else "0",
+                "KACE_TEST_EXECUTE_RUNTIME": "1" if execute_runtime else "0",
                 "MSYS2_ENV_CONV_EXCL": "KACE_VENV_FROM;KACE_VENV_TO",
                 "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
             }
@@ -214,6 +221,48 @@ class TestInstallWizardFlow(unittest.TestCase):
             ".kace-install.",
             (install_dir / "venv" / "pyvenv.cfg").read_text(encoding="utf-8"),
         )
+
+    def test_existing_outdated_install_executes_the_expected_commit(self):
+        expected = "0123456789abcdef0123456789abcdef01234567"
+        result, marker, install_dir = self._run_installer(
+            0,
+            fetched_commit=expected,
+            no_launch=True,
+            execute_runtime=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertEqual(
+            (install_dir / ".kace-runtime-commit").read_text(encoding="utf-8").strip(),
+            expected,
+        )
+        launcher = install_dir.parent / ".local" / "bin" / "kace"
+        fake_bin = install_dir.parent.parent / "bin"
+        launched = subprocess.run(
+            [
+                _find_bash(),
+                "-c",
+                'export PATH="$1:$PATH"; exec "$2"',
+                "launcher-test",
+                _shell_path(fake_bin),
+                _shell_path(launcher),
+            ],
+            env={
+                **os.environ,
+                "KACE_TEST_FETCHED_COMMIT": expected,
+                "KACE_TEST_REAL_PYTHON": _shell_path(Path(sys.executable)),
+                "KACE_TEST_EXECUTE_RUNTIME": "1",
+            },
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        self.assertEqual(launched.returncode, 0, launched.stdout + launched.stderr)
+        self.assertIn("new runtime", launched.stdout)
+        self.assertNotIn("old runtime", launched.stdout)
 
     def test_wizard_failure_is_returned_by_installer(self):
         result, marker, _install_dir = self._run_installer(7)

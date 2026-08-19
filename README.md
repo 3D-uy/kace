@@ -146,7 +146,7 @@ The standalone command installs from a reviewed immutable commit:
 KACE_COMMIT='8c6822553b966b3e7ce657cf5369b33730c37e07'; KACE_INSTALL_SHA256='29b4a5124d36bcdef852f4d6e966db7bf73ba853920c080826da8251b6dde930'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
-The installer is downloaded to a temporary file, verified before execution, and bound to the same full commit through `KACE_SOURCE_REF` and `KACE_EXPECTED_COMMIT`. It verifies the fetched and checked-out commit, builds a fresh staged virtual environment, and publishes only installer-owned runtime paths with rollback. Generated artifacts already stored under `~/kace/` remain untouched.
+The installer is downloaded to a temporary file, verified before execution, and bound to the same full commit through `KACE_SOURCE_REF` and `KACE_EXPECTED_COMMIT`. It verifies the fetched and checked-out commit, builds a fresh staged virtual environment, and publishes only installer-owned runtime paths with rollback. The installed `kace` launcher rechecks the persisted bootstrap pin against the local repository `HEAD` on every invocation, so it cannot silently execute another revision. Generated artifacts already stored under `~/kace/` remain untouched.
 
 ### Run from a source checkout
 

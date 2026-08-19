@@ -146,7 +146,7 @@ O comando standalone instala a partir de um commit imutável revisado:
 KACE_COMMIT='8c6822553b966b3e7ce657cf5369b33730c37e07'; KACE_INSTALL_SHA256='29b4a5124d36bcdef852f4d6e966db7bf73ba853920c080826da8251b6dde930'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
-O instalador é baixado para um arquivo temporário, verificado antes da execução e vinculado ao mesmo commit completo por `KACE_SOURCE_REF` e `KACE_EXPECTED_COMMIT`. O instalador verifica o commit obtido e o checkout, cria um ambiente virtual novo em staging e publica somente os caminhos de runtime que controla, com rollback. Os artefatos gerados existentes em `~/kace/` permanecem intactos.
+O instalador é baixado para um arquivo temporário, verificado antes da execução e vinculado ao mesmo commit completo por `KACE_SOURCE_REF` e `KACE_EXPECTED_COMMIT`. O instalador verifica o commit obtido e o checkout, cria um ambiente virtual novo em staging e publica somente os caminhos de runtime que controla, com rollback. O launcher `kace` instalado compara em cada execução o pin persistido pelo bootstrap com o `HEAD` do repositório local, portanto não pode executar silenciosamente outra revisão. Os artefatos gerados existentes em `~/kace/` permanecem intactos.
 
 ### Executar a partir de um checkout do código-fonte
 

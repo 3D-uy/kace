@@ -38,6 +38,8 @@ STAGING_DIR=""
 BACKUP_DIR=""
 PUBLISHED_PATHS=""
 PUBLICATION_ACTIVE=0
+ACTIVE_KACE_BIN=""
+RUNTIME_COMMIT_FILE=".kace-runtime-commit"
 
 _run_root() {
     if [ "$(id -u)" -eq 0 ]; then
@@ -210,7 +212,8 @@ _SPARSE_PATTERNS="/kace.py
 /firmware/
 /data/
 /templates/
-/scripts/cc_wrapper.py"
+/scripts/cc_wrapper.py
+/scripts/board_contract_cc_wrapper.py"
 
 # Check if sparse checkout is supported (requires Git >= 2.25)
 _git_supports_sparse() {
@@ -296,12 +299,13 @@ echo -e "${G}  ✔ Python dependencies verified (isolated venv)${R}"
 # ── Step 4: Configure executable permissions ─────────────────
 echo -e "${C}[4/5]${R} Configuring permissions..."
 chmod +x "$STAGING_DIR/kace.py"
+printf '%s\n' "$ACTUAL_COMMIT" > "$STAGING_DIR/$RUNTIME_COMMIT_FILE"
 
 # Publish only installer-owned runtime paths. Generated printer configs,
 # firmware artifacts, deployment manifests, snapshots, and any other files in
 # ~/kace remain untouched. A failure before wrapper publication restores every
 # replaced runtime path from the same-filesystem backup.
-_RUNTIME_PATHS=".git kace.py VERSION requirements.txt requirements-ssh.txt core firmware data templates scripts venv"
+_RUNTIME_PATHS=".git $RUNTIME_COMMIT_FILE kace.py VERSION requirements.txt requirements-ssh.txt core firmware data templates scripts venv"
 for item in $_RUNTIME_PATHS; do
     if [ ! -e "$STAGING_DIR/$item" ] && [ ! -L "$STAGING_DIR/$item" ]; then
         echo -e "${E}  Staged runtime is incomplete: ${item} is missing.${R}" >&2
@@ -326,6 +330,10 @@ if [ "$PUBLISHED_COMMIT" != "$ACTUAL_COMMIT" ]; then
     echo -e "${E}  Published runtime does not match the verified staged commit.${R}" >&2
     exit 1
 fi
+if [ "$(tr -d '\r\n' < "$INSTALL_DIR/$RUNTIME_COMMIT_FILE")" != "$EXPECTED_COMMIT" ]; then
+    echo -e "${E}  Published runtime pin does not match the expected commit.${R}" >&2
+    exit 1
+fi
 if ! "$INSTALL_DIR/venv/bin/python" -c 'import jinja2, questionary, yaml'; then
     echo -e "${E}  Published virtual environment failed its import preflight.${R}" >&2
     exit 1
@@ -345,6 +353,15 @@ if [ "$(id -u)" -eq 0 ] || command -v sudo &>/dev/null; then
     WRAPPER_TEMP=$(_run_root mktemp "$(dirname "$KACE_BIN")/.kace.XXXXXX")
     if ! printf '%s\n' \
         '#!/usr/bin/env bash' \
+        'set -euo pipefail' \
+        "expected_commit=\"$EXPECTED_COMMIT\"" \
+        "install_dir=\"$INSTALL_DIR\"" \
+        'pinned_commit=$(tr -d '\''\r\n'\'' < "$install_dir/.kace-runtime-commit")' \
+        'actual_commit=$(git -C "$install_dir" rev-parse --verify HEAD 2>/dev/null)' \
+        'if [ "$pinned_commit" != "$expected_commit" ] || [ "$actual_commit" != "$expected_commit" ]; then' \
+        '    echo "KACE runtime does not match the bootstrap-pinned commit $expected_commit." >&2' \
+        '    exit 70' \
+        'fi' \
         "exec \"$INSTALL_DIR/venv/bin/python\" \"$INSTALL_DIR/kace.py\" \"\$@\"" | \
             _run_root tee "$WRAPPER_TEMP" >/dev/null; then
         _run_root rm -f -- "$WRAPPER_TEMP" || true
@@ -352,6 +369,7 @@ if [ "$(id -u)" -eq 0 ] || command -v sudo &>/dev/null; then
     fi
     _run_root chmod 0755 "$WRAPPER_TEMP"
     _run_root mv -f -- "$WRAPPER_TEMP" "$KACE_BIN"
+    ACTIVE_KACE_BIN="$KACE_BIN"
     echo -e "${G}  ✔ Global wrapper command created: ${B}kace${R} → ${KACE_BIN}${R}"
 else
     # Fallback: add to user's PATH via ~/.local/bin
@@ -360,10 +378,20 @@ else
     WRAPPER_TEMP=$(mktemp "$FALLBACK_BIN/.kace.XXXXXX")
     printf '%s\n' \
         '#!/usr/bin/env bash' \
+        'set -euo pipefail' \
+        "expected_commit=\"$EXPECTED_COMMIT\"" \
+        "install_dir=\"$INSTALL_DIR\"" \
+        'pinned_commit=$(tr -d '\''\r\n'\'' < "$install_dir/.kace-runtime-commit")' \
+        'actual_commit=$(git -C "$install_dir" rev-parse --verify HEAD 2>/dev/null)' \
+        'if [ "$pinned_commit" != "$expected_commit" ] || [ "$actual_commit" != "$expected_commit" ]; then' \
+        '    echo "KACE runtime does not match the bootstrap-pinned commit $expected_commit." >&2' \
+        '    exit 70' \
+        'fi' \
         "exec \"$INSTALL_DIR/venv/bin/python\" \"$INSTALL_DIR/kace.py\" \"\$@\"" \
         > "$WRAPPER_TEMP"
     chmod 0755 "$WRAPPER_TEMP"
     mv -f -- "$WRAPPER_TEMP" "$FALLBACK_BIN/kace"
+    ACTIVE_KACE_BIN="$FALLBACK_BIN/kace"
     echo -e "${Y}  ⚠ sudo not available. Created fallback wrapper at ${FALLBACK_BIN}/kace${R}"
     echo -e "${Y}  ⚠ Make sure ${FALLBACK_BIN} is in your PATH:${R}"
     echo -e "${Y}     export PATH=\"\$HOME/.local/bin:\$PATH\"${R}"
@@ -390,9 +418,8 @@ echo -e "  ${C}Launching KACE...${R}"
 sleep 1
 # Reconnect stdin to the terminal so interactive prompts (questionary) work
 exec < /dev/tty || true
-cd "$INSTALL_DIR"
 set +e
-./venv/bin/python kace.py
+"$ACTIVE_KACE_BIN"
 KACE_EXIT=$?
 set -e
 exit "$KACE_EXIT"
