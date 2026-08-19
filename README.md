@@ -63,7 +63,7 @@ KACE is the Raspberry Pi-side interactive CLI in the KACE ecosystem. It guides a
 | Source checkout or contributor setup | Clone the repository, install the locked dependencies, and run `python kace.py`. |
 
 ```bash
-KACE_COMMIT='cd12a469e5314a71da284f30fd80caaa1f0b7716'; KACE_INSTALL_SHA256='29b4a5124d36bcdef852f4d6e966db7bf73ba853920c080826da8251b6dde930'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
+KACE_COMMIT='c960cb7710658eedf01e30c73cfd2b09995cef96'; KACE_INSTALL_SHA256='29b4a5124d36bcdef852f4d6e966db7bf73ba853920c080826da8251b6dde930'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 > [!WARNING]
@@ -143,7 +143,7 @@ For a new Raspberry Pi, use [KACE Studio](https://github.com/3D-uy/KACE-studio).
 The standalone command installs from a reviewed immutable commit:
 
 ```bash
-KACE_COMMIT='cd12a469e5314a71da284f30fd80caaa1f0b7716'; KACE_INSTALL_SHA256='29b4a5124d36bcdef852f4d6e966db7bf73ba853920c080826da8251b6dde930'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
+KACE_COMMIT='c960cb7710658eedf01e30c73cfd2b09995cef96'; KACE_INSTALL_SHA256='29b4a5124d36bcdef852f4d6e966db7bf73ba853920c080826da8251b6dde930'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 The installer is downloaded to a temporary file, verified before execution, and bound to the same full commit through `KACE_SOURCE_REF` and `KACE_EXPECTED_COMMIT`. It verifies the fetched and checked-out commit, builds a fresh staged virtual environment, and publishes only installer-owned runtime paths with rollback. Generated artifacts already stored under `~/kace/` remain untouched.
