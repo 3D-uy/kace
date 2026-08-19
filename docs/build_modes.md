@@ -4,6 +4,15 @@ This document explains the three firmware build paths available in KACE, how to
 identify which mode is active, and how to obtain a real, flashable Klipper binary
 from the Docker development environment.
 
+## Build workspace
+
+BoardContract builds create their disposable Klipper clone, checkout, compiler
+wrappers, and build output under `~/.cache/kace/workspaces/` by default, rather
+than under `/tmp`. Set `KACE_CACHE_HOME` (or the standard `XDG_CACHE_HOME`) to
+place that workspace on another persistent filesystem. KACE checks that the
+workspace has at least 1 GiB free before cloning and 2 GiB before checkout or
+compilation; every per-run workspace is removed after the build.
+
 ---
 
 ## 1. Mock Build (Default — Docker Dev Container)

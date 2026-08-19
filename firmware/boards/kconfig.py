@@ -17,12 +17,19 @@ import re
 import shutil
 import struct
 import subprocess
-import tempfile
 import uuid
 import zlib
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from firmware.identity import ToolchainIdentity
+from core.workspace import (
+    BUILD_MINIMUM_FREE_BYTES,
+    CHECKOUT_MINIMUM_FREE_BYTES,
+    CLONE_MINIMUM_FREE_BYTES,
+    ensure_free_space,
+    heavy_workspace,
+    is_no_space_error,
+)
 
 from .catalog import BoardCatalog, load_default_catalog
 from .models import ArtifactFormat, BoardContract, BuildTarget, HardwareVariant, TransportKind
@@ -72,6 +79,15 @@ class ArtifactValidationError(BoardContractBuildError):
 
 class BuildCommandError(BoardContractBuildError):
     def __init__(self, phase: str, result: "CommandProof"):
+        if is_no_space_error(result.stderr_tail) or is_no_space_error(result.stdout_tail):
+            super().__init__(
+                f"{phase} failed because the build workspace ran out of disk space. "
+                "Free space on the workspace filesystem or set KACE_CACHE_HOME "
+                "to a larger disk."
+            )
+            self.phase = phase
+            self.result = result
+            return
         detail = result.stderr_tail or result.stdout_tail
         message = f"{phase} failed with exit code {result.returncode}"
         if detail:
@@ -579,13 +595,14 @@ class BoardContractKconfigBuilder:
             self._reject_legacy_path(staging_parent, "staging_parent")
             staging_parent.mkdir(parents=True, exist_ok=True)
 
-        with tempfile.TemporaryDirectory(
-            prefix="kace-board-contract-", dir=str(staging_parent) if staging_parent else None
-        ) as temporary:
-            staging_root = Path(temporary).resolve()
+        with heavy_workspace(
+            "board-contract-", parent=staging_parent
+        ) as staging_root:
+            ensure_free_space(staging_root, CLONE_MINIMUM_FREE_BYTES, "Klipper clone")
             checkout = staging_root / "klipper"
             self._prepare_checkout(checkout, contract, context)
             self._reject_legacy_checkout(checkout)
+            ensure_free_space(staging_root, CHECKOUT_MINIMUM_FREE_BYTES, "Klipper checkout")
             commit = self._read_checkout_commit(checkout, context)
             if commit != contract.upstream.validated_commit:
                 raise CheckoutCommitMismatch(
@@ -621,6 +638,7 @@ class BoardContractKconfigBuilder:
         )
         if not clone.ok:
             raise BuildCommandError("git clone", clone)
+        ensure_free_space(checkout.parent, CHECKOUT_MINIMUM_FREE_BYTES, "Klipper checkout")
         checkout_result = self._run(
             (*context.git_command, "checkout", "--detach", contract.upstream.validated_commit),
             checkout,
@@ -666,6 +684,7 @@ class BoardContractKconfigBuilder:
         output_root: Path,
         commit: str,
     ) -> BuildProof:
+        ensure_free_space(checkout.parent, BUILD_MINIMUM_FREE_BYTES, "Klipper firmware build")
         environment = self._environment(context)
         requested_bytes = serialize_requested_config(target.requested_kconfig)
         declared_symbols = collect_declared_kconfig_symbols(checkout)
@@ -754,13 +773,11 @@ class BoardContractKconfigBuilder:
                 "native artifact identify metadata does not contain the requested fingerprint"
             )
 
-        evidence_dir = Path(tempfile.mkdtemp(
-            prefix=(
-                f"{contract.board_id}-{variant.id}-{target.id}-"
-                f"{contract.contract_digest[:12]}-"
-            ),
-            dir=output_root,
-        ))
+        evidence_dir = output_root / (
+            f"{contract.board_id}-{variant.id}-{target.id}-"
+            f"{contract.contract_digest[:12]}-{uuid.uuid4().hex}"
+        )
+        evidence_dir.mkdir(mode=0o700)
         requested_evidence = evidence_dir / "requested.config"
         resolved_evidence = evidence_dir / "resolved.config"
         artifact_evidence = evidence_dir / target.artifact.native_filename

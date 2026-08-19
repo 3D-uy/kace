@@ -6,11 +6,14 @@ from copy import deepcopy
 from dataclasses import FrozenInstanceError
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 import zlib
 
 from firmware.boards.catalog import load_default_catalog
@@ -18,6 +21,8 @@ from firmware.boards.kconfig import (
     ArtifactValidationError,
     BoardContractBuildContext,
     BoardContractKconfigBuilder,
+    BuildCommandError,
+    CommandProof,
     CheckoutError,
     CheckoutCommitMismatch,
     DiscardedKconfigSelection,
@@ -33,6 +38,7 @@ from firmware.boards.kconfig import (
     verify_resolved_assertions,
     artifact_contains_firmware_fingerprint,
 )
+from core.workspace import WorkspaceSpaceError
 
 
 TARGETS = (
@@ -276,6 +282,50 @@ class BuildProofPipelineTests(unittest.TestCase):
                 with self.assertRaises(FrozenInstanceError):
                     proof.artifact_size = 0
                 self.assertTrue(all(checkout != Path.home() / "klipper" for checkout in builder.checkouts))
+
+    def test_default_workspace_uses_kace_cache_not_a_small_system_temp(self):
+        contract, variant, target = self._parts(*TARGETS[0])
+        builder = _FixtureBuilder(contract, variant, target)
+        cache_home = Path(self.staging.name) / "cache-home"
+        small_tmp = Path(self.staging.name) / "small-tmp"
+        small_tmp.mkdir()
+
+        def disk_usage(path):
+            path = Path(path).resolve()
+            free = 128 * 1024 ** 2 if path.is_relative_to(small_tmp.resolve()) else 10 * 1024 ** 3
+            return shutil._ntuple_diskusage(20 * 1024 ** 3, 10 * 1024 ** 3, free)
+
+        with patch.dict(os.environ, {"KACE_CACHE_HOME": str(cache_home)}), \
+             patch("tempfile.gettempdir", return_value=str(small_tmp)), \
+             patch("core.workspace.shutil.disk_usage", side_effect=disk_usage):
+            proof = builder.build(
+                *TARGETS[0],
+                context=BoardContractBuildContext(output_directory=self.output.name),
+            )
+
+        self.assertTrue(Path(proof.artifact_path).is_file())
+        self.assertEqual(
+            cache_home / "kace" / "workspaces",
+            builder.checkouts[0].parent.parent,
+        )
+
+    def test_insufficient_workspace_space_fails_before_checkout(self):
+        contract, variant, target = self._parts(*TARGETS[0])
+        builder = _FixtureBuilder(contract, variant, target)
+        with patch("core.workspace.shutil.disk_usage") as disk_usage:
+            disk_usage.return_value = shutil._ntuple_diskusage(
+                1024 ** 3, 900 * 1024 ** 2, 124 * 1024 ** 2,
+            )
+            with self.assertRaisesRegex(WorkspaceSpaceError, "Klipper clone"):
+                builder.build(*TARGETS[0], context=self._context())
+        self.assertEqual([], builder.checkouts)
+
+    def test_enospc_command_error_hides_repeated_git_output(self):
+        repeated = "unable to write file: No space left on device\n" * 300
+        result = CommandProof(("git", "checkout"), 128, "", "", "", repeated)
+        error = BuildCommandError("git checkout", result)
+        self.assertIn("ran out of disk space", str(error))
+        self.assertNotIn("unable to write file", str(error))
 
     def test_missing_expected_artifact_is_rejected(self):
         contract, variant, target = self._parts(*TARGETS[0])

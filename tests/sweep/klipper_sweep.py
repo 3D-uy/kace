@@ -12,7 +12,6 @@ import os
 import re
 import sys
 import subprocess
-import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_HERE, '..', '..'))
@@ -22,6 +21,7 @@ if _ROOT not in sys.path:
 from tests.sweep.result_codes import SweepResult, SweepSummary
 from tests.klipper_contract import KLIPPER_REF, KLIPPER_REPO_URL
 from core.advanced_module_handler import is_unsupported_section
+from core.workspace import CLONE_MINIMUM_FREE_BYTES, ensure_free_space, heavy_workspace
 
 CONFIG_SUBDIR    = "config"
 
@@ -106,7 +106,9 @@ def run_full_sweep(verbose=False):
     print("  KACE — Full Klipper Config Sweep")
     print("=" * 60)
 
-    with tempfile.TemporaryDirectory(prefix="kace_sweep_") as tmpdir:
+    with heavy_workspace("klipper-sweep-") as workspace:
+        ensure_free_space(workspace, CLONE_MINIMUM_FREE_BYTES, "Klipper sweep clone")
+        tmpdir = str(workspace)
         if not _clone_klipper(tmpdir):
             print("\n\033[91mSweep aborted — could not clone Klipper.\033[0m")
             return False

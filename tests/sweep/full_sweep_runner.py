@@ -14,7 +14,6 @@ import os
 import re
 import sys
 import subprocess
-import tempfile
 import time
 import datetime
 import argparse
@@ -35,6 +34,7 @@ except (AttributeError, OSError):
 
 from tests.sweep.result_codes import SweepResult, SweepSummary
 from tests.klipper_contract import KLIPPER_REF, KLIPPER_REPO_URL
+from core.workspace import CLONE_MINIMUM_FREE_BYTES, ensure_free_space, heavy_workspace
 from core.scraper import parse_config, extract_profile_defaults
 from core.generator import generate_config
 from core.advanced_module_handler import is_unsupported_section
@@ -222,7 +222,9 @@ def run_full_sweep(verbose=False):
             pass
     os.makedirs(output_dir, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="kace_sweep_") as tmpdir:
+    with heavy_workspace("klipper-sweep-") as workspace:
+        ensure_free_space(workspace, CLONE_MINIMUM_FREE_BYTES, "Klipper sweep clone")
+        tmpdir = str(workspace)
         if not _clone_klipper(tmpdir):
             log("\n\033[91mSweep aborted — could not clone Klipper.\033[0m")
             return False
