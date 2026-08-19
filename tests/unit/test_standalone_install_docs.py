@@ -8,8 +8,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-IMMUTABLE_REF = "8c6822553b966b3e7ce657cf5369b33730c37e07"
-INSTALL_SHA256 = "29b4a5124d36bcdef852f4d6e966db7bf73ba853920c080826da8251b6dde930"
+IMMUTABLE_REF = "8a07d3e5a5f375c6d14bddc391658a8185f4b347"
+INSTALL_SHA256 = "0a27bfc3064bc6baf35b02a3960dbbfa37b5c0e7d1d989e22eb97230a698c9e4"
 
 
 class TestStandaloneInstallDocs(unittest.TestCase):
