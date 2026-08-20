@@ -12,6 +12,8 @@ import shutil
 import subprocess
 import struct
 import tempfile
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zlib
@@ -37,6 +39,7 @@ from firmware.boards.kconfig import (
     verify_requested_selections,
     verify_resolved_assertions,
     artifact_contains_firmware_fingerprint,
+    recommended_build_concurrency,
 )
 from core.workspace import WorkspaceSpaceError, WorkspaceStorageError
 
@@ -70,12 +73,24 @@ def _resolved_config(values):
 class _FixtureBuilder(BoardContractKconfigBuilder):
     """Exercises the complete pipeline with deterministic fake make output."""
 
-    def __init__(self, contract, variant, target, *, create_artifact=True, wrong_commit=False):
+    def __init__(
+        self,
+        contract,
+        variant,
+        target,
+        *,
+        create_artifact=True,
+        wrong_commit=False,
+        lto_fail_first=False,
+    ):
         self.fixture_contract = contract
         self.fixture_variant = variant
         self.fixture_target = target
         self.create_artifact = create_artifact
         self.wrong_commit = wrong_commit
+        self.lto_fail_first = lto_fail_first
+        self.build_calls = 0
+        self.commands = []
         self.checkouts = []
         super().__init__(command_runner=self._command)
 
@@ -100,7 +115,11 @@ class _FixtureBuilder(BoardContractKconfigBuilder):
             return "0" * 40
         return self.fixture_contract.upstream.validated_commit
 
+    def _verify_checkout_clean(self, checkout, context):
+        return None
+
     def _command(self, argv, cwd, environment):
+        self.commands.append(tuple(argv))
         if "olddefconfig" in argv:
             requested = parse_kconfig((cwd / ".config").read_bytes())
             requested.update(self.fixture_target.resolved_assertions)
@@ -109,6 +128,11 @@ class _FixtureBuilder(BoardContractKconfigBuilder):
             argv and Path(argv[0]).name == "make"
             and any(item.startswith("KLIPPER_VERSION=") for item in argv)
         ):
+            self.build_calls += 1
+            if self.lto_fail_first and self.build_calls == 1:
+                return subprocess.CompletedProcess(
+                    argv, 1, stdout="", stderr="lto-wrapper failed for ltrans object"
+                )
             if self.create_artifact:
                 artifact = cwd / self.fixture_target.artifact.native_path
                 artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -223,6 +247,180 @@ class TargetCompatibilityTests(unittest.TestCase):
             validate_target_contract(self.variant, target)
 
 
+class BuildConcurrencyTests(unittest.TestCase):
+    def test_raspberry_pi_3_uses_two_jobs(self):
+        self.assertEqual(
+            2,
+            recommended_build_concurrency(
+                cpu_count=4,
+                model="Raspberry Pi 3 Model B Plus Rev 1.3",
+                memory_bytes=1024 ** 3,
+            ),
+        )
+
+    def test_other_hosts_are_bounded_by_cpu_memory_and_global_cap(self):
+        self.assertEqual(
+            3,
+            recommended_build_concurrency(
+                cpu_count=12,
+                model="Generic Linux host",
+                memory_bytes=3 * 512 * 1024 ** 2,
+            ),
+        )
+        self.assertEqual(
+            1,
+            recommended_build_concurrency(
+                cpu_count=8,
+                model="Generic Linux host",
+                memory_bytes=256 * 1024 ** 2,
+            ),
+        )
+
+
+class ProgressReportingTests(unittest.TestCase):
+    def test_long_phase_emits_elapsed_heartbeats_without_command_output(self):
+        messages = []
+        context = BoardContractBuildContext(
+            output_directory="unused",
+            progress_reporter=messages.append,
+            progress_interval_seconds=0.01,
+        )
+        builder = BoardContractKconfigBuilder()
+
+        with builder._phase("Compilando firmware", context):
+            time.sleep(0.035)
+
+        self.assertTrue(any("en curso" in message for message in messages))
+        self.assertTrue(
+            messages[-1].startswith("[OK] Compilando firmware completado en")
+        )
+
+
+class PersistentSourceCacheTests(unittest.TestCase):
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("git is required for source-cache tests")
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.source = self.root / "source"
+        self.source.mkdir()
+        self._git("init", "--quiet", cwd=self.source)
+        self._git("config", "user.email", "cache-test@example.invalid", cwd=self.source)
+        self._git("config", "user.name", "KACE Cache Test", cwd=self.source)
+        (self.source / "Makefile").write_text("validated source\n", encoding="utf-8")
+        self._git("add", "Makefile", cwd=self.source)
+        self._git("commit", "--quiet", "-m", "validated source", cwd=self.source)
+        self.commit = self._git("rev-parse", "HEAD", cwd=self.source).stdout.strip()
+        self.repository = "https://example.invalid/Klipper3d/klipper.git"
+        self.contract = SimpleNamespace(
+            upstream=SimpleNamespace(
+                repository=self.repository,
+                validated_commit=self.commit,
+            )
+        )
+        self.cache_home = self.root / "cache-home"
+        self.output = self.root / "output"
+        self.output.mkdir()
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    @staticmethod
+    def _git(*argv, cwd):
+        return subprocess.run(
+            ("git", *argv),
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def _context(self, reporter=None):
+        return BoardContractBuildContext(
+            output_directory=str(self.output),
+            source_checkout=str(self.source),
+            progress_reporter=reporter,
+            progress_interval_seconds=0,
+        )
+
+    def _prepare(self, name, *, reporter=None):
+        checkout = self.root / name
+        builder = BoardContractKconfigBuilder()
+        with patch.dict(os.environ, {"KACE_CACHE_HOME": str(self.cache_home)}):
+            builder._prepare_checkout(
+                checkout, self.contract, self._context(reporter=reporter)
+            )
+            cache = builder._source_cache_path(self.repository)
+        return builder, checkout, cache
+
+    def test_warm_cache_reuses_exact_commit_without_source_or_build_outputs(self):
+        _builder, first, cache = self._prepare("checkout-1")
+        self.assertTrue(cache.is_dir())
+        (first / ".config").write_text("CONFIG_STALE=y\n", encoding="utf-8")
+        (first / "out").mkdir()
+        (first / "out" / "klipper.bin").write_bytes(b"stale")
+        os.replace(self.source, self.root / "source-unavailable")
+
+        _builder, second, reused_cache = self._prepare("checkout-2")
+
+        self.assertEqual(cache, reused_cache)
+        self.assertEqual(
+            self.commit,
+            self._git("rev-parse", "HEAD", cwd=second).stdout.strip(),
+        )
+        self.assertEqual(
+            "", self._git("status", "--porcelain", cwd=second).stdout.strip()
+        )
+        self.assertFalse((second / ".config").exists())
+        self.assertFalse((second / "out").exists())
+        self.assertFalse((cache / ".config").exists())
+        self.assertFalse((cache / "out").exists())
+
+    def test_corrupt_cache_is_rebuilt_automatically(self):
+        _builder, _first, cache = self._prepare("checkout-1")
+        shutil.rmtree(cache / "objects")
+        messages = []
+
+        _builder, checkout, rebuilt_cache = self._prepare(
+            "checkout-2", reporter=messages.append
+        )
+
+        self.assertEqual(cache, rebuilt_cache)
+        self.assertEqual(
+            self.commit,
+            self._git("rev-parse", "HEAD", cwd=checkout).stdout.strip(),
+        )
+        self.assertTrue(any("reconstruyendo" in message for message in messages))
+
+    def test_dirty_isolated_checkout_is_rejected_before_configuration(self):
+        builder, checkout, _cache = self._prepare("checkout-1")
+        (checkout / ".config").write_text("CONFIG_UNTRUSTED=y\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(CheckoutError, "dirty before configuration"):
+            builder._verify_checkout_clean(checkout, self._context())
+
+    def test_missing_validated_commit_is_rejected_without_replacing_good_cache(self):
+        builder, _checkout, cache = self._prepare("checkout-1")
+        wrong_contract = SimpleNamespace(
+            upstream=SimpleNamespace(
+                repository=self.repository,
+                validated_commit="0" * 40,
+            )
+        )
+        with patch.dict(os.environ, {"KACE_CACHE_HOME": str(self.cache_home)}):
+            with self.assertRaisesRegex(CheckoutError, "validated commit"):
+                builder._prepare_checkout(
+                    self.root / "checkout-wrong", wrong_contract, self._context()
+                )
+        self.assertTrue(cache.is_dir())
+        self.assertEqual(
+            self.commit,
+            self._git(
+                "--git-dir", str(cache), "rev-parse", self.commit, cwd=self.root
+            ).stdout.strip(),
+        )
+
+
 class BuildProofPipelineTests(unittest.TestCase):
     def setUp(self):
         self.catalog = load_default_catalog(refresh=True)
@@ -281,7 +479,104 @@ class BuildProofPipelineTests(unittest.TestCase):
                 self.assertTrue((Path(proof.artifact_path).parent / "build-proof.json").is_file())
                 with self.assertRaises(FrozenInstanceError):
                     proof.artifact_size = 0
-                self.assertTrue(all(checkout != Path.home() / "klipper" for checkout in builder.checkouts))
+                self.assertTrue(
+                    all(
+                        checkout != Path.home() / "klipper"
+                        for checkout in builder.checkouts
+                    )
+                )
+
+    def test_automatic_parallelism_is_recorded_in_the_build_command(self):
+        contract, variant, target = self._parts(*TARGETS[0])
+        builder = _FixtureBuilder(contract, variant, target)
+        with patch(
+            "firmware.boards.kconfig.recommended_build_concurrency",
+            return_value=2,
+        ):
+            proof = builder.build(
+                *TARGETS[0],
+                context=BoardContractBuildContext(
+                    output_directory=self.output.name,
+                    staging_parent=self.staging.name,
+                    progress_interval_seconds=0,
+                ),
+            )
+        self.assertIn("-j2", proof.build.argv)
+
+    def test_explicit_parallelism_overrides_host_detection(self):
+        contract, variant, target = self._parts(*TARGETS[0])
+        builder = _FixtureBuilder(contract, variant, target)
+        with patch(
+            "firmware.boards.kconfig.recommended_build_concurrency",
+            return_value=4,
+        ) as detector:
+            proof = builder.build(
+                *TARGETS[0],
+                context=BoardContractBuildContext(
+                    output_directory=self.output.name,
+                    staging_parent=self.staging.name,
+                    concurrency=1,
+                    progress_interval_seconds=0,
+                ),
+            )
+        detector.assert_not_called()
+        self.assertNotIn("-j4", proof.build.argv)
+
+    def test_progress_reports_all_phases_durations_and_lto_retry(self):
+        contract, variant, target = self._parts(*TARGETS[0])
+        builder = _FixtureBuilder(
+            contract, variant, target, lto_fail_first=True
+        )
+        events = []
+        fixture_runner = builder.command_runner
+
+        def traced_runner(argv, cwd, environment):
+            events.append(("command", tuple(argv)))
+            return fixture_runner(argv, cwd, environment)
+
+        builder.command_runner = traced_runner
+
+        proof = builder.build(
+            *TARGETS[0],
+            context=BoardContractBuildContext(
+                output_directory=self.output.name,
+                staging_parent=self.staging.name,
+                concurrency=2,
+                progress_reporter=lambda message: events.append(("report", message)),
+                progress_interval_seconds=0,
+            ),
+        )
+        messages = [value for kind, value in events if kind == "report"]
+
+        self.assertTrue(proof.lto_retry_used)
+        self.assertEqual(2, len(proof.build_attempts))
+        for phase in (
+            "Preparando Klipper",
+            "Configurando firmware",
+            "Compilando firmware",
+            "Verificando firmware",
+        ):
+            self.assertTrue(any(message == f"[....] {phase}..." for message in messages))
+            self.assertTrue(
+                any(
+                    message.startswith(f"[OK] {phase} completado en ")
+                    for message in messages
+                )
+            )
+        self.assertTrue(
+            any("reintentará explícitamente sin LTO" in message for message in messages)
+        )
+        notice_index = next(
+            index
+            for index, event in enumerate(events)
+            if event[0] == "report" and "sin LTO" in event[1]
+        )
+        clean_index = next(
+            index
+            for index, event in enumerate(events)
+            if event[0] == "command" and "clean" in event[1]
+        )
+        self.assertLess(notice_index, clean_index)
 
     def test_default_workspace_uses_kace_cache_not_a_small_system_temp(self):
         contract, variant, target = self._parts(*TARGETS[0])

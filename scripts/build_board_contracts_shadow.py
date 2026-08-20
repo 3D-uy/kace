@@ -69,6 +69,7 @@ def main() -> int:
                 source_checkout=args.source_checkout,
                 make_command=(args.make,),
                 concurrency=args.jobs,
+                progress_reporter=lambda message: print(message, flush=True),
             ),
         )
         summary = proof.to_mapping()

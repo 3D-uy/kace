@@ -8,6 +8,7 @@ evidence.  Commands are always argv vectors and never pass through a shell.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -17,9 +18,11 @@ import re
 import shutil
 import struct
 import subprocess
+import threading
+import time
 import uuid
 import zlib
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 
 from firmware.identity import ToolchainIdentity
 from core.workspace import (
@@ -27,8 +30,10 @@ from core.workspace import (
     CHECKOUT_MINIMUM_FREE_BYTES,
     CLONE_MINIMUM_FREE_BYTES,
     ensure_free_space,
+    exclusive_file_lock,
     heavy_workspace,
     is_no_space_error,
+    kace_cache_directory,
 )
 
 from .catalog import BoardCatalog, load_default_catalog
@@ -39,6 +44,52 @@ from .upstream import KlipperSourceContract, load_klipper_source_contract
 
 KconfigScalar = bool | int | str
 CommandRunner = Callable[[Sequence[str], Path, Mapping[str, str]], subprocess.CompletedProcess]
+ProgressReporter = Callable[[str], None]
+
+_BUILD_MEMORY_PER_JOB_BYTES = 512 * 1024 ** 2
+_DEFAULT_MAX_BUILD_JOBS = 4
+_PHASE_PREPARE = "Preparando Klipper"
+_PHASE_CONFIGURE = "Configurando firmware"
+_PHASE_COMPILE = "Compilando firmware"
+_PHASE_VERIFY = "Verificando firmware"
+
+
+def _read_raspberry_pi_model() -> str:
+    try:
+        return Path("/proc/device-tree/model").read_text(
+            encoding="utf-8", errors="replace"
+        ).rstrip("\0\n")
+    except OSError:
+        return ""
+
+
+def _read_total_memory_bytes() -> Optional[int]:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def recommended_build_concurrency(
+    *,
+    cpu_count: Optional[int] = None,
+    model: Optional[str] = None,
+    memory_bytes: Optional[int] = None,
+) -> int:
+    """Choose conservative make parallelism for the current build host."""
+    processors = max(1, int(cpu_count if cpu_count is not None else (os.cpu_count() or 1)))
+    host_model = _read_raspberry_pi_model() if model is None else model
+    if "raspberry pi 3" in host_model.lower():
+        return min(2, processors)
+
+    jobs = min(processors, _DEFAULT_MAX_BUILD_JOBS)
+    total_memory = _read_total_memory_bytes() if memory_bytes is None else memory_bytes
+    if total_memory is not None and total_memory > 0:
+        jobs = min(jobs, max(1, total_memory // _BUILD_MEMORY_PER_JOB_BYTES))
+    return max(1, jobs)
 
 
 class BoardContractBuildError(RuntimeError):
@@ -181,6 +232,8 @@ class BoardContractBuildContext:
     concurrency: Optional[int] = None
     environment_path: Optional[str] = None
     allow_lto_retry: bool = True
+    progress_reporter: Optional[ProgressReporter] = None
+    progress_interval_seconds: float = 10.0
 
     def __post_init__(self) -> None:
         if not self.output_directory:
@@ -192,6 +245,10 @@ class BoardContractBuildContext:
                 raise ValueError(f"{name} may not contain shell syntax")
         if self.concurrency is not None and self.concurrency < 1:
             raise ValueError("concurrency must be positive")
+        if self.progress_reporter is not None and not callable(self.progress_reporter):
+            raise ValueError("progress_reporter must be callable")
+        if self.progress_interval_seconds < 0:
+            raise ValueError("progress_interval_seconds may not be negative")
 
 
 _NOT_SET_RE = re.compile(r"^# (CONFIG_[A-Za-z0-9_]+) is not set$")
@@ -557,10 +614,12 @@ class BoardContractKconfigBuilder:
         catalog: Optional[BoardCatalog] = None,
         source_contract: Optional[KlipperSourceContract] = None,
         command_runner: Optional[CommandRunner] = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ):
         self.catalog = catalog or load_default_catalog()
         self.source_contract = source_contract or load_klipper_source_contract()
         self.command_runner = command_runner or _default_command_runner
+        self.monotonic = monotonic
 
     def build(
         self,
@@ -598,17 +657,21 @@ class BoardContractKconfigBuilder:
         with heavy_workspace(
             "board-contract-", parent=staging_parent
         ) as staging_root:
-            ensure_free_space(staging_root, CLONE_MINIMUM_FREE_BYTES, "Klipper clone")
-            checkout = staging_root / "klipper"
-            self._prepare_checkout(checkout, contract, context)
-            self._reject_legacy_checkout(checkout)
-            ensure_free_space(staging_root, CHECKOUT_MINIMUM_FREE_BYTES, "Klipper checkout")
-            commit = self._read_checkout_commit(checkout, context)
-            if commit != contract.upstream.validated_commit:
-                raise CheckoutCommitMismatch(
-                    f"checkout commit {commit} does not match validated "
-                    f"{contract.upstream.validated_commit}"
+            with self._phase(_PHASE_PREPARE, context):
+                ensure_free_space(staging_root, CLONE_MINIMUM_FREE_BYTES, "Klipper clone")
+                checkout = staging_root / "klipper"
+                self._prepare_checkout(checkout, contract, context)
+                self._reject_legacy_checkout(checkout)
+                ensure_free_space(
+                    staging_root, CHECKOUT_MINIMUM_FREE_BYTES, "Klipper checkout"
                 )
+                commit = self._read_checkout_commit(checkout, context)
+                if commit != contract.upstream.validated_commit:
+                    raise CheckoutCommitMismatch(
+                        f"checkout commit {commit} does not match validated "
+                        f"{contract.upstream.validated_commit}"
+                    )
+                self._verify_checkout_clean(checkout, context)
             return self._build_in_checkout(
                 checkout, contract, variant, target, context, output_root, commit
             )
@@ -631,13 +694,57 @@ class BoardContractKconfigBuilder:
                 Path(context.source_checkout).expanduser().resolve(), "source_checkout"
             )
         environment = self._environment(context)
-        clone = self._run(
-            (*context.git_command, "clone", "--no-checkout", "--no-hardlinks", source, str(checkout)),
+        cache = self._source_cache_path(contract.upstream.repository)
+        cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        ensure_free_space(cache.parent, CLONE_MINIMUM_FREE_BYTES, "Klipper source cache")
+        with exclusive_file_lock(cache.with_suffix(cache.suffix + ".lock")):
+            valid, reason = self._validate_source_cache(
+                cache,
+                contract.upstream.repository,
+                contract.upstream.validated_commit,
+                context,
+                environment,
+            )
+            if not valid:
+                if self._cache_path_exists(cache):
+                    self._report(
+                        context,
+                        f"  Caché de Klipper inválido ({reason}); reconstruyendo.",
+                    )
+                else:
+                    self._report(context, "  Creando caché local de Klipper.")
+                self._rebuild_source_cache(
+                    cache,
+                    str(source),
+                    contract.upstream.repository,
+                    contract.upstream.validated_commit,
+                    context,
+                    environment,
+                )
+            else:
+                self._report(context, "  Reutilizando caché local verificado de Klipper.")
+
+        init = self._run(
+            (*context.git_command, "init", "--quiet", str(checkout)),
             checkout.parent,
             environment,
         )
-        if not clone.ok:
-            raise BuildCommandError("git clone", clone)
+        if not init.ok:
+            raise BuildCommandError("git init isolated checkout", init)
+        fetch = self._run(
+            (
+                *context.git_command,
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                str(cache),
+                f"+{contract.upstream.validated_commit}:refs/kace/validated",
+            ),
+            checkout,
+            environment,
+        )
+        if not fetch.ok:
+            raise BuildCommandError("git fetch from verified cache", fetch)
         ensure_free_space(checkout.parent, CHECKOUT_MINIMUM_FREE_BYTES, "Klipper checkout")
         checkout_result = self._run(
             (*context.git_command, "checkout", "--detach", contract.upstream.validated_commit),
@@ -646,6 +753,162 @@ class BoardContractKconfigBuilder:
         )
         if not checkout_result.ok:
             raise BuildCommandError("git checkout", checkout_result)
+
+    @staticmethod
+    def _source_cache_path(repository: str) -> Path:
+        identity = hashlib.sha256(repository.encode("utf-8")).hexdigest()[:20]
+        return kace_cache_directory() / "sources" / f"klipper-{identity}.git"
+
+    def _validate_source_cache(
+        self,
+        cache: Path,
+        repository: str,
+        commit: str,
+        context: BoardContractBuildContext,
+        environment: Mapping[str, str],
+    ) -> tuple[bool, str]:
+        if cache.is_symlink():
+            return False, "es un enlace simbólico"
+        if not cache.is_dir():
+            return False, "ausente o no es un directorio"
+        checks = (
+            (
+                "bare",
+                (
+                    *context.git_command,
+                    "--git-dir",
+                    str(cache),
+                    "rev-parse",
+                    "--is-bare-repository",
+                ),
+            ),
+            (
+                "repository",
+                (
+                    *context.git_command,
+                    "--git-dir",
+                    str(cache),
+                    "config",
+                    "--get",
+                    "kace.repository",
+                ),
+            ),
+            (
+                "commit",
+                (
+                    *context.git_command,
+                    "--git-dir",
+                    str(cache),
+                    "cat-file",
+                    "-e",
+                    f"{commit}^{{commit}}",
+                ),
+            ),
+            (
+                "integrity",
+                (
+                    *context.git_command,
+                    "--git-dir",
+                    str(cache),
+                    "fsck",
+                    "--full",
+                    "--no-dangling",
+                    commit,
+                ),
+            ),
+        )
+        for name, argv in checks:
+            proof, completed = self._execute(argv, cache.parent, environment)
+            if not proof.ok:
+                return False, f"falló la comprobación {name}"
+            output = str(completed.stdout or "").strip()
+            if name == "bare" and output != "true":
+                return False, "no es un repositorio bare"
+            if name == "repository" and output != repository:
+                return False, "pertenece a otro repositorio"
+        return True, ""
+
+    def _rebuild_source_cache(
+        self,
+        cache: Path,
+        source: str,
+        repository: str,
+        commit: str,
+        context: BoardContractBuildContext,
+        environment: Mapping[str, str],
+    ) -> None:
+        temporary = cache.parent / f".{cache.name}.{uuid.uuid4().hex}.tmp"
+        quarantine = cache.parent / f".{cache.name}.{uuid.uuid4().hex}.invalid"
+        self._remove_cache_path(temporary)
+        try:
+            clone = self._run(
+                (
+                    *context.git_command,
+                    "clone",
+                    "--mirror",
+                    "--no-hardlinks",
+                    source,
+                    str(temporary),
+                ),
+                cache.parent,
+                environment,
+            )
+            if not clone.ok:
+                raise BuildCommandError("git clone source cache", clone)
+            marker = self._run(
+                (
+                    *context.git_command,
+                    "--git-dir",
+                    str(temporary),
+                    "config",
+                    "kace.repository",
+                    repository,
+                ),
+                cache.parent,
+                environment,
+            )
+            if not marker.ok:
+                raise BuildCommandError("git bind source cache", marker)
+            valid, reason = self._validate_source_cache(
+                temporary, repository, commit, context, environment
+            )
+            if not valid:
+                raise CheckoutError(
+                    f"rebuilt Klipper cache does not contain an intact validated commit: {reason}"
+                )
+
+            previous_exists = self._cache_path_exists(cache)
+            if previous_exists:
+                os.replace(cache, quarantine)
+            try:
+                os.replace(temporary, cache)
+            except Exception:
+                if (
+                    previous_exists
+                    and self._cache_path_exists(quarantine)
+                    and not self._cache_path_exists(cache)
+                ):
+                    os.replace(quarantine, cache)
+                raise
+            self._remove_cache_path(quarantine)
+        finally:
+            self._remove_cache_path(temporary)
+
+    @staticmethod
+    def _remove_cache_path(path: Path) -> None:
+        if path.is_symlink():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    @staticmethod
+    def _cache_path_exists(path: Path) -> bool:
+        return os.path.lexists(os.fspath(path))
 
     def _read_checkout_commit(
         self, checkout: Path, context: BoardContractBuildContext
@@ -662,6 +925,20 @@ class BoardContractKconfigBuilder:
             raise CheckoutError(f"git returned invalid commit identity: {commit!r}")
         return commit
 
+    def _verify_checkout_clean(
+        self, checkout: Path, context: BoardContractBuildContext
+    ) -> None:
+        proof, completed = self._execute(
+            (*context.git_command, "status", "--porcelain", "--untracked-files=all"),
+            checkout,
+            self._environment(context),
+        )
+        if not proof.ok:
+            raise BuildCommandError("git status isolated checkout", proof)
+        dirty = str(completed.stdout or "").strip()
+        if dirty:
+            raise CheckoutError("isolated Klipper checkout is dirty before configuration")
+
     def _reject_legacy_checkout(self, checkout: Path) -> None:
         self._reject_legacy_path(checkout, "isolated checkout")
 
@@ -674,6 +951,60 @@ class BoardContractKconfigBuilder:
             return
         raise CheckoutError(f"{field_name} may not use or write under ~/klipper")
 
+    def _report(self, context: BoardContractBuildContext, message: str) -> None:
+        reporter = context.progress_reporter
+        if reporter is None:
+            return
+        try:
+            reporter(message)
+        except Exception:
+            # Presentation must never weaken or interrupt build verification.
+            return
+
+    @contextmanager
+    def _phase(
+        self, label: str, context: BoardContractBuildContext
+    ) -> Iterator[None]:
+        started = self.monotonic()
+        self._report(context, f"[....] {label}...")
+        stop = threading.Event()
+        heartbeat: Optional[threading.Thread] = None
+        if context.progress_reporter is not None and context.progress_interval_seconds > 0:
+            interval = context.progress_interval_seconds
+
+            def emit_elapsed() -> None:
+                while not stop.wait(interval):
+                    elapsed = max(0.0, self.monotonic() - started)
+                    self._report(
+                        context,
+                        f"  {label}: en curso ({self._format_duration(elapsed)}).",
+                    )
+
+            heartbeat = threading.Thread(target=emit_elapsed, daemon=True)
+            heartbeat.start()
+        failed = True
+        try:
+            yield
+            failed = False
+        finally:
+            stop.set()
+            if heartbeat is not None:
+                heartbeat.join(timeout=1.0)
+            elapsed = max(0.0, self.monotonic() - started)
+            outcome = "[ERROR]" if failed else "[OK]"
+            state = "falló tras" if failed else "completado en"
+            self._report(
+                context,
+                f"{outcome} {label} {state} {self._format_duration(elapsed)}.",
+            )
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        if seconds < 60:
+            return f"{seconds:.1f} s"
+        minutes, remaining = divmod(seconds, 60)
+        return f"{int(minutes)} min {remaining:.0f} s"
+
     def _build_in_checkout(
         self,
         checkout: Path,
@@ -684,146 +1015,178 @@ class BoardContractKconfigBuilder:
         output_root: Path,
         commit: str,
     ) -> BuildProof:
-        ensure_free_space(checkout.parent, BUILD_MINIMUM_FREE_BYTES, "Klipper firmware build")
-        environment = self._environment(context)
-        requested_bytes = serialize_requested_config(target.requested_kconfig)
-        declared_symbols = collect_declared_kconfig_symbols(checkout)
-        verify_declared_symbols(target.requested_kconfig, declared_symbols)
-        verify_declared_symbols(target.resolved_assertions, declared_symbols)
-        config_path = checkout / ".config"
-        config_path.write_bytes(requested_bytes)
+        with self._phase(_PHASE_CONFIGURE, context):
+            ensure_free_space(
+                checkout.parent, BUILD_MINIMUM_FREE_BYTES, "Klipper firmware build"
+            )
+            environment = self._environment(context)
+            requested_bytes = serialize_requested_config(target.requested_kconfig)
+            declared_symbols = collect_declared_kconfig_symbols(checkout)
+            verify_declared_symbols(target.requested_kconfig, declared_symbols)
+            verify_declared_symbols(target.resolved_assertions, declared_symbols)
+            config_path = checkout / ".config"
+            config_path.write_bytes(requested_bytes)
 
-        olddefconfig = self._run(
-            (*context.make_command, "olddefconfig"), checkout, environment
-        )
-        if not olddefconfig.ok:
-            raise BuildCommandError("olddefconfig", olddefconfig)
-        if not config_path.is_file():
-            raise KconfigError("olddefconfig removed .config")
-        resolved_bytes = _normalize_lf(config_path.read_bytes())
-        resolved = parse_kconfig(resolved_bytes)
-        selection_proof = verify_requested_selections(target.requested_kconfig, resolved)
-        assertion_proof = verify_resolved_assertions(target.resolved_assertions, resolved)
+            olddefconfig = self._run(
+                (*context.make_command, "olddefconfig"), checkout, environment
+            )
+            if not olddefconfig.ok:
+                raise BuildCommandError("olddefconfig", olddefconfig)
+            if not config_path.is_file():
+                raise KconfigError("olddefconfig removed .config")
+            resolved_bytes = _normalize_lf(config_path.read_bytes())
+            resolved = parse_kconfig(resolved_bytes)
+            selection_proof = verify_requested_selections(
+                target.requested_kconfig, resolved
+            )
+            assertion_proof = verify_resolved_assertions(
+                target.resolved_assertions, resolved
+            )
 
-        toolchain = self._identify_toolchain(checkout, variant, context, environment)
-        wrapper_directory, flags_log = self._prepare_compiler_audit(checkout)
-        build_environment = dict(environment)
-        build_environment["PATH"] = (
-            str(wrapper_directory) + os.pathsep + build_environment.get("PATH", "")
-        )
-        build_environment["KACE_CC_FLAGS_LOG"] = str(flags_log)
-        build_environment["KACE_CC_DISABLE_LTO"] = "0"
+            toolchain = self._identify_toolchain(
+                checkout, variant, context, environment
+            )
+            wrapper_directory, flags_log = self._prepare_compiler_audit(checkout)
+            build_environment = dict(environment)
+            build_environment["PATH"] = (
+                str(wrapper_directory)
+                + os.pathsep
+                + build_environment.get("PATH", "")
+            )
+            build_environment["KACE_CC_FLAGS_LOG"] = str(flags_log)
+            build_environment["KACE_CC_DISABLE_LTO"] = "0"
 
-        # The identity later observed through Moonraker must be compiled into
-        # the firmware.  Choosing it after the build would produce an identity
-        # that the MCU can never report.
-        build_id = uuid.uuid4().hex
-        firmware_fingerprint = f"kace-b1-{build_id}"
-        self._inject_firmware_fingerprint(checkout, firmware_fingerprint)
-        build_argv: tuple[str, ...] = context.make_command + (
-            f"KLIPPER_VERSION={firmware_fingerprint}",
-        )
-        if context.concurrency and context.concurrency > 1:
-            build_argv += (f"-j{context.concurrency}",)
-        build_attempts: list[CommandProof] = []
-        build = self._run(build_argv, checkout, build_environment)
-        build_attempts.append(build)
-        lto_retry_used = False
-        fallback_reason = ""
-        if not build.ok and context.allow_lto_retry and self._is_lto_failure(build):
-            lto_retry_used = True
-            fallback_reason = "LTO linker failure: compiler ltrans objects were unavailable"
-            retry_environment = dict(build_environment)
-            retry_environment["KACE_CC_DISABLE_LTO"] = "1"
-            flags_log.write_bytes(b"")
-            clean = self._run((*context.make_command, "clean"), checkout, retry_environment)
-            if not clean.ok:
-                raise BuildCommandError("LTO retry clean", clean)
-            build = self._run(build_argv, checkout, retry_environment)
+            # The identity later observed through Moonraker must be compiled into
+            # the firmware.  Choosing it after the build would produce an identity
+            # that the MCU can never report.
+            build_id = uuid.uuid4().hex
+            firmware_fingerprint = f"kace-b1-{build_id}"
+            self._inject_firmware_fingerprint(checkout, firmware_fingerprint)
+            jobs = context.concurrency or recommended_build_concurrency()
+            build_argv: tuple[str, ...] = context.make_command + (
+                f"KLIPPER_VERSION={firmware_fingerprint}",
+            )
+            if jobs > 1:
+                build_argv += (f"-j{jobs}",)
+            self._report(context, f"  Paralelismo de compilación: make -j{jobs}.")
+
+        with self._phase(_PHASE_COMPILE, context):
+            build_attempts: list[CommandProof] = []
+            build = self._run(build_argv, checkout, build_environment)
             build_attempts.append(build)
-        if not build.ok:
-            raise BuildCommandError("build", build)
-        requested_flags, effective_flags = self._read_compiler_flags(flags_log)
-        lto_requested = any(self._is_lto_flag(item) for item in requested_flags)
-        lto_effective = any(self._is_lto_flag(item) for item in effective_flags)
+            lto_retry_used = False
+            fallback_reason = ""
+            if not build.ok and context.allow_lto_retry and self._is_lto_failure(build):
+                lto_retry_used = True
+                fallback_reason = (
+                    "LTO linker failure: compiler ltrans objects were unavailable"
+                )
+                self._report(
+                    context,
+                    "  LTO falló; KACE limpiará el checkout y reintentará "
+                    "explícitamente sin LTO.",
+                )
+                retry_environment = dict(build_environment)
+                retry_environment["KACE_CC_DISABLE_LTO"] = "1"
+                flags_log.write_bytes(b"")
+                clean = self._run(
+                    (*context.make_command, "clean"), checkout, retry_environment
+                )
+                if not clean.ok:
+                    raise BuildCommandError("LTO retry clean", clean)
+                build = self._run(build_argv, checkout, retry_environment)
+                build_attempts.append(build)
+            if not build.ok:
+                raise BuildCommandError("build", build)
 
-        native_path = (checkout / target.artifact.native_path).resolve()
-        try:
-            native_path.relative_to(checkout)
-        except ValueError as exc:
-            raise ArtifactValidationError("artifact path escapes checkout") from exc
-        if native_path.name != target.artifact.native_filename:
-            raise ArtifactValidationError("ArtifactPolicy native path/name disagree")
-        expected_suffix = _ARTIFACT_SUFFIXES[target.artifact.format]
-        if not native_path.name.lower().endswith(expected_suffix):
-            raise ArtifactValidationError(
-                f"artifact extension does not match {target.artifact.format.value}"
-            )
-        if not native_path.is_file():
-            raise ArtifactValidationError(
-                f"expected native artifact is absent: {target.artifact.native_path}"
-            )
-        artifact_bytes = native_path.read_bytes()
-        if not artifact_bytes:
-            raise ArtifactValidationError("native artifact is empty")
-        if not artifact_contains_firmware_fingerprint(
-            artifact_bytes, firmware_fingerprint
-        ):
-            raise ArtifactValidationError(
-                "native artifact identify metadata does not contain the requested fingerprint"
-            )
+        with self._phase(_PHASE_VERIFY, context):
+            requested_flags, effective_flags = self._read_compiler_flags(flags_log)
+            lto_requested = any(self._is_lto_flag(item) for item in requested_flags)
+            lto_effective = any(self._is_lto_flag(item) for item in effective_flags)
 
-        evidence_dir = output_root / (
-            f"{contract.board_id}-{variant.id}-{target.id}-"
-            f"{contract.contract_digest[:12]}-{uuid.uuid4().hex}"
-        )
-        evidence_dir.mkdir(mode=0o700)
-        requested_evidence = evidence_dir / "requested.config"
-        resolved_evidence = evidence_dir / "resolved.config"
-        artifact_evidence = evidence_dir / target.artifact.native_filename
-        requested_evidence.write_bytes(requested_bytes)
-        resolved_evidence.write_bytes(resolved_bytes)
-        shutil.copyfile(native_path, artifact_evidence)
+            native_path = (checkout / target.artifact.native_path).resolve()
+            try:
+                native_path.relative_to(checkout)
+            except ValueError as exc:
+                raise ArtifactValidationError("artifact path escapes checkout") from exc
+            if native_path.name != target.artifact.native_filename:
+                raise ArtifactValidationError("ArtifactPolicy native path/name disagree")
+            expected_suffix = _ARTIFACT_SUFFIXES[target.artifact.format]
+            if not native_path.name.lower().endswith(expected_suffix):
+                raise ArtifactValidationError(
+                    f"artifact extension does not match {target.artifact.format.value}"
+                )
+            if not native_path.is_file():
+                raise ArtifactValidationError(
+                    f"expected native artifact is absent: {target.artifact.native_path}"
+                )
+            artifact_bytes = native_path.read_bytes()
+            if not artifact_bytes:
+                raise ArtifactValidationError("native artifact is empty")
+            if not artifact_contains_firmware_fingerprint(
+                artifact_bytes, firmware_fingerprint
+            ):
+                raise ArtifactValidationError(
+                    "native artifact identify metadata does not contain the requested "
+                    "fingerprint"
+                )
 
-        proof = BuildProof(
-            schema="kace-board-build-proof/v3",
-            board_id=contract.board_id,
-            hardware_variant_id=variant.id,
-            build_target_id=target.id,
-            contract_digest=contract.contract_digest,
-            klipper_commit=commit,
-            requested_config_path=str(requested_evidence),
-            requested_config_sha256=_sha256(requested_bytes),
-            resolved_config_path=str(resolved_evidence),
-            resolved_config_sha256=_sha256(resolved_bytes),
-            artifact_path=str(artifact_evidence),
-            artifact_sha256=_sha256(artifact_bytes),
-            artifact_size=len(artifact_bytes),
-            olddefconfig=olddefconfig,
-            requested_selections=selection_proof,
-            resolved_assertions=assertion_proof,
-            build=build,
-            build_attempts=tuple(build_attempts),
-            lto_retry_used=lto_retry_used,
-            toolchain=toolchain,
-            requested_flags=requested_flags,
-            effective_flags=effective_flags,
-            lto_requested=lto_requested,
-            lto_effective=lto_effective,
-            fallback_used=lto_retry_used,
-            fallback_reason=fallback_reason,
-            build_id=build_id,
-            firmware_fingerprint=firmware_fingerprint,
-            embedded_fingerprint_verified=True,
-        )
-        proof_path = evidence_dir / "build-proof.json"
-        temporary_proof = evidence_dir / ".build-proof.json.tmp"
-        temporary_proof.write_bytes(
-            json.dumps(proof.to_mapping(), ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
-            + b"\n"
-        )
-        os.replace(temporary_proof, proof_path)
-        return proof
+            evidence_dir = output_root / (
+                f"{contract.board_id}-{variant.id}-{target.id}-"
+                f"{contract.contract_digest[:12]}-{uuid.uuid4().hex}"
+            )
+            evidence_dir.mkdir(mode=0o700)
+            requested_evidence = evidence_dir / "requested.config"
+            resolved_evidence = evidence_dir / "resolved.config"
+            artifact_evidence = evidence_dir / target.artifact.native_filename
+            requested_evidence.write_bytes(requested_bytes)
+            resolved_evidence.write_bytes(resolved_bytes)
+            shutil.copyfile(native_path, artifact_evidence)
+
+            proof = BuildProof(
+                schema="kace-board-build-proof/v3",
+                board_id=contract.board_id,
+                hardware_variant_id=variant.id,
+                build_target_id=target.id,
+                contract_digest=contract.contract_digest,
+                klipper_commit=commit,
+                requested_config_path=str(requested_evidence),
+                requested_config_sha256=_sha256(requested_bytes),
+                resolved_config_path=str(resolved_evidence),
+                resolved_config_sha256=_sha256(resolved_bytes),
+                artifact_path=str(artifact_evidence),
+                artifact_sha256=_sha256(artifact_bytes),
+                artifact_size=len(artifact_bytes),
+                olddefconfig=olddefconfig,
+                requested_selections=selection_proof,
+                resolved_assertions=assertion_proof,
+                build=build,
+                build_attempts=tuple(build_attempts),
+                lto_retry_used=lto_retry_used,
+                toolchain=toolchain,
+                requested_flags=requested_flags,
+                effective_flags=effective_flags,
+                lto_requested=lto_requested,
+                lto_effective=lto_effective,
+                fallback_used=lto_retry_used,
+                fallback_reason=fallback_reason,
+                build_id=build_id,
+                firmware_fingerprint=firmware_fingerprint,
+                embedded_fingerprint_verified=True,
+            )
+            proof_path = evidence_dir / "build-proof.json"
+            temporary_proof = evidence_dir / ".build-proof.json.tmp"
+            temporary_proof.write_bytes(
+                json.dumps(
+                    proof.to_mapping(),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    indent=2,
+                ).encode("utf-8")
+                + b"\n"
+            )
+            os.replace(temporary_proof, proof_path)
+            return proof
 
     @staticmethod
     def _inject_firmware_fingerprint(checkout: Path, fingerprint: str) -> None:

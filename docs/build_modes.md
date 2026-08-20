@@ -6,13 +6,24 @@ from the Docker development environment.
 
 ## Build workspace
 
-BoardContract builds create their disposable Klipper clone, checkout, compiler
-wrappers, and build output under `~/.cache/kace/workspaces/` by default, rather
-than under `/tmp`. Set `KACE_CACHE_HOME` (or the standard `XDG_CACHE_HOME`) to
-place that workspace on another persistent filesystem. KACE rejects a cache or
-explicit staging parent mounted as `tmpfs`, `ramfs`, or `devtmpfs`, checks that
-the workspace has at least 1 GiB free before cloning and 2 GiB before checkout
-or compilation, and removes every per-run workspace after the build.
+BoardContract builds keep a persistent bare Klipper source cache under
+`~/.cache/kace/sources/` and create their disposable checkout, compiler wrappers,
+and build output under `~/.cache/kace/workspaces/` by default, rather than under
+`/tmp`. The cache is accepted only after its contractual repository marker, exact
+commit, bare-repository state, and full Git object integrity pass. A failed check
+causes an atomic rebuild from the configured source. Every build fetches only the
+validated commit from that cache into a new detached, clean checkout; `.config`,
+the fingerprint Makefile edit, `out/`, and compiler logs are never cached.
+
+Set `KACE_CACHE_HOME` (or the standard `XDG_CACHE_HOME`) to place both areas on
+another persistent filesystem. KACE rejects an explicit staging parent mounted
+as `tmpfs`, `ramfs`, or `devtmpfs`, checks that the filesystems have at least 1
+GiB free before source preparation and 2 GiB before checkout or compilation,
+and removes every per-run workspace after the build. Runtime BoardContract
+builds display timed preparation, configuration, compilation, and verification
+phases. They use `make -j2` on Raspberry Pi 3 and a conservative CPU/memory-aware
+limit on other hosts. Build command output remains captured for proof/error tails
+rather than flooding the terminal, with periodic elapsed-time updates instead.
 
 ---
 

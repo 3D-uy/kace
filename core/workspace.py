@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import re
 import shutil
+import threading
+import time
 import uuid
 from typing import Iterator
 
@@ -23,6 +25,7 @@ _NO_SPACE_MARKERS = (
     "disk full",
 )
 _MEMORY_FILESYSTEMS = frozenset({"tmpfs", "ramfs", "devtmpfs"})
+_workspace_thread_lock = threading.RLock()
 
 
 class WorkspaceSpaceError(RuntimeError):
@@ -101,6 +104,65 @@ def ensure_free_space(directory: Path | str, required_bytes: int, phase: str) ->
             f"only {available / GIB:.1f} GiB available. "
             "Free space on this filesystem or set KACE_CACHE_HOME to a larger disk."
         )
+
+
+@contextmanager
+def exclusive_file_lock(
+    lock_path: Path | str,
+    *,
+    timeout_seconds: float = 600.0,
+) -> Iterator[None]:
+    """Serialize a persistent workspace mutation across threads and processes."""
+    path = Path(lock_path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not _workspace_thread_lock.acquire(timeout=timeout_seconds):
+        raise TimeoutError(f"Timed out locking KACE workspace: {path}")
+    try:
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        lock_file = os.fdopen(descriptor, "r+b", closefd=True)
+        acquired = False
+        try:
+            if path.stat().st_size == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+                os.fsync(lock_file.fileno())
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass
+            deadline = time.monotonic() + timeout_seconds
+            while True:
+                try:
+                    lock_file.seek(0)
+                    if os.name == "nt":
+                        import msvcrt
+
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Timed out locking KACE workspace: {path}")
+                    time.sleep(0.05)
+            yield
+        finally:
+            if acquired:
+                lock_file.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+    finally:
+        _workspace_thread_lock.release()
 
 
 @contextmanager

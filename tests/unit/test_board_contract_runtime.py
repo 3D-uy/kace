@@ -272,6 +272,9 @@ class BoardContractRuntimeTests(unittest.TestCase):
             ),
             build.call_args.args,
         )
+        build_context = build.call_args.kwargs["context"]
+        self.assertIsNone(build_context.concurrency)
+        self.assertTrue(callable(build_context.progress_reporter))
         self.assertEqual(source.proof.digest, result.artifact.build_proof_digest)
         self.assertEqual(source.proof.digest, result.deployment_plan.build_proof_digest)
 

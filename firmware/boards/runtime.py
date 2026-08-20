@@ -26,6 +26,10 @@ from .models import BoardContract, SupportStatus
 from .resolver import BoardResolver, ResolutionStatus
 
 
+def _runtime_build_progress(message: str) -> None:
+    print(message, flush=True)
+
+
 class FirmwareAuthority(str, Enum):
     BOARD_CONTRACT = "board_contract"
     LEGACY = "legacy"
@@ -292,6 +296,10 @@ def build_board_contract_runtime(
         git_command=_argv(user_data.get("git_command"), ("git",)),
         make_command=_argv(user_data.get("make_command"), ("make",)),
         concurrency=user_data.get("board_contract_build_concurrency"),
+        progress_reporter=(
+            user_data.get("board_contract_progress_reporter")
+            or _runtime_build_progress
+        ),
     )
     proof = BoardContractKconfigBuilder(catalog=active_catalog).build(
         contract.board_id,
