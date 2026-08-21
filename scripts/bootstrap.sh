@@ -519,7 +519,7 @@ path = Path(sys.argv[1])
 state_path = Path(sys.argv[2]) if sys.argv[2] else None
 enabled = sys.argv[3] == "true"
 device = sys.argv[4] if enabled else None
-pin = f"gpiochip0/gpio{sys.argv[5]}" if enabled else None
+pin = f"gpio{sys.argv[5]}" if enabled else None
 if enabled and sys.argv[6] == "true":
     pin = f"!{pin}"
 expected = [
@@ -676,7 +676,7 @@ path = Path(sys.argv[1])
 state_path = Path(sys.argv[2]) if sys.argv[2] else None
 enabled = sys.argv[3] == "true"
 device = sys.argv[4] if enabled else None
-pin = f"gpiochip0/gpio{sys.argv[5]}" if enabled else None
+pin = f"gpio{sys.argv[5]}" if enabled else None
 if enabled and sys.argv[6] == "true":
     pin = f"!{pin}"
 expected = {

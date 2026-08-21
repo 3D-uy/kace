@@ -14,6 +14,7 @@
 
 import json
 import os
+import posixpath
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -104,7 +105,15 @@ def _delete(url: str, api_key: str = None) -> tuple[bool, str, dict]:
         return False, f"Unexpected error: {e}", {}
 
 
-def _post_multipart(url: str, field_name: str, filename: str, file_bytes: bytes, root: str = "config", api_key: str = None) -> tuple[bool, str, dict]:
+def _post_multipart(
+    url: str,
+    field_name: str,
+    filename: str,
+    file_bytes: bytes,
+    root: str = "config",
+    path: str = None,
+    api_key: str = None,
+) -> tuple[bool, str, dict]:
     """POST a file as multipart/form-data to the Moonraker file upload endpoint."""
     boundary = uuid.uuid4().hex
     crlf = b"\r\n"
@@ -117,6 +126,15 @@ def _post_multipart(url: str, field_name: str, filename: str, file_bytes: bytes,
     parts.append(b'Content-Disposition: form-data; name="root"')
     parts.append(b"")
     parts.append(root.encode())
+
+    # Moonraker creates a missing subdirectory when the optional ``path`` form
+    # field is supplied.  A path embedded only in ``filename`` requires the
+    # directory to exist already and otherwise fails the upload.
+    if path:
+        parts.append(f"--{boundary}".encode())
+        parts.append(b'Content-Disposition: form-data; name="path"')
+        parts.append(b"")
+        parts.append(path.encode())
 
     # File field
     parts.append(f"--{boundary}".encode())
@@ -196,13 +214,19 @@ def upload_printer_cfg(host: str, port: int, cfg_path: str, filename: str = None
     if not filename:
         filename = os.path.basename(cfg_path)
 
+    remote_name = filename.replace("\\", "/")
+    remote_path, upload_name = posixpath.split(remote_name)
+    if not upload_name:
+        return False, f"Invalid remote filename: {filename}"
+
     url = f"{_base_url(host, port)}/server/files/upload"
     ok, msg, body = _post_multipart(
         url,
         field_name="file",
-        filename=filename,
+        filename=upload_name,
         file_bytes=file_bytes,
         root="config",
+        path=remote_path or None,
         api_key=api_key,
     )
     if not ok:

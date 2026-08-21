@@ -82,6 +82,7 @@ class ConfigDeploymentTransaction:
         confirm: Optional[Callable[[str], bool]] = None,
         output: Optional[Callable[[str], None]] = None,
         review: Optional[Callable[[ConfigurationReview], bool]] = None,
+        activation_selector: Optional[Callable[[], str]] = None,
         snapshot_root: Optional[str] = None,
         board: str = "",
         kace_version: str = "unknown",
@@ -97,6 +98,7 @@ class ConfigDeploymentTransaction:
         self.confirm = confirm or (lambda _diff: True)
         self.output = output or (lambda _line: None)
         self.review = review
+        self.activation_selector = activation_selector
         self.snapshot_root = snapshot_root
         self.board = board
         self.kace_version = kace_version
@@ -105,7 +107,7 @@ class ConfigDeploymentTransaction:
         self.transaction_id = str(uuid.uuid4())
         self.snapshot: Optional[DeploymentSnapshot] = None
         self.plan: Optional[ManagedConfigPlan] = None
-        self._writes_started = False
+        self._written_names: set[str] = set()
 
     @staticmethod
     def _sha256(data: bytes) -> str:
@@ -163,18 +165,27 @@ class ConfigDeploymentTransaction:
             if self._sha256(remote) != self._sha256(artifact.content):
                 raise RuntimeError(f"checksum mismatch for {artifact.remote_name}")
 
-    def _rollback(self) -> tuple[bool, str]:
+    def _rollback(self) -> tuple[Optional[bool], str]:
         if self.snapshot is None:
             return False, "no snapshot is available"
+        if not self._written_names:
+            return None, "rollback not required: the failed upload created no remote file"
         failures: list[str] = []
-        names = list(self.snapshot.config_files)
+        names = [
+            name for name in self.snapshot.config_files
+            if name in self._written_names
+        ]
         names.sort(key=lambda name: name == ROOT_REMOTE)
         for name in names:
             try:
                 self.transport.upload_bytes(name, self.snapshot.config_files[name])
             except Exception as exc:
                 failures.append(f"restore {name}: {exc}")
-        for name in self.snapshot.missing_files:
+        missing = [
+            name for name in self.snapshot.missing_files
+            if name in self._written_names
+        ]
+        for name in missing:
             try:
                 self.transport.delete_file(name)
             except Exception as exc:
@@ -184,12 +195,13 @@ class ConfigDeploymentTransaction:
 
         try:
             restored = self.transport.read_files(tuple(
-                list(self.snapshot.config_files) + list(self.snapshot.missing_files)
+                names + missing
             ))
-            for name, original in self.snapshot.config_files.items():
+            for name in names:
+                original = self.snapshot.config_files[name]
                 if restored.get(name) != original:
                     return False, f"rollback checksum mismatch for {name}"
-            for name in self.snapshot.missing_files:
+            for name in missing:
                 if restored.get(name) is not None:
                     return False, f"rollback did not remove newly created {name}"
             if self.activation == "none":
@@ -205,6 +217,26 @@ class ConfigDeploymentTransaction:
         except Exception as exc:
             return False, f"rollback activation failed: {exc}"
         return True, "rollback restored byte-identical state and Klipper Ready"
+
+    def _record_possible_write(self, name: str) -> None:
+        """Record a failed upload only when the remote bytes may have changed."""
+        assert self.snapshot is not None
+        try:
+            current = self.transport.read_files((name,)).get(name)
+        except Exception:
+            # If the post-failure state cannot be inspected, rollback must be
+            # conservative: the server may have written before returning an
+            # error or dropping the connection.
+            self._written_names.add(name)
+            return
+        if name in self.snapshot.missing_files and current is None:
+            return
+        if (
+            name in self.snapshot.config_files
+            and current == self.snapshot.config_files[name]
+        ):
+            return
+        self._written_names.add(name)
 
     def run(self) -> ConfigTransactionResult:
         try:
@@ -251,6 +283,11 @@ class ConfigDeploymentTransaction:
                     "deployment cancelled after dry-run diff",
                     self.transaction_id,
                 )
+            if self.activation_selector is not None:
+                selected = self.activation_selector()
+                if selected not in {"firmware", "service", "none"}:
+                    raise ValueError(f"Unsupported activation mode: {selected}")
+                self.activation = selected
             originals = {
                 item.remote_name: item.previous for item in self.plan.changed_artifacts
             }
@@ -276,8 +313,12 @@ class ConfigDeploymentTransaction:
 
         try:
             for artifact in self._ordered_artifacts():
-                self._writes_started = True
-                self.transport.upload_bytes(artifact.remote_name, artifact.content)
+                try:
+                    self.transport.upload_bytes(artifact.remote_name, artifact.content)
+                except Exception:
+                    self._record_possible_write(artifact.remote_name)
+                    raise
+                self._written_names.add(artifact.remote_name)
             self._verify_plan()
             if self.activation == "none":
                 return ConfigTransactionResult(
@@ -302,7 +343,7 @@ class ConfigDeploymentTransaction:
                 self.snapshot,
             )
         except Exception as exc:
-            rollback_ok, rollback_detail = self._rollback() if self._writes_started else (None, "not required")
+            rollback_ok, rollback_detail = self._rollback()
             state = (
                 ConfigTransactionState.ACTIVATION_FAILED
                 if "Ready" in str(exc) or "restart" in str(exc).lower()
@@ -310,11 +351,21 @@ class ConfigDeploymentTransaction:
                 if "checksum" in str(exc)
                 else ConfigTransactionState.UPLOAD_FAILED
             )
+            failure_label = {
+                ConfigTransactionState.ACTIVATION_FAILED: "activation error",
+                ConfigTransactionState.VERIFY_FAILED: "verification error",
+                ConfigTransactionState.UPLOAD_FAILED: "upload error",
+            }[state]
             if rollback_ok is False:
                 state = ConfigTransactionState.ROLLBACK_FAILED
+                detail = f"{failure_label}: {exc}; rollback error: {rollback_detail}"
+            elif rollback_ok is True:
+                detail = f"{failure_label}: {exc}; rollback succeeded: {rollback_detail}"
+            else:
+                detail = f"{failure_label}: {exc}; {rollback_detail}"
             return ConfigTransactionResult(
                 state,
-                f"{exc}; {rollback_detail}",
+                detail,
                 self.transaction_id,
                 self.snapshot,
                 rollback_ok,

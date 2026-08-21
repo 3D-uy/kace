@@ -203,8 +203,6 @@ def build_configuration_review(plan: ManagedConfigPlan) -> ConfigurationReview:
         calibration.append("heated-bed PID")
     calibration.append("probe Z offset" if "probe:z_virtual_endstop" in hardware else "physical Z endstop")
     summary.append(SummaryItem("info", "Calibration after installation: " + ", ".join(calibration)))
-    summary.extend(SummaryItem("warning", item.message) for item in validation.warnings)
-    summary.extend(SummaryItem("error", item.message) for item in validation.errors)
     changed = tuple(item.remote_name for item in plan.changed_artifacts)
     changes: list[str] = []
     if "printer.cfg" in changed:

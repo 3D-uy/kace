@@ -23,6 +23,7 @@ class FakeTransport:
         self.files = dict(files or {})
         self.calls = []
         self.fail_upload = None
+        self.fail_delete = None
         self.corrupt_download = None
         self.fail_restart = False
         self.fail_moonraker_restart = False
@@ -42,6 +43,8 @@ class FakeTransport:
 
     def delete_file(self, name):
         self.calls.append(("delete", name))
+        if name == self.fail_delete:
+            raise OSError("synthetic rollback delete failure")
         self.files.pop(name, None)
 
     def restart(self, mode):
@@ -112,6 +115,35 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(uploads[-1], "printer.cfg")
         self.assertIn(("restart", "firmware"), transport.calls)
 
+    def test_review_confirmation_precedes_restart_selection_and_upload(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport({"printer.cfg": b"# user\n"})
+
+            def review(_review):
+                transport.calls.append(("review_and_confirm",))
+                return True
+
+            def select_activation():
+                transport.calls.append(("select_activation",))
+                return "firmware"
+
+            result = self.run_transaction(
+                transport,
+                root,
+                review=review,
+                activation_selector=select_activation,
+            )
+        self.assertEqual(result.state, ConfigTransactionState.COMMITTED)
+        self.assertLess(
+            transport.calls.index(("review_and_confirm",)),
+            transport.calls.index(("select_activation",)),
+        )
+        first_upload = next(
+            index for index, call in enumerate(transport.calls)
+            if call[0] == "upload"
+        )
+        self.assertLess(transport.calls.index(("select_activation",)), first_upload)
+
     def test_moonraker_change_restarts_moonraker_before_klipper(self):
         with tempfile.TemporaryDirectory() as root:
             transport = FakeTransport({
@@ -150,6 +182,32 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(transport.files["printer.cfg"], old_root)
         self.assertNotIn("kace/generated-hardware.cfg", transport.files)
         self.assertNotIn("kace/generated-macros.cfg", transport.files)
+        self.assertNotIn(("delete", "kace/generated-macros.cfg"), transport.calls)
+
+    def test_first_upload_failure_does_not_delete_a_file_that_never_existed(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport({"printer.cfg": b"# original root\n"})
+            transport.fail_upload = "kace/generated-hardware.cfg"
+            result = self.run_transaction(transport, root)
+        self.assertEqual(result.state, ConfigTransactionState.UPLOAD_FAILED)
+        self.assertIsNone(result.rollback_succeeded)
+        self.assertFalse(any(call[0] == "delete" for call in transport.calls))
+        self.assertIn("upload error:", result.detail)
+        self.assertIn("rollback not required", result.detail)
+        self.assertNotIn("rollback error", result.detail)
+        self.assertNotIn("delete", result.detail)
+
+    def test_upload_and_rollback_errors_are_reported_separately(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport({"printer.cfg": b"# original root\n"})
+            transport.fail_upload = "kace/generated-macros.cfg"
+            transport.fail_delete = "kace/generated-hardware.cfg"
+            result = self.run_transaction(transport, root)
+        self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
+        self.assertFalse(result.rollback_succeeded)
+        self.assertIn("upload error: synthetic upload failure", result.detail)
+        self.assertIn("rollback error:", result.detail)
+        self.assertIn("delete kace/generated-hardware.cfg", result.detail)
 
     def test_restart_failure_rolls_back_and_reaches_ready(self):
         with tempfile.TemporaryDirectory() as root:

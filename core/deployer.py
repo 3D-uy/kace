@@ -556,7 +556,30 @@ def _review_configuration_export(review, yes_no_fn) -> bool:
     return _interactive_configuration_review(review, yes_no_fn, destination=True)
 
 
-def _run_config_transaction(transport, user_data, activation, generated=None):
+def _select_config_activation():
+    """Ask how to activate only after the managed diff was accepted."""
+    from core.menu import numbered_select
+    from core.translations import t
+
+    activation = numbered_select(
+        t("moonraker.restart_prompt"),
+        choices=[
+            {"name": t("moonraker.restart_firmware"), "value": "firmware"},
+            {"name": t("moonraker.restart_service"), "value": "service"},
+            {"name": t("moonraker.restart_skip"), "value": "none"},
+        ],
+    ) or "none"
+    return "none" if activation == "skip" else activation
+
+
+def _run_config_transaction(
+    transport,
+    user_data,
+    activation,
+    generated=None,
+    *,
+    activation_selector=None,
+):
     from core.config_transaction import ConfigDeploymentTransaction
     from core.menu import yes_no
 
@@ -576,6 +599,7 @@ def _run_config_transaction(transport, user_data, activation, generated=None):
         macros,
         activation=activation,
         review=_review_configuration,
+        activation_selector=activation_selector,
         board=user_data.get("board", ""),
         kace_version=_KACE_VERSION,
     )
@@ -590,8 +614,6 @@ def _run_config_transaction(transport, user_data, activation, generated=None):
 def deploy_config(user_data):
     """Deploy configuration through the shared verified transaction over SFTP."""
     from core.config_transaction import SftpConfigTransport
-    from core.menu import numbered_select
-    from core.translations import t
 
     password = user_data.pop("password", "")
     try:
@@ -624,16 +646,6 @@ def deploy_config(user_data):
             if destination.endswith(".cfg")
             else destination.rstrip("/")
         )
-        activation = numbered_select(
-            t("moonraker.restart_prompt"),
-            choices=[
-                {"name": t("moonraker.restart_firmware"), "value": "firmware"},
-                {"name": t("moonraker.restart_service"), "value": "service"},
-                {"name": t("moonraker.restart_skip"), "value": "none"},
-            ],
-        ) or "none"
-        if activation == "skip":
-            activation = "none"
         transport = SftpConfigTransport(
             sftp,
             config_dir,
@@ -641,7 +653,13 @@ def deploy_config(user_data):
             int(user_data.get("moonraker_port", 7125)),
             user_data.get("moonraker_api_key") or None,
         )
-        return _run_config_transaction(transport, user_data, activation, generated)
+        return _run_config_transaction(
+            transport,
+            user_data,
+            "none",
+            generated,
+            activation_selector=_select_config_activation,
+        )
     except paramiko.AuthenticationException as exc:
         return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH authentication failed: {exc}")
     except (OSError, TimeoutError) as exc:
@@ -667,7 +685,7 @@ def deploy_moonraker(user_data):
     from urllib.parse import urlsplit
 
     from core.config_transaction import MoonrakerConfigTransport
-    from core.menu import numbered_select, password_input, simple_input, yes_no
+    from core.menu import password_input, simple_input, yes_no
     from core.moonraker import DEFAULT_PORT, _base_url, check_moonraker
     from core.translations import t
 
@@ -709,20 +727,11 @@ def deploy_moonraker(user_data):
 
     user_data["moonraker_host"] = host
     user_data["moonraker_port"] = port
-    activation = numbered_select(
-        t("moonraker.restart_prompt"),
-        choices=[
-            {"name": t("moonraker.restart_firmware"), "value": "firmware"},
-            {"name": t("moonraker.restart_service"), "value": "service"},
-            {"name": t("moonraker.restart_skip"), "value": "none"},
-        ],
-    ) or "none"
-    if activation == "skip":
-        activation = "none"
     return _run_config_transaction(
         MoonrakerConfigTransport(host, port, api_key or None),
         user_data,
-        activation,
+        "none",
+        activation_selector=_select_config_activation,
     )
 
 

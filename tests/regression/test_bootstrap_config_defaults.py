@@ -162,31 +162,32 @@ SUDO=""
         self.assertIn('"file_manager" "enable_object_processing" "True"', script)
 
     def test_requested_relay_replaces_existing_values_and_verifies(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            moonraker_cfg = root / "moonraker.conf"
-            moonraker_cfg.write_text(
-                "[server]\nport: 7125\n\n"
-                "[power printer]\n"
-                "type: gpio\n"
-                "pin: gpiochip0/gpio5\n"
-                "restart_klipper_when_powered: false\n"
-                "initial_state: off\n"
-                "off_when_shutdown: true\n"
-                "custom_option: preserved\n",
-                encoding="utf-8",
-            )
-            power_json = root / "power.json"
-            power_json.write_text(
-                '{"schema":1,"enabled":true,"device":"printer"}\n',
-                encoding="utf-8",
-            )
-            command = """
+        for active_low, expected_pin in (("false", "gpio21"), ("true", "!gpio21")):
+            with self.subTest(active_low=active_low), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                moonraker_cfg = root / "moonraker.conf"
+                moonraker_cfg.write_text(
+                    "[server]\nport: 7125\n\n"
+                    "[power printer]\n"
+                    "type: gpio\n"
+                    "pin: gpiochip0/gpio5\n"
+                    "restart_klipper_when_powered: false\n"
+                    "initial_state: off\n"
+                    "off_when_shutdown: true\n"
+                    "custom_option: preserved\n",
+                    encoding="utf-8",
+                )
+                power_json = root / "power.json"
+                power_json.write_text(
+                    '{"schema":1,"enabled":true,"device":"printer"}\n',
+                    encoding="utf-8",
+                )
+                command = f"""
 POWER_CONFIG_PATH="$3"
 POWER_RELAY=true
 POWER_DEVICE=printer
-POWER_GPIO=20
-POWER_ACTIVE_LOW=true
+POWER_GPIO=21
+POWER_ACTIVE_LOW={active_low}
 POWER_RESTART_KLIPPER=true
 POWER_INITIAL_STATE=on
 POWER_OFF_WHEN_SHUTDOWN=false
@@ -194,20 +195,20 @@ validate_power_relay_settings
 ensure_moonraker_config "$1" "$2"
 verify_requested_power_relay "$1"
 """
-            result = self._run_bootstrap_library(
-                command, moonraker_cfg, root / "comms" / "klippy.sock", power_json
-            )
-            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-            content = moonraker_cfg.read_text(encoding="utf-8")
-            self.assertEqual(content.count("[power printer]"), 1)
-            self.assertIn("pin: !gpiochip0/gpio20", content)
-            self.assertIn("restart_klipper_when_powered: true", content)
-            self.assertIn("initial_state: on", content)
-            self.assertIn("off_when_shutdown: false", content)
-            self.assertIn("custom_option: preserved", content)
-            self.assertNotIn("gpiochip0/gpio5", content)
-            self.assertIn("# BEGIN KACE MANAGED: power", content)
-            self.assertIn("# END KACE MANAGED: power", content)
+                result = self._run_bootstrap_library(
+                    command, moonraker_cfg, root / "comms" / "klippy.sock", power_json
+                )
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+                content = moonraker_cfg.read_text(encoding="utf-8")
+                self.assertEqual(content.count("[power printer]"), 1)
+                self.assertIn(f"pin: {expected_pin}", content)
+                self.assertIn("restart_klipper_when_powered: true", content)
+                self.assertIn("initial_state: on", content)
+                self.assertIn("off_when_shutdown: false", content)
+                self.assertIn("custom_option: preserved", content)
+                self.assertNotIn("gpiochip0/gpio5", content)
+                self.assertIn("# BEGIN KACE MANAGED: power", content)
+                self.assertIn("# END KACE MANAGED: power", content)
 
     def test_power_reconciliation_is_idempotent_before_state_is_persisted(self):
         with tempfile.TemporaryDirectory() as tmpdir:

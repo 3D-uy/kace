@@ -163,6 +163,27 @@ class TestUploadPrinterCfg(unittest.TestCase):
         self.assertIn(b'filename="custom.cfg"', called_req.data)
 
     @patch("urllib.request.urlopen")
+    def test_nested_upload_uses_path_field_to_create_missing_directory(self, mock_urlopen):
+        """Moonraker's path form field creates a missing config subdirectory."""
+        mock_urlopen.return_value = _fake_response(
+            {"result": {"item": {"path": "kace/generated-hardware.cfg"}}},
+            status=201,
+        )
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._write_tmp_cfg(tmp)
+            ok, result = upload_printer_cfg(
+                "mypi", 7125, cfg, filename="kace/generated-hardware.cfg"
+            )
+        self.assertTrue(ok)
+        self.assertEqual(result, "kace/generated-hardware.cfg")
+        body = mock_urlopen.call_args.args[0].data
+        self.assertIn(b'name="root"\r\n\r\nconfig', body)
+        self.assertIn(b'name="path"\r\n\r\nkace', body)
+        self.assertIn(b'filename="generated-hardware.cfg"', body)
+        self.assertNotIn(b'filename="kace/generated-hardware.cfg"', body)
+
+    @patch("urllib.request.urlopen")
     def test_upload_default_basename(self, mock_urlopen):
         """Omitting filename should default to the file's basename (e.g. macros.cfg)."""
         import tempfile

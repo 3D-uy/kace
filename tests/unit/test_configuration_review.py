@@ -124,6 +124,16 @@ class DryRunPresentationTests(unittest.TestCase):
         self.assertNotIn("--- remote/printer.cfg", rendered)
         self.assertIn("advertencia", rendered)
 
+    def test_homing_warnings_are_rendered_once(self):
+        rendered = render_configuration_review(self.review, color=False)
+        homing_warnings = [
+            warning.message for warning in self.review.validation.warnings
+            if "homing" in warning.code
+        ]
+        self.assertTrue(homing_warnings)
+        for warning in homing_warnings:
+            self.assertEqual(rendered.count(warning), 1)
+
     def test_advanced_mode_prints_full_diff(self):
         answers = iter((True, False))
         output = io.StringIO()

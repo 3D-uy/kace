@@ -90,8 +90,11 @@ class SshBoundaryTests(unittest.TestCase):
         self.assertEqual(transport.config_dir, "/home/kace/printer_data/config")
         self.assertEqual(transport.port, 8123)
         self.assertIs(passed_user, self.user)
-        self.assertEqual(activation, "service")
+        self.assertEqual(activation, "none")
         self.assertEqual(generated[0], "generated.cfg")
+        _select.assert_not_called()
+        self.assertEqual(run.call_args.kwargs["activation_selector"](), "service")
+        _select.assert_called_once()
         self.sftp.close.assert_called_once()
         self.ssh.close.assert_called_once()
 
@@ -140,7 +143,10 @@ class MoonrakerBoundaryTests(unittest.TestCase):
         transport, _user, activation = run.call_args.args
         self.assertEqual(transport.host, "pi.local")
         self.assertEqual(transport.port, 7125)
-        self.assertEqual(activation, "firmware")
+        self.assertEqual(activation, "none")
+        _select.assert_not_called()
+        self.assertEqual(run.call_args.kwargs["activation_selector"](), "firmware")
+        _select.assert_called_once()
 
     @patch("core.menu.yes_no", return_value=False)
     @patch("core.moonraker.check_moonraker", return_value=(False, "offline"))
