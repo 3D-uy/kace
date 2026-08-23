@@ -9,7 +9,13 @@ from core.validators import (
 from core.translations import t
 from core.terminal import BOLD, INFO, RESET, WARNING
 from core.exceptions import DerivationAmbiguityError, WizardExit
-from core.workflow_outcome import WorkflowOutcome, WorkflowResult, failed, success
+from core.workflow_outcome import (
+    WorkflowOutcome,
+    WorkflowResult,
+    failed,
+    pending_activation,
+    success,
+)
 from core.capabilities import validate_firmware_processor_for_architecture
 from firmware.derivation import derive_config
 from firmware.configuration import (
@@ -200,7 +206,10 @@ def _run_board_contract_firmware(user_data, decision):
         return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
     if not yes_no(t("kace.compile_prompt", mcu=prompt_mcu)):
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
-        return success("BoardContract firmware compilation was explicitly skipped.")
+        user_data["firmware_compilation_skipped"] = True
+        return pending_activation(
+            "Firmware compilation is required before configuration deployment."
+        )
 
     print(f"\n\033[92m[*]\033[0m {t('kace.compiling')}", flush=True)
     try:
@@ -298,7 +307,10 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
     ans = yes_no(t("kace.compile_prompt", mcu=prompt_mcu))
     if not ans:
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
-        return success("Firmware compilation was explicitly skipped by the user.")
+        user_data["firmware_compilation_skipped"] = True
+        return pending_activation(
+            "Firmware compilation is required before configuration deployment."
+        )
 
     # ── 1. Resolve firmware configuration interactively (derivation prompts) ──
     current_mcu = mcu

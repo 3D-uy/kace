@@ -43,6 +43,7 @@ Strategy
 import io
 import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
@@ -224,6 +225,10 @@ class _HeadlessMixin:
         sys.argv = ["kace"]
         # Bypass dashboard / prompt_toolkit import inside kace.main()
         os.environ["KACE_AUTO"] = "1"
+        self._workflow_tmp = tempfile.TemporaryDirectory()
+        os.environ["KACE_FIRMWARE_WORKFLOW_PATH"] = os.path.join(
+            self._workflow_tmp.name, "firmware-workflow.json"
+        )
         self._pt_patch = patch(
             'prompt_toolkit.output.create_output',
             return_value=MagicMock(),
@@ -233,6 +238,8 @@ class _HeadlessMixin:
     def tearDown(self):
         self._pt_patch.stop()
         os.environ.pop("KACE_AUTO", None)
+        os.environ.pop("KACE_FIRMWARE_WORKFLOW_PATH", None)
+        self._workflow_tmp.cleanup()
         sys.argv = self._orig_argv
 
 
@@ -713,139 +720,220 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         self.assertEqual(ctx.exception.code, 30)
         generate.assert_not_called()
 
-    def _run(self, terminal_state):
-        from core.moonraker_deployer import DeployResult
-        # kace.py owns ``-v`` as --version; unittest also uses it for verbose
-        # output, so import with a neutral argv in isolated module runs.
+    def test_declining_compilation_blocks_generation_and_deploy(self):
+        from core.workflow_outcome import pending_activation
+
         with patch.object(sys, "argv", ["test_main_integration"]):
             import kace
-        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
-        user_data["pending_firmware_deployment"] = True
-        user_data["klipper_version"] = "kace-test"
-        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=object())
-        result = DeployResult(terminal_state, "test result")
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "lpc1769",
+            "mcu_hint": "usb",
+        }
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard", return_value=user_data), \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.has_todo_pins", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("builtins.print"), \
+             patch(
+                 "core.firmware_wizard.run_firmware_wizard",
+                 return_value=pending_activation("compilation required"),
+             ):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 41)
+        generate.assert_not_called()
+
+    def test_resume_from_mcu_verified_checkpoint_does_not_repeat_wizard(self):
+        import hashlib
+        from core.firmware_workflow import (
+            FirmwareWorkflowState,
+            create_checkpoint,
+            transition_checkpoint,
+            write_checkpoint,
+        )
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        serial = "/dev/serial/by-id/usb-Klipper_lpc1769_RESUMED-if00"
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "lpc1769",
+            "mcu_hint": "usb",
+            "mcu_path": serial,
+        }
+        firmware_path = os.path.join(self._workflow_tmp.name, "firmware.bin")
+        with open(firmware_path, "wb") as output:
+            output.write(b"resume firmware")
+        checkpoint = create_checkpoint(user_data)
+        checkpoint = transition_checkpoint(
+            checkpoint,
+            FirmwareWorkflowState.ARTIFACT_READY,
+            artifact={
+                "path": firmware_path,
+                "final_filename": "firmware.bin",
+                "sha256": hashlib.sha256(b"resume firmware").hexdigest(),
+                "size_bytes": len(b"resume firmware"),
+                "method": "MANUAL",
+                "strategy": "SD_CARD",
+                "instructions": [],
+                "build": {},
+            },
+        )
+        checkpoint = transition_checkpoint(
+            checkpoint, FirmwareWorkflowState.VERIFYING_MCU
+        )
+        checkpoint = transition_checkpoint(
+            checkpoint,
+            FirmwareWorkflowState.MCU_VERIFIED,
+            verified_serial_path=serial,
+            flash_evidence_recorded_at=1,
+        )
+        write_checkpoint(
+            checkpoint, os.environ["KACE_FIRMWARE_WORKFLOW_PATH"]
+        )
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard") as wizard, \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.generate_config", return_value={"content": "[mcu]\n"}), \
+             patch("kace.extract_mcu_serial", return_value=serial), \
+             patch("kace.print_summary"), \
+             patch("kace.time.sleep"), \
+             patch("kace.yes_no", return_value=True), \
+             patch("kace.numbered_select", return_value="none"), \
+             patch("builtins.print"):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        wizard.assert_not_called()
+
+    def test_interrupted_deploy_checkpoint_resumes_without_repeating_wizard(self):
+        import hashlib
+        from core.firmware_workflow import (
+            FirmwareWorkflowState,
+            create_checkpoint,
+            transition_checkpoint,
+            write_checkpoint,
+        )
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        serial = "/dev/serial/by-id/usb-Klipper_lpc1769_RESUMED-if00"
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "lpc1769",
+            "mcu_hint": "usb",
+            "mcu_path": serial,
+            "macros_generated": True,
+        }
+        firmware_path = os.path.join(self._workflow_tmp.name, "firmware.bin")
+        payload = b"interrupted deploy firmware"
+        with open(firmware_path, "wb") as output:
+            output.write(payload)
+        checkpoint = create_checkpoint(user_data)
+        checkpoint = transition_checkpoint(
+            checkpoint,
+            FirmwareWorkflowState.ARTIFACT_READY,
+            artifact={
+                "path": firmware_path,
+                "final_filename": "firmware.bin",
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size_bytes": len(payload),
+                "method": "MANUAL",
+                "strategy": "SD_CARD",
+                "instructions": [],
+                "build": {},
+            },
+        )
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.VERIFYING_MCU)
+        checkpoint = transition_checkpoint(
+            checkpoint,
+            FirmwareWorkflowState.MCU_VERIFIED,
+            verified_serial_path=serial,
+            flash_evidence_recorded_at=1,
+        )
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.CONFIG_GENERATED)
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.READY_TO_DEPLOY)
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.DEPLOYING)
+        write_checkpoint(checkpoint, os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+
+        with patch("kace.print_kace_banner"), \
+             patch("kace.run_wizard") as wizard, \
+             patch("kace.check_display_compatibility", return_value=[]), \
+             patch("kace.generate_config") as generate, \
+             patch("kace.extract_mcu_serial", return_value=serial), \
+             patch("kace.os.path.isfile", return_value=True), \
+             patch("kace.print_summary"), \
+             patch("kace.numbered_select", return_value="none"), \
+             patch("builtins.print"):
+            with self.assertRaises(SystemExit) as ctx:
+                kace.main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        wizard.assert_not_called()
+        generate.assert_not_called()
+
+    def _run_preconfiguration_delivery(self, status):
+        from core.workflow_outcome import success
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "mcu_type": "lpc1769",
+            "mcu_hint": "usb",
+            "pending_firmware_deployment": True,
+        }
+        deployment_result = SimpleNamespace(
+            status=SimpleNamespace(value=status),
+            detail="physical firmware delivery result",
+            ok=status == "FLASHED",
+        )
+        evidence = {
+            "path": os.path.join(self._workflow_tmp.name, "firmware.bin"),
+            "final_filename": "firmware.bin",
+            "sha256": "a" * 64,
+            "size_bytes": 1,
+            "method": "MANUAL",
+            "strategy": "SD_CARD",
+            "instructions": [],
+            "build": {},
+        }
+        with open(evidence["path"], "wb") as output:
+            output.write(b"x")
 
         with patch('kace.print_kace_banner'), \
              patch('kace.run_wizard', return_value=user_data), \
              patch('kace.check_display_compatibility', return_value=[]), \
-             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.generate_config') as generate, \
              patch('kace.has_todo_pins', return_value=[]), \
-             patch('kace.print_summary'), \
              patch('kace.time.sleep'), \
              patch('builtins.print'), \
-             patch('kace.yes_no', return_value=True), \
-             patch('kace.numbered_select') as deploy_menu, \
-             patch('kace.deploy_firmware_installation', return_value=result) as install:
+             patch('core.firmware_wizard.run_firmware_wizard', return_value=success()), \
+             patch('kace.artifact_evidence', return_value=evidence), \
+             patch('kace.execute_firmware_deployment', return_value=deployment_result) as execute:
             with self.assertRaises(SystemExit) as ctx:
                 kace.main()
 
-        install.assert_called_once_with(user_data)
-        deploy_menu.assert_not_called()
+        execute.assert_called_once_with(user_data)
+        generate.assert_not_called()
         return ctx.exception.code
 
-    def test_done_exits_zero(self):
-        from core.moonraker_deployer import DeployState
-        self.assertEqual(self._run(DeployState.DONE), 0)
+    def test_cancelled_physical_delivery_stops_before_configuration(self):
+        self.assertEqual(self._run_preconfiguration_delivery("CANCELLED"), 2)
 
-    def test_non_done_exits_nonzero(self):
-        from core.moonraker_deployer import DeployState
-        self.assertEqual(self._run(DeployState.FAILED_FLASH), 30)
+    def test_failed_physical_delivery_stops_before_configuration(self):
+        self.assertEqual(self._run_preconfiguration_delivery("FAILED"), 30)
 
-    def test_cancelled_physical_deployment_uses_cancelled_exit_code(self):
-        from core.moonraker_deployer import DeployState
-        self.assertEqual(self._run(DeployState.CANCELLED), 2)
+    def test_manual_media_delivery_is_persistently_pending_before_configuration(self):
+        self.assertEqual(self._run_preconfiguration_delivery("MEDIA_PREPARED"), 41)
 
-    def test_standalone_firmware_prompt_cancellation_is_not_reported_as_failure(self):
-        with patch.object(sys, "argv", ["test_main_integration"]):
-            import kace
-        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
-        user_data["pending_firmware_deployment"] = True
-        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=None)
-        deployment_result = SimpleNamespace(
-            status=SimpleNamespace(value="CANCELLED"),
-            detail="manual destination selection cancelled",
-            ok=False,
-        )
-
-        with patch('kace.print_kace_banner'), \
-             patch('kace.run_wizard', return_value=user_data), \
-             patch('kace.check_display_compatibility', return_value=[]), \
-             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
-             patch('kace.has_todo_pins', return_value=[]), \
-             patch('kace.print_summary'), \
-             patch('kace.time.sleep'), \
-             patch('builtins.print'), \
-             patch('kace.yes_no', return_value=True), \
-             patch('kace.numbered_select') as deploy_menu, \
-             patch('kace.execute_firmware_deployment', return_value=deployment_result):
-            with self.assertRaises(SystemExit) as ctx:
-                kace.main()
-
-        self.assertEqual(ctx.exception.code, 2)
-        deploy_menu.assert_not_called()
-
-    def test_standalone_firmware_action_required_is_pending_activation(self):
-        with patch.object(sys, "argv", ["test_main_integration"]):
-            import kace
-        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
-        user_data["pending_firmware_deployment"] = True
-        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=None)
-        deployment_result = SimpleNamespace(
-            status=SimpleNamespace(value="ACTION_REQUIRED"),
-            detail="insert the prepared SD card and restart the board",
-            ok=False,
-        )
-
-        with patch('kace.print_kace_banner'), \
-             patch('kace.run_wizard', return_value=user_data), \
-             patch('kace.check_display_compatibility', return_value=[]), \
-             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
-             patch('kace.has_todo_pins', return_value=[]), \
-             patch('kace.print_summary'), \
-             patch('kace.time.sleep'), \
-             patch('builtins.print') as mock_print, \
-             patch('kace.yes_no', return_value=True), \
-             patch('kace.numbered_select') as deploy_menu, \
-             patch('kace.execute_firmware_deployment', return_value=deployment_result):
-            with self.assertRaises(SystemExit) as ctx:
-                kace.main()
-
-        self.assertEqual(ctx.exception.code, 41)
-        printed = " ".join(str(call) for call in mock_print.call_args_list)
-        self.assertIn("pending activation", printed)
-        self.assertNotIn("did not complete", printed)
-        deploy_menu.assert_not_called()
-
-    def test_standalone_prepared_media_is_pending_activation(self):
-        with patch.object(sys, "argv", ["test_main_integration"]):
-            import kace
-        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED)
-        user_data["pending_firmware_deployment"] = True
-        user_data["firmware_artifact"] = SimpleNamespace(firmware_identity=None)
-        deployment_result = SimpleNamespace(
-            status=SimpleNamespace(value="MEDIA_PREPARED"),
-            detail="firmware copied to removable media",
-            ok=False,
-        )
-
-        with patch('kace.print_kace_banner'), \
-             patch('kace.run_wizard', return_value=user_data), \
-             patch('kace.check_display_compatibility', return_value=[]), \
-             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
-             patch('kace.has_todo_pins', return_value=[]), \
-             patch('kace.print_summary'), \
-             patch('kace.time.sleep'), \
-             patch('builtins.print') as mock_print, \
-             patch('kace.yes_no', return_value=True), \
-             patch('kace.numbered_select'), \
-             patch('kace.execute_firmware_deployment', return_value=deployment_result):
-            with self.assertRaises(SystemExit) as ctx:
-                kace.main()
-
-        self.assertEqual(ctx.exception.code, 41)
-        printed = " ".join(str(call) for call in mock_print.call_args_list)
-        self.assertIn("pending activation", printed)
-        self.assertNotIn("Firmware deployment did not complete", printed)
+    def test_manual_action_required_is_persistently_pending_before_configuration(self):
+        self.assertEqual(self._run_preconfiguration_delivery("ACTION_REQUIRED"), 41)
 
 
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────

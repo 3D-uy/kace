@@ -88,6 +88,8 @@ class ConfigDeploymentTransaction:
         kace_version: str = "unknown",
         timeout: float = 90.0,
         poll_interval: float = 1.0,
+        state_sink: Optional[Callable[[str, str], None]] = None,
+        verify_existing_ready: bool = False,
     ):
         if activation not in {"firmware", "service", "none"}:
             raise ValueError(f"Unsupported activation mode: {activation}")
@@ -108,6 +110,18 @@ class ConfigDeploymentTransaction:
         self.snapshot: Optional[DeploymentSnapshot] = None
         self.plan: Optional[ManagedConfigPlan] = None
         self._written_names: set[str] = set()
+        self.state_sink = state_sink
+        self.verify_existing_ready = bool(verify_existing_ready)
+
+    def _emit(self, state: str, detail: str) -> None:
+        if self.state_sink is None:
+            return
+        try:
+            self.state_sink(state, detail)
+        except Exception:
+            # Studio progress is observational and cannot change transaction
+            # authority or rollback behavior.
+            pass
 
     @staticmethod
     def _sha256(data: bytes) -> str:
@@ -239,6 +253,7 @@ class ConfigDeploymentTransaction:
         self._written_names.add(name)
 
     def run(self) -> ConfigTransactionResult:
+        self._emit("BACKUP", "validating configuration and preparing snapshot")
         try:
             remote = self.transport.read_files(self.CANDIDATES)
             self.plan = build_managed_config_plan(
@@ -270,9 +285,27 @@ class ConfigDeploymentTransaction:
             )
 
         if not self.plan.changed_artifacts:
+            if self.verify_existing_ready:
+                self._emit(
+                    "VERIFYING_CONFIG",
+                    "configuration already matches; verifying Klipper Ready",
+                )
+                ready, state = self._wait_ready()
+                if not ready:
+                    self._emit("CONFIG_ERROR", f"Klipper state={state}")
+                    return ConfigTransactionResult(
+                        ConfigTransactionState.ACTIVATION_FAILED,
+                        f"configuration matches but Klipper is not Ready (state={state})",
+                        self.transaction_id,
+                    )
+                self._emit("DONE", "configuration matches and Klipper is Ready")
             return ConfigTransactionResult(
                 ConfigTransactionState.COMMITTED,
-                "configuration is already reconciled; no files were written",
+                (
+                    "configuration is already reconciled and Klipper Ready"
+                    if self.verify_existing_ready
+                    else "configuration is already reconciled; no files were written"
+                ),
                 self.transaction_id,
             )
 
@@ -312,6 +345,7 @@ class ConfigDeploymentTransaction:
             )
 
         try:
+            self._emit("APPLYING_CONFIG", "uploading reconciled configuration")
             for artifact in self._ordered_artifacts():
                 try:
                     self.transport.upload_bytes(artifact.remote_name, artifact.content)
@@ -319,6 +353,7 @@ class ConfigDeploymentTransaction:
                     self._record_possible_write(artifact.remote_name)
                     raise
                 self._written_names.add(artifact.remote_name)
+            self._emit("VERIFYING_UPLOAD", "verifying uploaded configuration checksums")
             self._verify_plan()
             if self.activation == "none":
                 return ConfigTransactionResult(
@@ -329,13 +364,17 @@ class ConfigDeploymentTransaction:
                 )
 
             if any(item.remote_name == MOONRAKER_REMOTE for item in self.plan.changed_artifacts):
+                self._emit("WAITING_MOONRAKER", "restarting Moonraker before Klipper activation")
                 self.transport.restart_moonraker()
                 if not self._wait_moonraker():
                     raise RuntimeError("Moonraker did not recover after restart")
+            self._emit("FIRMWARE_RESTART", "restarting Klipper to activate configuration")
             self.transport.restart(self.activation)
+            self._emit("VERIFYING_CONFIG", "waiting for Klipper Ready after restart")
             ready, state = self._wait_ready()
             if not ready:
                 raise RuntimeError(f"Klipper did not become Ready (state={state})")
+            self._emit("DONE", "configuration activated and Klipper Ready")
             return ConfigTransactionResult(
                 ConfigTransactionState.COMMITTED,
                 "configuration checksums verified and Klipper Ready",
@@ -343,6 +382,7 @@ class ConfigDeploymentTransaction:
                 self.snapshot,
             )
         except Exception as exc:
+            self._emit("CONFIG_ERROR", str(exc))
             rollback_ok, rollback_detail = self._rollback()
             state = (
                 ConfigTransactionState.ACTIVATION_FAILED

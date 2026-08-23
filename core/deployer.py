@@ -26,7 +26,23 @@ def _preflight_check(cfg_path, user_data, yes_no_fn):
     (pin-namespace mismatches, unrecognized MCU) only warn and let the
     user decide, since we cannot enumerate every valid pin on every board.
     """
+    from core.firmware_workflow import (
+        DeploymentInvariantError,
+        enforce_deployment_invariants,
+    )
     from core.pin_validator import validate_required_sections, validate_pins_for_mcu
+
+    # This is the shared live-deployment boundary used by SSH, Moonraker and
+    # the composed firmware transaction.  Interactive choices cannot override
+    # missing firmware/MCU/serial evidence here.
+    try:
+        enforce_deployment_invariants(cfg_path, user_data)
+    except DeploymentInvariantError as exc:
+        print("\033[91m[!] Deployment safety gate FAILED:\033[0m")
+        for blocker in str(exc).split("; "):
+            print(f"\033[91m    • {blocker}\033[0m")
+        print("\033[93m    Resume the firmware workflow from its last valid checkpoint.\033[0m")
+        return False
 
     # ── Fatal: structural integrity ───────────────────────────────
     problems = validate_required_sections(cfg_path)
@@ -593,6 +609,25 @@ def _run_config_transaction(
     def _review_configuration(review):
         return _interactive_configuration_review(review, yes_no)
 
+    state_sink = None
+    checkpoint = user_data.get("workflow_checkpoint")
+    if isinstance(checkpoint, dict) and checkpoint.get("workflow_id"):
+        from core.moonraker_deployer import JsonEventSink
+
+        event_output = JsonEventSink()
+        runtime_id = f"{checkpoint['workflow_id']}-config"
+        sequence = [0]
+
+        def state_sink(state, detail):
+            sequence[0] += 1
+            event_output({
+                "schema": 1,
+                "workflow_id": runtime_id,
+                "sequence": sequence[0],
+                "state": state,
+                "detail": detail,
+            })
+
     transaction = ConfigDeploymentTransaction(
         transport,
         hardware,
@@ -602,6 +637,8 @@ def _run_config_transaction(
         activation_selector=activation_selector,
         board=user_data.get("board", ""),
         kace_version=_KACE_VERSION,
+        state_sink=state_sink,
+        verify_existing_ready=checkpoint is not None,
     )
     result = transaction.run()
     if result.rollback_succeeded is False:
@@ -609,6 +646,31 @@ def _run_config_transaction(
     elif result.rollback_succeeded:
         print("\033[92m[OK] Rollback restored byte-identical configuration and Klipper Ready.\033[0m")
     return _config_result_to_workflow(result)
+
+
+def _verify_running_firmware_checkpoint(user_data, host, port, api_key=None):
+    """Return a failure unless Klipper reports this checkpoint's exact build."""
+    checkpoint = user_data.get("workflow_checkpoint")
+    if not isinstance(checkpoint, dict):
+        # Existing configuration-only workflows have no firmware checkpoint.
+        return None
+
+    from core.firmware_workflow import FirmwareWorkflowError, verify_running_firmware
+
+    try:
+        versions = _MoonrakerClient(host, int(port), api_key=api_key).get_mcu_versions()
+        reported = verify_running_firmware(
+            checkpoint,
+            versions,
+            mcu_name=str(user_data.get("mcu_name") or "mcu"),
+        )
+    except (FirmwareWorkflowError, OSError, TimeoutError, ValueError) as exc:
+        return failed(
+            WorkflowOutcome.FIRMWARE_FAILED,
+            f"Klipper firmware verification failed after deployment: {exc}",
+        )
+    print(f"\033[92m[OK] Klipper reports compiled firmware {reported}.\033[0m")
+    return workflow_success(f"Configuration deployed and firmware {reported} verified.")
 
 
 def deploy_config(user_data):
@@ -653,13 +715,22 @@ def deploy_config(user_data):
             int(user_data.get("moonraker_port", 7125)),
             user_data.get("moonraker_api_key") or None,
         )
-        return _run_config_transaction(
+        result = _run_config_transaction(
             transport,
             user_data,
             "none",
             generated,
             activation_selector=_select_config_activation,
         )
+        if not result.ok:
+            return result
+        verified = _verify_running_firmware_checkpoint(
+            user_data,
+            user_data["host"],
+            int(user_data.get("moonraker_port", 7125)),
+            user_data.get("moonraker_api_key") or None,
+        )
+        return verified or result
     except paramiko.AuthenticationException as exc:
         return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH authentication failed: {exc}")
     except (OSError, TimeoutError) as exc:
@@ -727,12 +798,16 @@ def deploy_moonraker(user_data):
 
     user_data["moonraker_host"] = host
     user_data["moonraker_port"] = port
-    return _run_config_transaction(
+    result = _run_config_transaction(
         MoonrakerConfigTransport(host, port, api_key or None),
         user_data,
         "none",
         activation_selector=_select_config_activation,
     )
+    if not result.ok:
+        return result
+    verified = _verify_running_firmware_checkpoint(user_data, host, port, api_key or None)
+    return verified or result
 
 
 def _copy_artifacts(user_data, dest, artifact_type) -> bool:

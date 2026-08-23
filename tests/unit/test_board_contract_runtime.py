@@ -338,7 +338,8 @@ class BoardContractRuntimeTests(unittest.TestCase):
         with patch("sys.stdout", new_callable=io.StringIO) as output:
             result = run_firmware_wizard(user_data)
 
-        self.assertEqual(WorkflowOutcome.SUCCESS, result.outcome)
+        self.assertEqual(WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION, result.outcome)
+        self.assertTrue(user_data["firmware_compilation_skipped"])
         contract_build.assert_not_called()
         rendered = output.getvalue()
         self.assertIn("creality.v4.2.7", rendered)

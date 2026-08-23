@@ -191,11 +191,13 @@ class TestFirmwareWizard(unittest.TestCase):
         captured = io.StringIO()
         sys.stdout = captured
         try:
-            run_firmware_wizard(user_data)
+            result = run_firmware_wizard(user_data)
         finally:
             sys.stdout = sys.__stdout__
 
         self.assertIn("Skipping firmware compilation", captured.getvalue())
+        self.assertEqual(WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION, result.outcome)
+        self.assertTrue(user_data["firmware_compilation_skipped"])
 
     @patch('core.firmware_wizard.yes_no')
     @patch('core.firmware_wizard.numbered_select')

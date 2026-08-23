@@ -115,6 +115,21 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(uploads[-1], "printer.cfg")
         self.assertIn(("restart", "firmware"), transport.calls)
 
+    def test_restart_state_is_emitted_only_at_actual_activation_boundary(self):
+        events = []
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport({"printer.cfg": b"# user\n"})
+            result = self.run_transaction(
+                transport,
+                root,
+                state_sink=lambda state, detail: events.append((state, detail)),
+            )
+        states = [state for state, _detail in events]
+        self.assertEqual(result.state, ConfigTransactionState.COMMITTED)
+        self.assertLess(states.index("APPLYING_CONFIG"), states.index("FIRMWARE_RESTART"))
+        self.assertLess(states.index("FIRMWARE_RESTART"), states.index("VERIFYING_CONFIG"))
+        self.assertEqual(states[-1], "DONE")
+
     def test_review_confirmation_precedes_restart_selection_and_upload(self):
         with tempfile.TemporaryDirectory() as root:
             transport = FakeTransport({"printer.cfg": b"# user\n"})
@@ -170,6 +185,25 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
             [call for call in transport.calls[first_call_count:] if call[0] in {"upload", "restart"}],
             [],
         )
+
+    def test_resumed_identical_config_requires_klipper_ready_evidence(self):
+        events = []
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport({"printer.cfg": b"# user\n"})
+            self.run_transaction(transport, root)
+            before = len(transport.calls)
+            resumed = self.run_transaction(
+                transport,
+                root,
+                verify_existing_ready=True,
+                state_sink=lambda state, detail: events.append((state, detail)),
+            )
+        self.assertEqual(resumed.state, ConfigTransactionState.COMMITTED)
+        self.assertIn("Klipper Ready", resumed.detail)
+        self.assertEqual(events[-1][0], "DONE")
+        self.assertFalse(any(
+            call[0] == "restart" for call in transport.calls[before:]
+        ))
 
     def test_macros_upload_failure_restores_old_bytes_and_deletes_new_files(self):
         old_root = b"# original root\n"

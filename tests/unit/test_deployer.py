@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from core.config_transaction import ConfigTransactionState
 from core.deployer import (
     _copy_artifacts,
+    _verify_running_firmware_checkpoint,
     deploy_config,
     deploy_firmware_installation,
     deploy_local,
@@ -155,6 +156,24 @@ class MoonrakerBoundaryTests(unittest.TestCase):
         result = deploy_moonraker({})
         self.assertEqual(result.outcome, WorkflowOutcome.DEPLOYMENT_FAILED)
         self.assertIn("offline", result.detail)
+
+    @patch("core.deployer._MoonrakerClient")
+    def test_checkpoint_requires_exact_running_firmware_identity(self, client_type):
+        expected = "kace-b1-" + "2" * 32
+        checkpoint = {
+            "artifact": {"build": {"firmware_identity": {"reported_version": expected}}},
+        }
+        user = {"workflow_checkpoint": checkpoint}
+        client_type.return_value.get_mcu_versions.return_value = {"mcu": "old-build"}
+
+        with patch("core.firmware_workflow.verify_running_firmware") as verify:
+            from core.firmware_workflow import RunningFirmwareMismatch
+
+            verify.side_effect = RunningFirmwareMismatch("wrong firmware")
+            result = _verify_running_firmware_checkpoint(user, "pi.local", 7125)
+
+        self.assertEqual(result.outcome, WorkflowOutcome.FIRMWARE_FAILED)
+        self.assertIn("wrong firmware", result.detail)
 
 
 class LocalExportBoundaryTests(unittest.TestCase):
