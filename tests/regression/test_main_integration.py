@@ -454,7 +454,8 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
         exit with code 0."""
         q_patches = _mock_questionary_for_main(macros_answer=True, deploy_answer="none")
         with patch('kace.yes_no', q_patches['kace.yes_no']), \
-             patch('kace.numbered_select',  q_patches['kace.numbered_select']):
+             patch('kace.numbered_select',  q_patches['kace.numbered_select']), \
+             patch('kace.extract_mcu_serial', return_value='/dev/serial/by-id/mock'):
             import kace
             with self.assertRaises(SystemExit) as ctx:
                 kace.main()
@@ -577,6 +578,7 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
              patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
              patch('kace.has_todo_pins', return_value=[]), \
              patch('kace.print_summary'), \
+             patch('kace.extract_mcu_serial', return_value='/dev/serial/by-id/mock'), \
              patch('kace.time.sleep'), \
              patch('builtins.print'), \
              patch('kace.yes_no', return_value=True), \
@@ -620,6 +622,7 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
              patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
              patch('kace.has_todo_pins', return_value=[]), \
              patch('kace.print_summary'), \
+             patch('kace.extract_mcu_serial', return_value='/dev/serial/by-id/mock'), \
              patch('kace.time.sleep'), \
              patch('builtins.print'), \
              patch('kace.yes_no', return_value=True), \
