@@ -20,6 +20,7 @@ step_pin: PA1
 
 class FakeTransport:
     def __init__(self, files=None):
+        self.destination_key = ("simulated-printer", id(self))
         self.files = dict(files or {})
         self.calls = []
         self.fail_upload = None

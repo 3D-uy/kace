@@ -6,11 +6,14 @@ import hashlib
 import os
 import posixpath
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Callable, Mapping, Optional
+from urllib.parse import urlsplit
+from weakref import WeakValueDictionary
 
 from core.configuration_review import ConfigurationReview, build_configuration_review
 
@@ -24,6 +27,58 @@ from core.managed_config import (
     build_managed_config_plan,
 )
 from core.snapshot import DeploymentSnapshot, create_snapshot
+
+
+_destination_locks = WeakValueDictionary()
+_destination_locks_guard = threading.Lock()
+
+
+def config_destination_lock(transport):
+    """Serialize one destination in this process, including activation/rollback.
+
+    Separate transport instances must supply the same destination_key for the
+    same printer. This is not a lock against Mainsail or independent processes.
+    """
+    key = transport.destination_key
+    if not isinstance(key, tuple) or not key:
+        raise ValueError("configuration destination identity is unavailable")
+    with _destination_locks_guard:
+        lock = _destination_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _destination_locks[key] = lock
+        return lock
+
+
+class ConfigConflictError(RuntimeError):
+    """The reviewed remote state changed or could not be revalidated."""
+
+
+def read_config_state(transport) -> dict[str, Optional[bytes]]:
+    """Copy a complete byte-level baseline, distinguishing absence from failure."""
+    names = ConfigDeploymentTransaction.CANDIDATES
+    remote = transport.read_files(names)
+    state = {}
+    for name in names:
+        content = remote[name]  # An omitted entry is not confirmed absence.
+        if content is not None and not isinstance(content, bytes):
+            raise TypeError(f"configuration read did not return bytes for {name}")
+        state[name] = content
+    return state
+
+
+def revalidate_config_state(transport, reviewed) -> dict[str, Optional[bytes]]:
+    """Fail closed on content changes, creations, removals or unreadable files."""
+    try:
+        current = read_config_state(transport)
+    except Exception as exc:
+        raise ConfigConflictError(f"configuration revalidation failed: {exc}") from exc
+    changed = [name for name in current if current[name] != reviewed[name]]
+    if changed:
+        raise ConfigConflictError(
+            "concurrent configuration modification detected: " + ", ".join(changed)
+        )
+    return current
 
 
 class ConfigTransactionState(Enum):
@@ -58,7 +113,8 @@ class ConfigTransactionResult:
 class ConfigDeploymentTransaction:
     """Execute the same preflight/snapshot/upload/verify flow for any transport.
 
-    The transport must expose ``read_files``, ``upload_bytes``, ``delete_file``,
+    The transport must expose a stable ``destination_key`` tuple, ``read_files``,
+    ``upload_bytes``, ``delete_file``,
     ``restart``, ``restart_moonraker``, ``moonraker_online`` and
     ``klipper_state``. Read failures must raise; ``None`` is reserved for a
     positively confirmed absent file.
@@ -253,9 +309,23 @@ class ConfigDeploymentTransaction:
         self._written_names.add(name)
 
     def run(self) -> ConfigTransactionResult:
+        try:
+            lock = config_destination_lock(self.transport)
+        except Exception as exc:
+            return ConfigTransactionResult(
+                ConfigTransactionState.PRECONDITION_FAILED,
+                f"configuration destination could not be identified: {exc}",
+                self.transaction_id,
+            )
+        # Hold through review, snapshot, activation and rollback. A second KACE
+        # transaction must not read an intermediate state or race a rollback.
+        with lock:
+            return self._run_locked()
+
+    def _run_locked(self) -> ConfigTransactionResult:
         self._emit("BACKUP", "validating configuration and preparing snapshot")
         try:
-            remote = self.transport.read_files(self.CANDIDATES)
+            remote = read_config_state(self.transport)
             self.plan = build_managed_config_plan(
                 self.generated_hardware, self.generated_macros, remote
             )
@@ -285,6 +355,14 @@ class ConfigDeploymentTransaction:
             )
 
         if not self.plan.changed_artifacts:
+            try:
+                revalidate_config_state(self.transport, remote)
+            except ConfigConflictError as exc:
+                return ConfigTransactionResult(
+                    ConfigTransactionState.PRECONDITION_FAILED,
+                    f"{exc}; no configuration files were written",
+                    self.transaction_id,
+                )
             if self.verify_existing_ready:
                 self._emit(
                     "VERIFYING_CONFIG",
@@ -321,8 +399,9 @@ class ConfigDeploymentTransaction:
                 if selected not in {"firmware", "service", "none"}:
                     raise ValueError(f"Unsupported activation mode: {selected}")
                 self.activation = selected
+            current = revalidate_config_state(self.transport, remote)
             originals = {
-                item.remote_name: item.previous for item in self.plan.changed_artifacts
+                item.remote_name: current[item.remote_name] for item in self.plan.changed_artifacts
             }
             self.snapshot = create_snapshot(
                 originals,
@@ -330,6 +409,12 @@ class ConfigDeploymentTransaction:
                 board=self.board,
                 kace_version=self.kace_version,
                 persist_root=self.snapshot_root,
+            )
+        except ConfigConflictError as exc:
+            return ConfigTransactionResult(
+                ConfigTransactionState.PRECONDITION_FAILED,
+                f"{exc}; no configuration files were written",
+                self.transaction_id,
             )
         except OSError as exc:
             return ConfigTransactionResult(
@@ -344,8 +429,20 @@ class ConfigDeploymentTransaction:
                 self.transaction_id,
             )
 
+        self._emit("APPLYING_CONFIG", "uploading reconciled configuration")
         try:
-            self._emit("APPLYING_CONFIG", "uploading reconciled configuration")
+            # Snapshot persistence can take time. Check again immediately before
+            # the first write; external editors do not participate in our lock.
+            revalidate_config_state(self.transport, current)
+        except ConfigConflictError as exc:
+            return ConfigTransactionResult(
+                ConfigTransactionState.PRECONDITION_FAILED,
+                f"{exc}; no configuration files were written",
+                self.transaction_id,
+                self.snapshot,
+            )
+
+        try:
             for artifact in self._ordered_artifacts():
                 try:
                     self.transport.upload_bytes(artifact.remote_name, artifact.content)
@@ -419,6 +516,20 @@ class MoonrakerConfigTransport:
         self.host = host
         self.port = port
         self.api_key = api_key
+
+    @property
+    def destination_key(self) -> tuple:
+        from core.moonraker import _base_url
+
+        endpoint = urlsplit(_base_url(self.host, self.port))
+        if not endpoint.hostname or endpoint.port is None:
+            raise ValueError("Moonraker configuration destination is invalid")
+        # SFTP shares this activation endpoint and therefore the same lock.
+        # Credentials and transport objects must not split one printer's lock.
+        return (
+            "moonraker", endpoint.hostname.casefold().rstrip("."), endpoint.port,
+            endpoint.path.rstrip("/"),
+        )
 
     def read_files(self, names) -> Mapping[str, Optional[bytes]]:
         from core.moonraker import download_printer_cfg, list_config_files_checked
@@ -585,6 +696,10 @@ class LocalConfigTransport:
         self.config_dir = os.path.realpath(os.path.abspath(config_dir))
         if not os.path.isdir(self.config_dir):
             raise NotADirectoryError(self.config_dir)
+
+    @property
+    def destination_key(self) -> tuple:
+        return ("local", os.path.normcase(self.config_dir))
 
     def _path(self, name: str) -> str:
         if not name or name.startswith(("/", "\\")):

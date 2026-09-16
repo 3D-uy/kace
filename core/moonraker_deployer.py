@@ -210,6 +210,7 @@ class Deployer:
         cancel_event: Optional[threading.Event] = None,
         event_sink: Optional[Callable[[dict], None]] = None,
         snapshot_loader: Optional[Callable[[], object]] = None,
+        before_config_upload: Optional[Callable[[], object]] = None,
         firmware_copy: Optional[Callable[[], bool]] = None,
         firmware_deploy: Optional[Callable[[], object]] = None,
         monitor_before_firmware: bool = False,
@@ -228,6 +229,7 @@ class Deployer:
         self.power_on = power_on
         self.cancel_event = cancel_event or threading.Event()
         self.snapshot_loader = snapshot_loader
+        self.before_config_upload = before_config_upload
         self.firmware_copy = firmware_copy
         self.firmware_deploy = firmware_deploy
         self.monitor_before_firmware = monitor_before_firmware
@@ -666,6 +668,18 @@ class Deployer:
             )
 
             self._transition(DeployState.APPLYING_CONFIG, "uploading configuration")
+            # Firmware work and event delivery can outlast the original review.
+            # A failed final check has written nothing and must not roll back
+            # over the concurrent edit using the older snapshot.
+            if self.before_config_upload is not None:
+                try:
+                    self.before_config_upload()
+                except Exception as exc:
+                    return self._result(
+                        DeployState.FAILED_PRECONDITION,
+                        f"{exc}; no configuration files were written",
+                        versions,
+                    )
             for artifact in self.manifest.artifacts():
                 self.client.upload_config(artifact.local_path, artifact.remote_name)
 

@@ -1059,8 +1059,30 @@ def deploy_firmware_installation(user_data):
     flashing. The installation workflow owns physical identity, fingerprint
     verification, configuration upload, restart and rollback.
     """
+    from core.config_transaction import MoonrakerConfigTransport, config_destination_lock
+    from core.moonraker import DEFAULT_PORT
+    from core.moonraker_deployer import DeployResult, DeployState
+
+    try:
+        destination = MoonrakerConfigTransport(
+            user_data.get("moonraker_host", "localhost"),
+            int(user_data.get("moonraker_port", DEFAULT_PORT)),
+        )
+        lock = config_destination_lock(destination)
+    except Exception as exc:
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            f"configuration destination could not be identified: {exc}",
+        )
+    with lock:
+        return _deploy_firmware_installation_locked(user_data)
+
+
+def _deploy_firmware_installation_locked(user_data):
     from core.mcu_monitor import McuPresenceMonitor
-    from core.config_transaction import ConfigDeploymentTransaction, MoonrakerConfigTransport
+    from core.config_transaction import (
+        MoonrakerConfigTransport, read_config_state, revalidate_config_state,
+    )
     from core.managed_config import build_managed_config_plan
     from core.menu import yes_no
     from core.moonraker import DEFAULT_PORT
@@ -1126,7 +1148,7 @@ def deploy_firmware_installation(user_data):
                 "generated hardware configuration failed deployment preflight",
             )
         config_transport = MoonrakerConfigTransport(host, port, api_key)
-        remote_files = config_transport.read_files(ConfigDeploymentTransaction.CANDIDATES)
+        remote_files = read_config_state(config_transport)
         config_plan = build_managed_config_plan(
             generated_hardware, generated_macros, remote_files
         )
@@ -1143,10 +1165,11 @@ def deploy_firmware_installation(user_data):
         ):
             return DeployResult(DeployState.ABORTED, "configuration deployment cancelled")
         snapshot = None
+        current_files = revalidate_config_state(config_transport, remote_files)
         if config_plan.changed_artifacts:
             snapshot = create_snapshot(
                 {
-                    artifact.remote_name: artifact.previous
+                    artifact.remote_name: current_files[artifact.remote_name]
                     for artifact in config_plan.changed_artifacts
                 },
                 manifest_mcus=(mcu_name,),
@@ -1276,6 +1299,7 @@ def deploy_firmware_installation(user_data):
             # including when the broader CLI was started with --dev-deploy.
             verify_firmware=True,
             snapshot=snapshot,
+            before_config_upload=lambda: revalidate_config_state(config_transport, current_files),
             mcu_monitor=monitor,
             power_cycle_prompt=(
                 _confirm_power_off

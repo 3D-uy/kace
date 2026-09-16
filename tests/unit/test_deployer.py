@@ -323,6 +323,70 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
         self.assertIn("before firmware", result.detail)
         user["firmware_deployment_service"].execute.assert_not_called()
 
+    def test_concurrent_review_edit_aborts_before_snapshot_power_or_firmware(self):
+        files = {"printer.cfg": b"# original\n"}
+        generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"
+
+        def approve(_review, _yes_no):
+            files["printer.cfg"] = b"# concurrent edit\n"
+            return True
+
+        with patch("core.deployer._preflight_check", return_value=True), \
+                patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", generated, None)), \
+                patch("core.config_transaction.MoonrakerConfigTransport.read_files", side_effect=lambda names: {n: files.get(n) for n in names}), \
+                patch("core.deployer._interactive_configuration_review", side_effect=approve), \
+                patch("core.snapshot.create_snapshot") as snapshot, \
+                patch("core.power_controller.configured_power_controller") as power:
+            user = self._user()
+            result = deploy_firmware_installation(user)
+        self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
+        self.assertIn("concurrent configuration modification", result.detail)
+        self.assertEqual(files["printer.cfg"], b"# concurrent edit\n")
+        snapshot.assert_not_called()
+        power.assert_not_called()
+        user["firmware_deployment_service"].execute.assert_not_called()
+
+    def test_firmware_workflow_receives_final_config_revalidation(self):
+        from core.config_transaction import ConfigConflictError
+        from core.snapshot import create_snapshot
+
+        files = {"printer.cfg": b"# original\n"}
+        generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"
+        with tempfile.TemporaryDirectory() as root, \
+                patch("core.deployer._preflight_check", return_value=True), \
+                patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", generated, None)), \
+                patch("core.config_transaction.MoonrakerConfigTransport.read_files", side_effect=lambda names: {n: files.get(n) for n in names}), \
+                patch("core.deployer._interactive_configuration_review", return_value=True), \
+                patch("core.snapshot.create_snapshot", side_effect=lambda originals, **kwargs: create_snapshot(originals, persist_root=root, **kwargs)), \
+                patch("core.power_controller.configured_power_controller", return_value=None), \
+                patch("core.mcu_monitor.McuPresenceMonitor"), \
+                patch("core.moonraker_deployer.Deployer") as deployer:
+            deploy_firmware_installation(self._user())
+            options = deployer.call_args.kwargs
+            self.assertEqual(options["snapshot"].config_files["printer.cfg"], b"# original\n")
+            gate = options["before_config_upload"]
+            self.assertEqual(gate()["printer.cfg"], b"# original\n")
+            files["printer.cfg"] = b"# edited during firmware operation\n"
+            with self.assertRaisesRegex(ConfigConflictError, "concurrent"):
+                gate()
+
+    def test_firmware_wrapper_shares_config_lock_and_releases_it_on_exception(self):
+        from core.config_transaction import MoonrakerConfigTransport, config_destination_lock
+
+        user = self._user()
+        user["moonraker_host"] = "fixture-printer.local"
+        lock = config_destination_lock(MoonrakerConfigTransport("fixture-printer.local", 7125))
+
+        def fail(_user):
+            self.assertTrue(lock.locked())
+            raise RuntimeError("simulated firmware failure")
+
+        with patch("core.deployer._deploy_firmware_installation_locked", side_effect=fail):
+            with self.assertRaisesRegex(RuntimeError, "simulated firmware failure"):
+                deploy_firmware_installation(user)
+        self.assertTrue(lock.acquire(blocking=False))
+        lock.release()
+
 
 if __name__ == "__main__":
     unittest.main()

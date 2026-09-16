@@ -299,6 +299,38 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
         self.assertEqual(action, [])
 
+    def test_concurrent_configuration_during_firmware_aborts_without_upload_or_rollback(self):
+        from core.config_transaction import ConfigConflictError
+
+        reviewed = {"printer.cfg": b"# reviewed\n"}
+        files = dict(reviewed)
+        client = Client({})
+        events = []
+        deployer = self.make(client=client, events=events)
+
+        def on_event(event):
+            events.append(event)
+            if event["state"] == "APPLYING_CONFIG":
+                files["printer.cfg"] = b"# concurrent edit\n"
+
+        # The final guard must also run after observable event callbacks.
+        deployer.event_sink = on_event
+
+        def validate():
+            self.assertIn("versions", client.calls)
+            if files != reviewed:
+                raise ConfigConflictError("concurrent configuration modification detected: printer.cfg")
+
+        deployer.before_config_upload = validate
+        result = deployer.run()
+        self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
+        self.assertIn("concurrent", result.detail)
+        self.assertEqual(files["printer.cfg"], b"# concurrent edit\n")
+        self.assertFalse(any(isinstance(call, tuple) and call[0] == "upload" for call in client.calls))
+        self.assertNotIn("restart", client.calls)
+        self.assertNotIn("restart_moonraker", client.calls)
+        self.assertNotIn("rollback", client.calls)
+
     def test_moonraker_config_is_restarted_before_klipper(self):
         moonraker = os.path.join(self.tmp.name, "moonraker.conf")
         with open(moonraker, "wb") as stream:
