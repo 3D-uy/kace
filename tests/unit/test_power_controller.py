@@ -182,7 +182,7 @@ class PowerControllerTests(TestCase):
             stack.enter_context(
                 patch(
                     "core.config_transaction.MoonrakerConfigTransport.read_files",
-                    return_value={},
+                    side_effect=lambda names: {name: None for name in names},
                 )
             )
             stack.enter_context(patch("core.menu.yes_no", return_value=True))
