@@ -268,6 +268,12 @@ def build_managed_config_plan(
     )
     if stale_legacy_macros:
         existing_root = _remove_include(existing_root, LEGACY_MACROS_REMOTE)
+    # Previously migrated tuning lives in the managed hardware include.
+    # Apply root values last so explicit user overrides keep their precedence.
+    existing_hardware = (remote_files.get(HARDWARE_REMOTE) or b"").decode(
+        "utf-8", errors="strict",
+    )
+    generated = _carry_user_tuning(generated, existing_hardware)
     generated = _carry_user_tuning(generated, existing_root)
     preserve_existing_macros = (
         remote_files.get(LEGACY_MACROS_REMOTE) is not None

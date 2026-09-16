@@ -59,6 +59,88 @@ gcode:
         self.assertIn("enable_force_move: False", hardware)
         self.assertIn(MACROS_REMOTE, root)
 
+        second = build_managed_config_plan(
+            GENERATED, b"[gcode_macro KACE_TEST]\ngcode: G28\n", files,
+        )
+        self.assertEqual(files, {item.remote_name: item.content for item in second.artifacts})
+        self.assertEqual(second.changed_artifacts, ())
+
+    def test_repeated_deployments_preserve_motion_and_driver_tuning(self):
+        cases = (
+            ("printer", "max_velocity: 300\nmax_accel: 3000", "max_velocity: 80\nmax_accel: 1200"),
+            ("extruder", "pressure_advance: 0", "pressure_advance: 0.045"),
+            ("heater_bed", "control: pid\npid_Kp: 20\npid_Ki: 1\npid_Kd: 100",
+             "control: pid\npid_Kp: 33\npid_Ki: 2\npid_Kd: 140"),
+            ("stepper_x", "rotation_distance: 40\nmicrosteps: 16",
+             "rotation_distance: 39.8\nmicrosteps: 32\ngear_ratio: 2:1\nhoming_speed: 25"),
+            ("tmc2209 stepper_x", "run_current: 0.8\ninterpolate: True",
+             "run_current: 0.65\nhold_current: 0.3\ninterpolate: False"),
+        )
+        for section, defaults, tuning in cases:
+            with self.subTest(section=section):
+                generated = f"[{section}]\n{defaults}\n".encode()
+                remote = {ROOT_REMOTE: f"[{section}]\n{tuning}\n".encode()}
+                first = build_managed_config_plan(generated, None, remote)
+                files = {item.remote_name: item.content for item in first.artifacts}
+                for option in tuning.splitlines():
+                    self.assertIn(option.encode(), files[HARDWARE_REMOTE])
+                second = build_managed_config_plan(generated, None, files)
+                self.assertEqual(
+                    files, {item.remote_name: item.content for item in second.artifacts},
+                )
+                self.assertEqual(second.changed_artifacts, ())
+
+    def test_root_tuning_takes_precedence_without_losing_other_managed_values(self):
+        managed = GENERATED.replace(b"pid_Kp: 22.2", b"pid_Kp: 30").replace(
+            b"pid_Ki: 1.0", b"pid_Ki: 2.2",
+        )
+        remote = {
+            ROOT_REMOTE: b"[extruder]\npid_Kp: 31.5\n",
+            HARDWARE_REMOTE: managed,
+        }
+        original = dict(remote)
+        plan = build_managed_config_plan(GENERATED, None, remote)
+        files = {item.remote_name: item.content for item in plan.artifacts}
+        self.assertIn(b"pid_Kp: 31.5", files[HARDWARE_REMOTE])
+        self.assertIn(b"pid_Ki: 2.2", files[HARDWARE_REMOTE])
+        self.assertEqual(remote, original)
+        second = build_managed_config_plan(GENERATED, None, files)
+        self.assertEqual(second.changed_artifacts, ())
+
+    def test_generated_fields_update_while_migrated_tuning_is_preserved(self):
+        first = build_managed_config_plan(
+            GENERATED, None,
+            {ROOT_REMOTE: b"[printer]\nmax_velocity: 80\n[extruder]\npid_Kp: 33\n"},
+        )
+        remote = {item.remote_name: item.content for item in first.artifacts}
+        generated = GENERATED.replace(b"/dev/serial/by-id/test", b"/dev/serial/by-id/new").replace(
+            b"kinematics: cartesian", b"kinematics: corexy",
+        ) + b"[fan]\npin: PA8\n"
+        second = build_managed_config_plan(generated, None, remote)
+        files = {item.remote_name: item.content for item in second.artifacts}
+        hardware = files[HARDWARE_REMOTE]
+        self.assertIn(b"serial: /dev/serial/by-id/new", hardware)
+        self.assertIn(b"kinematics: corexy", hardware)
+        self.assertIn(b"[fan]\npin: PA8", hardware)
+        self.assertIn(b"max_velocity: 80", hardware)
+        self.assertIn(b"pid_Kp: 33", hardware)
+        self.assertEqual([item.remote_name for item in second.changed_artifacts], [HARDWARE_REMOTE])
+        self.assertEqual(build_managed_config_plan(generated, None, files).changed_artifacts, ())
+
+    def test_missing_or_empty_previous_hardware_uses_generated_values(self):
+        for previous in ({}, {HARDWARE_REMOTE: None}, {HARDWARE_REMOTE: b""}):
+            with self.subTest(previous=previous):
+                first = build_managed_config_plan(GENERATED, None, previous)
+                files = {item.remote_name: item.content for item in first.artifacts}
+                self.assertIn(b"max_velocity: 300", files[HARDWARE_REMOTE])
+                self.assertIn(b"pid_Kp: 22.2", files[HARDWARE_REMOTE])
+                self.assertIn(b"enable_force_move: True", files[HARDWARE_REMOTE])
+                self.assertEqual(build_managed_config_plan(GENERATED, None, files).changed_artifacts, ())
+
+    def test_invalid_previous_hardware_encoding_prevents_replacement(self):
+        with self.assertRaises(UnicodeDecodeError):
+            build_managed_config_plan(GENERATED, None, {HARDWARE_REMOTE: b"\xff"})
+
     def test_watermark_control_does_not_restore_old_pid_tuning(self):
         generated = GENERATED.replace(
             b"control: pid\npid_Kp: 22.2\npid_Ki: 1.0\npid_Kd: 100\n",
@@ -82,6 +164,19 @@ pid_Kd: 140
         self.assertNotIn("pid_Kp", hardware)
         self.assertNotIn("pid_Ki", hardware)
         self.assertNotIn("pid_Kd", hardware)
+
+    def test_watermark_control_does_not_restore_managed_pid_tuning(self):
+        first = build_managed_config_plan(GENERATED, None, {ROOT_REMOTE: GENERATED})
+        remote = {item.remote_name: item.content for item in first.artifacts}
+        generated = GENERATED.replace(
+            b"control: pid\npid_Kp: 22.2\npid_Ki: 1.0\npid_Kd: 100\n",
+            b"control: watermark\n",
+        )
+        plan = build_managed_config_plan(generated, None, remote)
+        files = {item.remote_name: item.content for item in plan.artifacts}
+        self.assertIn(b"control: watermark", files[HARDWARE_REMOTE])
+        self.assertNotIn(b"pid_", files[HARDWARE_REMOTE])
+        self.assertEqual(build_managed_config_plan(generated, None, files).changed_artifacts, ())
 
     def test_reconciliation_is_idempotent(self):
         first = build_managed_config_plan(
