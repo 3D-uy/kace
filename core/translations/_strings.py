@@ -692,6 +692,111 @@ UI_STRINGS: dict = {
         "Español":   "Nombre final requerido: {filename}",
         "Português": "Nome final obrigatório: {filename}",
     },
+    "firmware.resume.continue": {
+        "English":   "Continue from the last valid step",
+        "Español":   "Continuar desde el último paso válido",
+        "Português": "Continuar a partir da última etapa válida",
+    },
+    "firmware.resume.obtain": {
+        "English":   "Get/copy the prepared firmware",
+        "Español":   "Obtener/copiar el firmware preparado",
+        "Português": "Obter/copiar o firmware preparado",
+    },
+    "firmware.resume.verify": {
+        "English":   "Verify MCU after flashing",
+        "Español":   "Verificar el MCU después del flasheo",
+        "Português": "Verificar o MCU após a gravação",
+    },
+    "firmware.resume.compile": {
+        "English":   "Compile firmware again",
+        "Español":   "Compilar el firmware nuevamente",
+        "Português": "Compilar o firmware novamente",
+    },
+    "firmware.resume.new": {
+        "English":   "Start a new hardware workflow",
+        "Español":   "Iniciar un nuevo flujo de hardware",
+        "Português": "Iniciar um novo fluxo de hardware",
+    },
+    "firmware.resume.prompt": {
+        "English":   "Saved firmware workflow: {state}",
+        "Español":   "Flujo de firmware guardado: {state}",
+        "Português": "Fluxo de firmware salvo: {state}",
+    },
+    "firmware.manual.required": {
+        "English":   "Firmware flashing is still required.",
+        "Español":   "Todavía es necesario flashear el firmware.",
+        "Português": "Ainda é necessário gravar o firmware.",
+    },
+    "firmware.manual.artifact": {
+        "English":   "Artifact: {path}",
+        "Español":   "Artefacto: {path}",
+        "Português": "Artefato: {path}",
+    },
+    "firmware.manual.final_filename": {
+        "English":   "Final filename: {filename}",
+        "Español":   "Nombre final: {filename}",
+        "Português": "Nome final: {filename}",
+    },
+    "firmware.manual.unavailable": {
+        "English":   "unavailable",
+        "Español":   "no disponible",
+        "Português": "indisponível",
+    },
+    "firmware.manual.board_specific": {
+        "English":   "board-specific",
+        "Español":   "específico de la placa",
+        "Português": "específico da placa",
+    },
+    "firmware.manual.next_steps": {
+        "English":   "Copy/flash the artifact using the board-specific method and power-cycle the board. KACE will remain open so this same workflow can continue.",
+        "Español":   "Copie/flashee el artefacto con el método específico de la placa y haga un ciclo de apagado y encendido. KACE permanecerá abierto para continuar este mismo flujo.",
+        "Português": "Copie/grave o artefato pelo método específico da placa e desligue e ligue novamente a placa. O KACE permanecerá aberto para continuar este mesmo fluxo.",
+    },
+    "firmware.manual.pause_prompt": {
+        "English":   "After copying/flashing the firmware and power-cycling the board, continue with MCU verification:",
+        "Español":   "Después de copiar/flashear el firmware y hacer el ciclo de apagado y encendido de la placa, continúe con la verificación del MCU:",
+        "Português": "Depois de copiar/gravar o firmware e desligar e ligar novamente a placa, continue com a verificação do MCU:",
+    },
+    "firmware.manual.show_instructions": {
+        "English":   "Show the flashing instructions again",
+        "Español":   "Mostrar nuevamente las instrucciones de flasheo",
+        "Português": "Mostrar novamente as instruções de gravação",
+    },
+    "firmware.manual.cancel": {
+        "English":   "Cancel the installation",
+        "Español":   "Cancelar la instalación",
+        "Português": "Cancelar a instalação",
+    },
+    "firmware.manual.verifying": {
+        "English":   "Detecting and verifying the MCU after flashing...",
+        "Español":   "Detectando y verificando el MCU después del flasheo...",
+        "Português": "Detectando e verificando o MCU após a gravação...",
+    },
+    "firmware.manual.verify_failed": {
+        "English":   "MCU verification is not complete. Check the flash, power-cycle and USB connection, then try again.",
+        "Español":   "La verificación del MCU aún no se completó. Revise el flasheo, el ciclo de apagado y encendido y la conexión USB; luego inténtelo nuevamente.",
+        "Português": "A verificação do MCU ainda não foi concluída. Verifique a gravação, o ciclo de energia e a conexão USB; depois tente novamente.",
+    },
+    "firmware.manual.verified": {
+        "English":   "MCU detected and validated at {path}. Continuing installation.",
+        "Español":   "MCU detectado y validado en {path}. Continuando la instalación.",
+        "Português": "MCU detectado e validado em {path}. Continuando a instalação.",
+    },
+    "firmware.manual.pending_noninteractive": {
+        "English":   "Firmware is ready to copy/flash; interactive MCU verification is pending.",
+        "Español":   "El firmware está listo para copiar/flashear; queda pendiente la verificación interactiva del MCU.",
+        "Português": "O firmware está pronto para copiar/gravar; a verificação interativa do MCU está pendente.",
+    },
+    "firmware.manual.interrupted": {
+        "English":   "Manual firmware workflow interrupted.",
+        "Español":   "Se interrumpió el flujo manual de firmware.",
+        "Português": "O fluxo manual de firmware foi interrompido.",
+    },
+    "firmware.manual.cancelled": {
+        "English":   "Manual firmware workflow cancelled.",
+        "Español":   "Se canceló el flujo manual de firmware.",
+        "Português": "O fluxo manual de firmware foi cancelado.",
+    },
     "deployment.prepare_failed": {
         "English":   "Could not prepare firmware deployment: {error}",
         "Español":   "No se pudo preparar el despliegue de firmware: {error}",

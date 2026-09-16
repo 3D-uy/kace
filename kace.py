@@ -196,30 +196,114 @@ def _resume_firmware_workflow():
         FirmwareWorkflowState.READY_TO_DEPLOY,
         FirmwareWorkflowState.DEPLOYING,
     }:
-        choices.append({"name": "Continue from the last valid step", "value": "continue"})
+        choices.append({"name": t("firmware.resume.continue"), "value": "continue"})
     if checkpoint.get("artifact"):
-        choices.append({"name": "Get/copy the prepared firmware", "value": "obtain"})
-        choices.append({"name": "Verify MCU after flashing", "value": "verify"})
-    choices.append({"name": "Compile firmware again", "value": "compile"})
-    choices.append({"name": "Start a new hardware workflow", "value": "new"})
-    action = numbered_select(
-        f"\nSaved firmware workflow: {state.value}",
-        choices=choices,
-    )
-    return checkpoint, action or "continue"
+        choices.append({"name": t("firmware.resume.obtain"), "value": "obtain"})
+        choices.append({"name": t("firmware.resume.verify"), "value": "verify"})
+    choices.append({"name": t("firmware.resume.compile"), "value": "compile"})
+    choices.append({"name": t("firmware.resume.new"), "value": "new"})
+    viewed_artifact = False
+    while True:
+        action = numbered_select(
+            f"\n{t('firmware.resume.prompt', state=state.value)}",
+            choices=choices,
+            require_explicit=viewed_artifact,
+        )
+        if action != "obtain":
+            return checkpoint, action or "continue"
+        _show_prepared_firmware(checkpoint, view_only=True)
+        viewed_artifact = True
 
 
-def _show_prepared_firmware(checkpoint):
+def _show_prepared_firmware(checkpoint, *, view_only=False):
     artifact = checkpoint.get("artifact") or {}
-    print("\n\033[93m[!] Firmware flashing is still required.\033[0m")
-    print(f"    Artifact: {artifact.get('path') or 'unavailable'}")
-    print(f"    Final filename: {artifact.get('final_filename') or 'board-specific'}")
+    if not view_only:
+        print(f"\n\033[93m[!] {t('firmware.manual.required')}\033[0m")
+    print(f"    {t('firmware.manual.artifact', path=artifact.get('path') or t('firmware.manual.unavailable'))}")
+    print(
+        f"    {t('firmware.manual.final_filename', filename=artifact.get('final_filename') or t('firmware.manual.board_specific'))}"
+    )
     for index, instruction in enumerate(artifact.get("instructions") or (), 1):
         text = instruction.get("text") if isinstance(instruction, dict) else str(instruction)
         if text:
             print(f"    {index}. {text}")
-    print("    Copy the artifact using the board-specific method, power-cycle the board,")
-    print("    then resume with 'Verify MCU after flashing'.")
+    if not view_only:
+        print(f"    {t('firmware.manual.next_steps')}")
+
+
+def _wait_for_manual_flash(checkpoint, user_data, *, verify_immediately=False):
+    """Pause an interactive workflow until the prepared firmware is verified.
+
+    ``AWAITING_FLASH`` remains durable crash/reconnect state, but it is not a
+    terminal result. Studio keeps the same SSH/bootstrap process and the
+    operator advances this exact workflow after the physical power-cycle.
+    """
+    state = FirmwareWorkflowState(checkpoint["state"])
+    if state is FirmwareWorkflowState.ARTIFACT_READY:
+        checkpoint = transition_checkpoint(
+            checkpoint, FirmwareWorkflowState.AWAITING_FLASH
+        )
+        _persist_workflow(checkpoint, user_data)
+
+    if os.environ.get("KACE_AUTO") == "1":
+        _show_prepared_firmware(checkpoint)
+        _finish(pending_activation(t("firmware.manual.pending_noninteractive")))
+
+    should_verify = bool(verify_immediately)
+    while True:
+        if not should_verify:
+            _show_prepared_firmware(checkpoint)
+            try:
+                action = numbered_select(
+                    f"\n{t('firmware.manual.pause_prompt')}",
+                    choices=[
+                        {"name": t("firmware.resume.verify"), "value": "verify"},
+                        {
+                            "name": t("firmware.manual.show_instructions"),
+                            "value": "instructions",
+                        },
+                        {"name": t("firmware.manual.cancel"), "value": "cancel"},
+                    ],
+                    require_explicit=True,
+                )
+            except WizardExit:
+                _finish(cancelled(t("firmware.manual.interrupted")))
+            if action == "cancel":
+                _finish(cancelled(t("firmware.manual.cancelled")))
+            if action != "verify":
+                continue
+
+        if FirmwareWorkflowState(checkpoint["state"]) is not FirmwareWorkflowState.VERIFYING_MCU:
+            checkpoint = transition_checkpoint(
+                checkpoint, FirmwareWorkflowState.VERIFYING_MCU
+            )
+            _persist_workflow(checkpoint, user_data)
+        print(f"\n\033[96m[*]\033[0m {t('firmware.manual.verifying')}")
+        try:
+            checkpoint, observed = verify_reappeared_mcu(
+                checkpoint, flash_evidence=True
+            )
+        except FirmwareWorkflowError as exc:
+            checkpoint = transition_checkpoint(
+                checkpoint,
+                FirmwareWorkflowState.AWAITING_FLASH,
+                last_error=str(exc),
+            )
+            _persist_workflow(checkpoint, user_data)
+            print(
+                f"\n\033[93m[!] {t('firmware.manual.verify_failed')}\033[0m"
+            )
+            should_verify = False
+            continue
+
+        user_data["mcu_path"] = observed["mcu_path"]
+        user_data["mcu_type"] = observed["derived_mcu"]
+        _persist_workflow(checkpoint, user_data)
+        print(
+            f"\033[92m[OK]\033[0m "
+            f"{t('firmware.manual.verified', path=observed['mcu_path'])}"
+        )
+        return checkpoint
 
 
 def main():
@@ -245,9 +329,6 @@ def main():
     # restores decisions after SSH/Studio/process loss; runtime objects are
     # always reconstructed or revalidated.
     workflow_checkpoint, resume_action = _resume_firmware_workflow()
-    if resume_action == "obtain" and workflow_checkpoint is not None:
-        _show_prepared_firmware(workflow_checkpoint)
-        _finish(pending_activation("Firmware is ready to copy/flash; MCU verification is pending."))
 
     user_data = {"make_command": _make_command}
     if workflow_checkpoint is not None and resume_action != "new":
@@ -281,27 +362,9 @@ def main():
             FirmwareWorkflowState.AWAITING_FLASH,
             FirmwareWorkflowState.VERIFYING_MCU,
         }:
-            if FirmwareWorkflowState(workflow_checkpoint["state"]) is FirmwareWorkflowState.ARTIFACT_READY:
-                workflow_checkpoint = transition_checkpoint(
-                    workflow_checkpoint, FirmwareWorkflowState.AWAITING_FLASH
-                )
-                _persist_workflow(workflow_checkpoint, user_data)
-            try:
-                workflow_checkpoint, observed = verify_reappeared_mcu(
-                    workflow_checkpoint, flash_evidence=True
-                )
-            except FirmwareWorkflowError as exc:
-                workflow_checkpoint = transition_checkpoint(
-                    workflow_checkpoint,
-                    FirmwareWorkflowState.AWAITING_FLASH,
-                    last_error=str(exc),
-                )
-                _persist_workflow(workflow_checkpoint, user_data)
-                _show_prepared_firmware(workflow_checkpoint)
-                _finish(pending_activation(f"MCU verification is still pending: {exc}"))
-            user_data["mcu_path"] = observed["mcu_path"]
-            user_data["mcu_type"] = observed["derived_mcu"]
-            _persist_workflow(workflow_checkpoint, user_data)
+            workflow_checkpoint = _wait_for_manual_flash(
+                workflow_checkpoint, user_data, verify_immediately=True
+            )
     else:
         workflow_checkpoint = None
         try:
@@ -504,11 +567,10 @@ def main():
                         workflow_checkpoint, FirmwareWorkflowState.AWAITING_FLASH
                     )
                     _persist_workflow(workflow_checkpoint, user_data)
-                    _show_prepared_firmware(workflow_checkpoint)
-                    _finish(pending_activation(
-                        deployment_result.detail or "Flash the prepared firmware, then verify the MCU."
-                    ))
-                if not deployment_result.ok:
+                    workflow_checkpoint = _wait_for_manual_flash(
+                        workflow_checkpoint, user_data
+                    )
+                elif not deployment_result.ok:
                     workflow_checkpoint = transition_checkpoint(
                         workflow_checkpoint,
                         FirmwareWorkflowState.AWAITING_FLASH,
@@ -516,7 +578,11 @@ def main():
                     )
                     _persist_workflow(workflow_checkpoint, user_data)
                     _finish(failed(WorkflowOutcome.FIRMWARE_FAILED, deployment_result.detail))
-                physical_verified = True
+                else:
+                    # Only an actual automatic flash still needs the existing
+                    # immediate MCU-verification branch. Manual delivery has
+                    # already completed that pause/verification above.
+                    physical_verified = True
 
             if physical_verified:
                 workflow_checkpoint = transition_checkpoint(
@@ -539,14 +605,10 @@ def main():
                 user_data["mcu_type"] = observed["derived_mcu"]
                 _persist_workflow(workflow_checkpoint, user_data)
             else:
-                workflow_checkpoint = transition_checkpoint(
-                    workflow_checkpoint, FirmwareWorkflowState.AWAITING_FLASH
-                )
-                _persist_workflow(workflow_checkpoint, user_data)
-                _show_prepared_firmware(workflow_checkpoint)
-                _finish(pending_activation(
-                    "Firmware is compiled and verified, but flashing and MCU verification are pending."
-                ))
+                if FirmwareWorkflowState(workflow_checkpoint["state"]) is not FirmwareWorkflowState.MCU_VERIFIED:
+                    workflow_checkpoint = _wait_for_manual_flash(
+                        workflow_checkpoint, user_data
+                    )
 
     if workflow_checkpoint is not None:
         workflow_state = FirmwareWorkflowState(workflow_checkpoint["state"])
@@ -557,10 +619,19 @@ def main():
             FirmwareWorkflowState.DEPLOYING,
             FirmwareWorkflowState.COMPLETE,
         }:
-            _show_prepared_firmware(workflow_checkpoint)
-            _finish(pending_activation(
-                f"Firmware workflow is {workflow_state.value}; configuration deployment remains blocked."
-            ))
+            if workflow_state in {
+                FirmwareWorkflowState.ARTIFACT_READY,
+                FirmwareWorkflowState.AWAITING_FLASH,
+                FirmwareWorkflowState.VERIFYING_MCU,
+            }:
+                workflow_checkpoint = _wait_for_manual_flash(
+                    workflow_checkpoint, user_data
+                )
+            else:
+                _show_prepared_firmware(workflow_checkpoint)
+                _finish(pending_activation(
+                    f"Firmware workflow is {workflow_state.value}; configuration deployment remains blocked."
+                ))
 
     existing_state = FirmwareWorkflowState(workflow_checkpoint["state"]) if workflow_checkpoint else None
     if existing_state in {

@@ -641,6 +641,116 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
         local_mock.assert_not_called()
 
 
+class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
+    def _saved_checkpoint(self, state):
+        import hashlib
+        from core.firmware_workflow import (
+            FirmwareWorkflowState as State, create_checkpoint,
+            transition_checkpoint, write_checkpoint,
+        )
+
+        data = {**_WIZARD_USER_DATA_WITH_PARSED, "mcu_type": "lpc1769", "mcu_hint": "usb"}
+        path = os.path.join(self._workflow_tmp.name, "firmware.bin")
+        payload = b"prepared firmware for viewing"
+        with open(path, "wb") as output:
+            output.write(payload)
+        checkpoint = transition_checkpoint(create_checkpoint(data), State.ARTIFACT_READY, artifact={
+            "path": path, "final_filename": "firmware.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(), "size_bytes": len(payload),
+            "method": "MANUAL", "strategy": "SD_CARD", "build": {},
+            "instructions": [{"text": "Copy firmware.bin to the SD card."}],
+        })
+        checkpoint = transition_checkpoint(checkpoint, State.AWAITING_FLASH)
+        if state != "AWAITING_FLASH":
+            checkpoint = transition_checkpoint(checkpoint, State.VERIFYING_MCU)
+            checkpoint = transition_checkpoint(
+                checkpoint, State.MCU_VERIFIED,
+                verified_serial_path=data["mcu_path"], flash_evidence_recorded_at=1,
+            )
+        if state == "READY_TO_DEPLOY":
+            checkpoint = transition_checkpoint(checkpoint, State.CONFIG_GENERATED)
+            checkpoint = transition_checkpoint(checkpoint, State.READY_TO_DEPLOY)
+        write_checkpoint(checkpoint)
+        return checkpoint
+
+    def test_obtain_only_displays_artifact_and_returns_to_same_menu(self):
+        from contextlib import ExitStack
+        from pathlib import Path
+        import kace
+
+        class StopAtMenu(Exception):
+            pass
+
+        for state in ("AWAITING_FLASH", "MCU_VERIFIED", "READY_TO_DEPLOY"):
+            with self.subTest(state=state):
+                checkpoint = self._saved_checkpoint(state)
+                checkpoint_path = Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+                original = checkpoint_path.read_bytes()
+                prompts = []
+
+                def select(prompt, **kwargs):
+                    prompts.append((prompt, kwargs))
+                    if len(prompts) == 1:
+                        self.assertIn("obtain", [choice["value"] for choice in kwargs["choices"]])
+                        return "obtain"
+                    self.assertEqual(prompt, prompts[0][0])
+                    self.assertEqual(kwargs["choices"], prompts[0][1]["choices"])
+                    self.assertTrue(kwargs["require_explicit"])
+                    raise StopAtMenu
+
+                with ExitStack() as stack:
+                    stack.enter_context(patch.dict(os.environ, {"KACE_AUTO": "0"}))
+                    stack.enter_context(patch("core.dashboard.detect_system_state", return_value={}))
+                    stack.enter_context(patch("core.dashboard.run_dashboard", return_value="start"))
+                    stack.enter_context(patch("firmware.detector.discover_mcu_hardware", return_value={}))
+                    stack.enter_context(patch("kace.numbered_select", side_effect=select))
+                    output = stack.enter_context(patch("sys.stdout", new_callable=io.StringIO))
+                    stack.enter_context(patch("kace.time.sleep"))
+                    stack.enter_context(patch("kace.check_display_compatibility", return_value=[]))
+                    guards = [stack.enter_context(patch(
+                        "kace." + name, side_effect=AssertionError(f"obtain invoked {name}")
+                    )) for name in (
+                        "run_wizard", "transition_checkpoint", "write_checkpoint",
+                        "verify_reappeared_mcu", "generate_config", "yes_no",
+                        "execute_firmware_deployment", "deploy_config", "deploy_moonraker",
+                        "deploy_usb", "deploy_local",
+                    )]
+                    with self.assertRaises(StopAtMenu):
+                        kace.main()
+                    for guard in guards:
+                        guard.assert_not_called()
+                self.assertEqual(checkpoint_path.read_bytes(), original)
+                self.assertIn(checkpoint["artifact"]["path"], output.getvalue())
+                self.assertIn("firmware.bin", output.getvalue())
+                self.assertIn("Copy firmware.bin to the SD card.", output.getvalue())
+                self.assertNotIn(kace.t("firmware.manual.required"), output.getvalue())
+                self.assertNotIn(kace.t("firmware.manual.next_steps"), output.getvalue())
+
+    def test_obtain_requires_separate_continue_or_verify_selection(self):
+        from pathlib import Path
+        import kace
+
+        for state, action in (
+            ("AWAITING_FLASH", "verify"),
+            ("MCU_VERIFIED", "continue"),
+            ("READY_TO_DEPLOY", "continue"),
+        ):
+            with self.subTest(state=state):
+                checkpoint = self._saved_checkpoint(state)
+                path = Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+                original = path.read_bytes()
+                with patch.dict(os.environ, {"KACE_AUTO": "0"}), \
+                     patch("firmware.detector.discover_mcu_hardware", return_value={}), \
+                     patch("kace.numbered_select", side_effect=["obtain", "obtain", action]) as select, \
+                     patch("sys.stdout", new_callable=io.StringIO):
+                    resumed, selected = kace._resume_firmware_workflow()
+                self.assertEqual(selected, action)
+                self.assertEqual(resumed, checkpoint)
+                self.assertEqual(select.call_count, 3)
+                self.assertTrue(select.call_args.kwargs["require_explicit"])
+                self.assertEqual(path.read_bytes(), original)
+
+
 class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
     """The structured terminal result must control the process exit code."""
 
@@ -937,6 +1047,125 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
 
     def test_manual_action_required_is_persistently_pending_before_configuration(self):
         self.assertEqual(self._run_preconfiguration_delivery("ACTION_REQUIRED"), 41)
+
+    def test_interactive_manual_flash_pauses_and_resumes_same_workflow_in_spanish(self):
+        """Studio's interactive process must survive the physical flash pause."""
+        import hashlib
+        import json
+
+        from core.firmware_workflow import FirmwareWorkflowState, transition_checkpoint
+        from core.translations import get_lang, set_lang
+        from core.workflow_outcome import success
+
+        with patch.object(sys, "argv", ["test_main_integration"]):
+            import kace
+
+        serial = "/dev/serial/by-id/usb-Klipper_lpc1769_FLASHED-if00"
+        firmware_path = os.path.join(self._workflow_tmp.name, "firmware.bin")
+        payload = b"verified manual firmware"
+        with open(firmware_path, "wb") as output:
+            output.write(payload)
+        evidence = {
+            "path": firmware_path,
+            "final_filename": "firmware.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+            "method": "MANUAL",
+            "strategy": "SD_CARD",
+            "instructions": [{
+                "id": "deployment.manual.copy",
+                "text": "Copie firmware.bin en la raíz de la tarjeta SD.",
+            }],
+            "build": {},
+        }
+        user_data = {
+            **_WIZARD_USER_DATA_WITH_PARSED,
+            "language": "Español",
+            "mcu_type": "lpc1769",
+            "mcu_hint": "usb",
+            "pending_firmware_deployment": True,
+        }
+        deployment_result = SimpleNamespace(
+            status=SimpleNamespace(value="MEDIA_PREPARED"),
+            detail="firmware.bin está listo para la instalación manual",
+            ok=False,
+        )
+        verification_attempts = []
+
+        def verify_after_flash(checkpoint, *, flash_evidence=False):
+            verification_attempts.append(checkpoint["workflow_id"])
+            self.assertTrue(flash_evidence)
+            self.assertEqual(
+                checkpoint["state"], FirmwareWorkflowState.VERIFYING_MCU.value
+            )
+            if len(verification_attempts) == 1:
+                from core.firmware_workflow import FirmwareWorkflowError
+
+                raise FirmwareWorkflowError("the expected MCU has not reappeared")
+            verified = transition_checkpoint(
+                checkpoint,
+                FirmwareWorkflowState.MCU_VERIFIED,
+                verified_serial_path=serial,
+                flash_evidence_recorded_at=1,
+            )
+            return verified, {"derived_mcu": "lpc1769", "mcu_path": serial}
+
+        previous_language = get_lang()
+        previous_auto = os.environ.pop("KACE_AUTO", None)
+        try:
+            set_lang("Español")
+            with patch("core.dashboard.detect_system_state", return_value={}), \
+                 patch("core.dashboard.run_dashboard", return_value="start"), \
+                 patch("firmware.detector.discover_mcu_hardware", return_value={}), \
+                 patch("kace.run_wizard", return_value=user_data), \
+                 patch("kace.check_display_compatibility", return_value=[]), \
+                 patch("kace.has_todo_pins", return_value=[]), \
+                 patch("core.firmware_wizard.run_firmware_wizard", return_value=success()), \
+                 patch("kace.artifact_evidence", return_value=evidence), \
+                 patch("kace.execute_firmware_deployment", return_value=deployment_result), \
+                 patch("kace.verify_reappeared_mcu", side_effect=verify_after_flash) as verify, \
+                 patch("kace.generate_config") as generate, \
+                 patch("kace.extract_mcu_serial", return_value=serial), \
+                 patch("kace.print_summary"), \
+                 patch("kace.time.sleep"), \
+                 patch("kace.yes_no", return_value=True), \
+                 patch("kace.numbered_select", side_effect=["verify", "verify", "none"]) as select, \
+                 patch("kace.print_workflow_result") as terminal_result, \
+                 patch("builtins.print") as output:
+                with self.assertRaises(SystemExit) as ctx:
+                    kace.main()
+        finally:
+            set_lang(previous_language)
+            if previous_auto is not None:
+                os.environ["KACE_AUTO"] = previous_auto
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(verify.call_count, 2)
+        self.assertEqual(len(set(verification_attempts)), 1)
+        generate.assert_called_once()
+        self.assertEqual(select.call_count, 3)
+        self.assertEqual(terminal_result.call_count, 1)
+        self.assertEqual(terminal_result.call_args.args[0].exit_code, 0)
+
+        rendered = "\n".join(
+            " ".join(str(item) for item in printed.args)
+            for printed in output.call_args_list
+        )
+        self.assertIn("Todavía es necesario flashear el firmware.", rendered)
+        self.assertIn("La verificación del MCU aún no se completó.", rendered)
+        self.assertIn("MCU detectado y validado", rendered)
+        self.assertNotIn("Firmware flashing is still required", rendered)
+
+        with open(
+            os.environ["KACE_FIRMWARE_WORKFLOW_PATH"], encoding="utf-8"
+        ) as source:
+            final_checkpoint = json.load(source)
+        self.assertEqual(
+            final_checkpoint["state"], FirmwareWorkflowState.READY_TO_DEPLOY.value
+        )
+        self.assertEqual(
+            final_checkpoint["hardware"]["verified_serial_path"], serial
+        )
 
 
 # ── Full smoke pipeline test (requires jinja2) ─────────────────────────────────
