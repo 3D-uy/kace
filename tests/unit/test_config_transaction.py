@@ -186,6 +186,28 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
             [],
         )
 
+    def test_repeated_deployment_preserves_save_config_without_extra_writes(self):
+        saved = (
+            b"#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+            b"#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.\n"
+            b"#*#\n#*# [bltouch]\n#*# z_offset = 2.375\n"
+        )
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport({"printer.cfg": b"[mcu]\nserial: old\n" + saved})
+            first = self.run_transaction(transport, root)
+            deployed = dict(transport.files)
+            first_call_count = len(transport.calls)
+            second = self.run_transaction(transport, root)
+        self.assertEqual(first.state, ConfigTransactionState.COMMITTED)
+        self.assertEqual(second.state, ConfigTransactionState.COMMITTED)
+        deployed_root = deployed["printer.cfg"]
+        self.assertEqual(deployed_root[deployed_root.index(b"#*# <"):], saved)
+        self.assertEqual(deployed_root.count(b"SAVE_CONFIG"), 1)
+        self.assertEqual(transport.files, deployed)
+        self.assertFalse(any(
+            call[0] in {"upload", "restart"} for call in transport.calls[first_call_count:]
+        ))
+
     def test_resumed_identical_config_requires_klipper_ready_evidence(self):
         events = []
         with tempfile.TemporaryDirectory() as root:

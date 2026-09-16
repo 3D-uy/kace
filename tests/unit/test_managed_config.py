@@ -28,6 +28,78 @@ pid_Kd: 100
 
 
 class TestManagedConfigPlan(unittest.TestCase):
+    def test_save_config_after_managed_section_is_preserved_exactly(self):
+        saved = (
+            b"#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+            b"#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.\n"
+            b"#*#\n"
+            b"#*# [bltouch]\n"
+            b"#*# z_offset = 2.375  \n"
+            b"#*#\n"
+            b"#*# [bed_mesh default]\n"
+            b"#*# points =\n"
+            b"#*#     0.015, -0.025, 0.035\n"
+        )
+        for newline in (b"\n", b"\r\n"):
+            for ending in (b"", newline, newline * 2):
+                with self.subTest(newline=newline, ending=ending):
+                    block = saved.rstrip(b"\n").replace(b"\n", newline) + ending
+                    existing = b"[mcu]" + newline + b"serial: old" + newline + block
+                    first = build_managed_config_plan(GENERATED, None, {ROOT_REMOTE: existing})
+                    files = {item.remote_name: item.content for item in first.artifacts}
+                    root = files[ROOT_REMOTE]
+                    self.assertEqual(root[root.index(b"#*# <"):], block)
+                    self.assertEqual(root.count(b"SAVE_CONFIG"), 1)
+                    self.assertNotIn(b"serial: old", root)
+                    self.assertNotIn(b"#*#", files[HARDWARE_REMOTE])
+                    self.assertIn(b"serial: /dev/serial/by-id/test", files[HARDWARE_REMOTE])
+
+                    second = build_managed_config_plan(GENERATED, None, files)
+                    self.assertEqual(
+                        files, {item.remote_name: item.content for item in second.artifacts},
+                    )
+                    self.assertEqual(second.changed_artifacts, ())
+
+                    generated = GENERATED.replace(b"/dev/serial/by-id/test", b"/dev/serial/by-id/new")
+                    updated = build_managed_config_plan(generated, None, files)
+                    updated_files = {item.remote_name: item.content for item in updated.artifacts}
+                    self.assertEqual(updated_files[ROOT_REMOTE], root)
+                    self.assertIn(b"serial: /dev/serial/by-id/new", updated_files[HARDWARE_REMOTE])
+                    self.assertEqual(
+                        [item.remote_name for item in updated.changed_artifacts], [HARDWARE_REMOTE],
+                    )
+
+    def test_save_config_survives_removal_of_stale_legacy_include(self):
+        saved = (
+            b"#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+            b"#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.\n"
+            b"#*#\n#*# [probe]\n#*# z_offset = 1.725\n"
+        )
+        existing = GENERATED + b"[include macros.cfg]\n" + saved
+        first = build_managed_config_plan(
+            GENERATED, b"# macros\n", {ROOT_REMOTE: existing, LEGACY_MACROS_REMOTE: None},
+        )
+        files = {item.remote_name: item.content for item in first.artifacts}
+        root = files[ROOT_REMOTE]
+        self.assertEqual(root[root.index(b"#*# <"):], saved)
+        self.assertNotIn(b"[include macros.cfg]", root)
+        self.assertIn(MACROS_REMOTE.encode(), root)
+        self.assertEqual(
+            build_managed_config_plan(GENERATED, b"# macros\n", files).changed_artifacts, (),
+        )
+
+    def test_save_config_after_user_section_keeps_exact_eof(self):
+        saved = (
+            b"#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+            b"#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.\n"
+            b"#*#\n#*# [probe]\n#*# z_offset = 1.725"
+        )
+        user = b"[gcode_macro USER]\ngcode: M117 keep\n"
+        first = build_managed_config_plan(GENERATED, None, {ROOT_REMOTE: user + saved})
+        files = {item.remote_name: item.content for item in first.artifacts}
+        self.assertTrue(files[ROOT_REMOTE].endswith(user + saved))
+        self.assertEqual(build_managed_config_plan(GENERATED, None, files).changed_artifacts, ())
+
     def test_preserves_user_sections_includes_pid_and_force_move_choice(self):
         existing = b"""[include user-extra.cfg]
 [extruder]

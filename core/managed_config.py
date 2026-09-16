@@ -24,6 +24,9 @@ MANAGED_BEGIN = "# BEGIN KACE MANAGED: generated-includes"
 MANAGED_END = "# END KACE MANAGED: generated-includes"
 
 _SECTION_RE = re.compile(r"(?m)^\s*\[([^\]\r\n]+)\]\s*(?:[#;].*)?$")
+_SAVE_CONFIG_RE = re.compile(
+    r"(?m)^#\*# <---------------------- SAVE_CONFIG ---------------------->[ \t]*\r?$"
+)
 _MANAGED_RE = re.compile(
     rf"(?ms)^\s*{re.escape(MANAGED_BEGIN)}\r?\n.*?^\s*{re.escape(MANAGED_END)}\s*(?:\r?\n)?"
 )
@@ -260,6 +263,13 @@ def build_managed_config_plan(
     generated = generated_hardware.decode("utf-8")
     existing_root_bytes = remote_files.get(ROOT_REMOTE)
     existing_root = (existing_root_bytes or b"").decode("utf-8", errors="strict")
+    # Klipper owns everything from the SAVE_CONFIG header through EOF.
+    # Isolate it before section/include removal and newline normalization.
+    save_config = ""
+    save_config_match = _SAVE_CONFIG_RE.search(existing_root)
+    if save_config_match:
+        save_config = existing_root[save_config_match.start():]
+        existing_root = existing_root[:save_config_match.start()]
     stale_legacy_macros = (
         _LEGACY_HEADER in existing_root
         and MANAGED_BEGIN not in existing_root
@@ -283,6 +293,7 @@ def build_managed_config_plan(
     root, generated, migrated = _reconcile_root(
         existing_root, generated, effective_macros is not None
     )
+    root += save_config
 
     artifacts = [
         PlannedConfigArtifact(ROOT_REMOTE, root.encode("utf-8"), existing_root_bytes),
