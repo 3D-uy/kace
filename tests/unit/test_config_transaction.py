@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from core.config_transaction import (
     ConfigDeploymentTransaction,
@@ -106,6 +107,112 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(result.state, ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION)
         self.assertFalse(any(call[0] == "restart" for call in transport.calls))
         self.assertTrue(result.snapshot.storage_path)
+
+    def test_interrupt_before_writing_cancels_without_rollback(self):
+        for phase in ("read", "confirm", "upload"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as root:
+                original = {"printer.cfg": b"# original\n"}
+                transport = FakeTransport(original)
+
+                def interrupt(*_args):
+                    raise KeyboardInterrupt
+
+                kwargs = {}
+                if phase == "confirm":
+                    kwargs["confirm"] = interrupt
+                else:
+                    setattr(transport, "read_files" if phase == "read" else "upload_bytes", interrupt)
+                with patch.object(ConfigDeploymentTransaction, "_rollback") as rollback:
+                    try:
+                        result = self.run_transaction(transport, root, **kwargs)
+                    except KeyboardInterrupt:
+                        self.fail("interruption escaped without a cancellation result")
+                self.assertEqual(result.state, ConfigTransactionState.CANCELLED)
+                self.assertIsNone(result.rollback_succeeded)
+                rollback.assert_not_called()
+                self.assertEqual(transport.files, original)
+                self.assertFalse(any(c[0] in {"upload", "delete", "restart"} for c in transport.calls))
+
+    def test_interrupt_in_upload_restores_existing_and_removes_new_files(self):
+        for interrupted_upload in (1, 2):
+            with self.subTest(upload=interrupted_upload), tempfile.TemporaryDirectory() as root:
+                original = {"printer.cfg": b"# original\n", "kace/generated-hardware.cfg": b"# old hardware\n"}
+                transport = FakeTransport(original)
+                upload = transport.upload_bytes
+                count = 0
+
+                def write_then_interrupt(name, content):
+                    nonlocal count
+                    upload(name, content)
+                    count += 1
+                    if count == interrupted_upload:
+                        raise KeyboardInterrupt
+
+                transport.upload_bytes = write_then_interrupt
+                try:
+                    result = self.run_transaction(transport, root)
+                except KeyboardInterrupt:
+                    self.fail(f"interrupted upload left remote state: {transport.files!r}")
+                self.assertEqual(result.state, ConfigTransactionState.CANCELLED)
+                self.assertTrue(result.rollback_succeeded)
+                self.assertEqual(transport.files, original)
+                self.assertIn("rollback succeeded", result.detail)
+                if interrupted_upload == 2:
+                    self.assertIn(("delete", "kace/generated-macros.cfg"), transport.calls)
+
+    def test_interrupt_during_restart_or_verification_rolls_back(self):
+        for phase in ("checksum", "restart", "ready"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as root:
+                original = {"printer.cfg": b"# original\n"}
+                transport = FakeTransport(original)
+                transaction = ConfigDeploymentTransaction(
+                    transport, GENERATED, None, activation="firmware",
+                    snapshot_root=root, poll_interval=0,
+                )
+                target, method = (
+                    (transaction, "_verify_plan") if phase == "checksum"
+                    else (transport, "restart" if phase == "restart" else "klipper_state")
+                )
+                operation = getattr(target, method)
+                interrupted = False
+
+                def interrupt_once(*args):
+                    nonlocal interrupted
+                    if not interrupted:
+                        interrupted = True
+                        raise KeyboardInterrupt
+                    return operation(*args)
+
+                with patch.object(target, method, side_effect=interrupt_once):
+                    try:
+                        result = transaction.run()
+                    except KeyboardInterrupt:
+                        self.fail(f"interruption during {phase} bypassed rollback")
+                self.assertEqual(result.state, ConfigTransactionState.CANCELLED)
+                self.assertTrue(result.rollback_succeeded)
+                self.assertEqual(transport.files, original)
+
+    def test_failed_or_interrupted_cancellation_rollback_is_reported(self):
+        for failure in (OSError("restore unavailable"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as root:
+                transport = FakeTransport({"printer.cfg": b"# original\n"})
+                upload = transport.upload_bytes
+
+                def write_then_interrupt(name, content):
+                    upload(name, content)
+                    raise KeyboardInterrupt
+
+                transport.upload_bytes = write_then_interrupt
+                with patch.object(transport, "delete_file", side_effect=failure):
+                    try:
+                        result = self.run_transaction(transport, root)
+                    except KeyboardInterrupt:
+                        self.fail("cancellation/rollback interruption was not reported")
+                self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
+                self.assertIs(result.rollback_succeeded, False)
+                self.assertIn("cancelled", result.detail)
+                self.assertIn("rollback", result.detail)
+                self.assertIn("kace/generated-hardware.cfg", transport.files)
 
     def test_success_uploads_includes_before_root_and_verifies_ready(self):
         with tempfile.TemporaryDirectory() as root:

@@ -293,7 +293,7 @@ class ConfigDeploymentTransaction:
         assert self.snapshot is not None
         try:
             current = self.transport.read_files((name,)).get(name)
-        except Exception:
+        except (Exception, KeyboardInterrupt):
             # If the post-failure state cannot be inspected, rollback must be
             # conservative: the server may have written before returning an
             # error or dropping the connection.
@@ -320,7 +320,28 @@ class ConfigDeploymentTransaction:
         # Hold through review, snapshot, activation and rollback. A second KACE
         # transaction must not read an intermediate state or race a rollback.
         with lock:
-            return self._run_locked()
+            try:
+                return self._run_locked()
+            except KeyboardInterrupt:
+                rollback_ok, rollback_detail = None, "no configuration files were written"
+                if self._written_names:
+                    try:
+                        rollback_ok, rollback_detail = self._rollback()
+                    except KeyboardInterrupt:
+                        rollback_ok, rollback_detail = False, "rollback interrupted by user"
+                    except Exception as exc:
+                        rollback_ok, rollback_detail = False, f"rollback failed: {exc}"
+                state = ConfigTransactionState.CANCELLED
+                if rollback_ok is False:
+                    state = ConfigTransactionState.ROLLBACK_FAILED
+                    detail = f"cancelled by user; rollback error: {rollback_detail}"
+                elif rollback_ok is True:
+                    detail = f"cancelled by user; rollback succeeded: {rollback_detail}"
+                else:
+                    detail = f"cancelled by user; {rollback_detail}"
+                return ConfigTransactionResult(
+                    state, detail, self.transaction_id, self.snapshot, rollback_ok,
+                )
 
     def _run_locked(self) -> ConfigTransactionResult:
         self._emit("BACKUP", "validating configuration and preparing snapshot")
@@ -446,10 +467,10 @@ class ConfigDeploymentTransaction:
             for artifact in self._ordered_artifacts():
                 try:
                     self.transport.upload_bytes(artifact.remote_name, artifact.content)
-                except Exception:
+                    self._written_names.add(artifact.remote_name)
+                except (Exception, KeyboardInterrupt):
                     self._record_possible_write(artifact.remote_name)
                     raise
-                self._written_names.add(artifact.remote_name)
             self._emit("VERIFYING_UPLOAD", "verifying uploaded configuration checksums")
             self._verify_plan()
             if self.activation == "none":

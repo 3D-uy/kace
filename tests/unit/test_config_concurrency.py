@@ -329,10 +329,8 @@ class TestConfigConcurrency(unittest.TestCase):
                     with patch("core.config_transaction.create_snapshot", side_effect=OSError("full disk")):
                         self.assertEqual(transaction.run().state, ConfigTransactionState.SNAPSHOT_FAILED)
                 elif scenario == "exception":
-                    # Only lock cleanup is tested; interrupt/rollback semantics are unchanged.
                     with patch.object(transport, "read_files", side_effect=KeyboardInterrupt):
-                        with self.assertRaises(KeyboardInterrupt):
-                            transaction.run()
+                        self.assertEqual(transaction.run().state, ConfigTransactionState.CANCELLED)
                 else:
                     result = transaction.run()
                     self.assertEqual(result.ok, scenario == "success")

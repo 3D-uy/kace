@@ -439,6 +439,7 @@ class Deployer:
         versions = {}
         monitor_armed = False
         media_prepared = False
+        config_write_started = False
         try:
             if self.snapshot_loader is not None:
                 self._transition(DeployState.BACKUP, "capturing pre-deployment configuration")
@@ -681,6 +682,8 @@ class Deployer:
                         versions,
                     )
             for artifact in self.manifest.artifacts():
+                # An interrupted upload may have written before returning.
+                config_write_started = True
                 self.client.upload_config(artifact.local_path, artifact.remote_name)
 
             self._transition(DeployState.VERIFYING_UPLOAD, "verifying uploaded checksums")
@@ -717,6 +720,17 @@ class Deployer:
 
             return self._result(DeployState.DONE, "deployment validated", versions)
         except (KeyboardInterrupt, McuMonitorCancelled):
+            if config_write_started:
+                try:
+                    rollback_ok, rollback_detail = self._rollback()
+                except KeyboardInterrupt:
+                    rollback_ok, rollback_detail = False, "rollback interrupted by user"
+                except Exception as exc:
+                    rollback_ok, rollback_detail = False, f"rollback failed: {exc}"
+                return self._result(
+                    DeployState.CANCELLED if rollback_ok else DeployState.CONFIG_ERROR,
+                    f"cancelled by user; {rollback_detail}", versions, rollback_ok,
+                )
             return self._result(DeployState.CANCELLED, "cancelled by user", versions)
         except McuIdentityMismatch as exc:
             return self._result(DeployState.FAILED_MONITOR, str(exc), versions)

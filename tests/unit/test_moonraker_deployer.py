@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from core.mcu_monitor import (
     McuIdentity,
@@ -418,6 +419,60 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.assertEqual(result.state, DeployState.CANCELLED)
         self.assertEqual(events[-1]["state"], "CANCELLED")
         self.assertEqual(events[-1]["detail"], "cancelled by user")
+
+    def test_configuration_interruptions_use_rollback_and_report_its_failure(self):
+        for phase in ("prewrite", "upload", "restart", "verify", "rollback_failure", "rollback_interrupt"):
+            with self.subTest(phase=phase):
+                client = Client({})
+                client.remote = dict(self.snapshot.config_files)
+                events = []
+                deployer = self.make(client=client, events=events)
+                interrupted = False
+                if phase == "prewrite":
+                    target, method = deployer, "before_config_upload"
+                    operation = lambda: None
+                elif phase == "verify":
+                    target, method = deployer, "_verify_uploads"
+                    operation = deployer._verify_uploads
+                else:
+                    target, method = client, "firmware_restart" if phase == "restart" else "upload_config"
+                    operation = getattr(target, method)
+
+                def interrupt_once(*args):
+                    nonlocal interrupted
+                    if not interrupted:
+                        interrupted = True
+                        if method == "upload_config":
+                            operation(*args)
+                        raise KeyboardInterrupt
+                    return operation(*args)
+
+                if phase == "rollback_failure":
+                    client.restore_snapshot = lambda _snapshot: ["printer.cfg"]
+                elif phase == "rollback_interrupt":
+                    def interrupt_restore(_snapshot):
+                        raise KeyboardInterrupt
+                    client.restore_snapshot = interrupt_restore
+                with patch.object(target, method, side_effect=interrupt_once):
+                    try:
+                        result = deployer.run()
+                    except KeyboardInterrupt:
+                        self.fail("interruption escaped instead of reporting cancellation/rollback")
+                if phase.startswith("rollback_"):
+                    self.assertEqual(result.state, DeployState.CONFIG_ERROR)
+                    self.assertIs(result.rollback_succeeded, False)
+                    self.assertIn("rollback", result.detail)
+                else:
+                    self.assertEqual(result.state, DeployState.CANCELLED)
+                    self.assertEqual(client.remote, self.snapshot.config_files)
+                    if phase == "prewrite":
+                        self.assertIsNone(result.rollback_succeeded)
+                        self.assertNotIn("rollback", client.calls)
+                        self.assertFalse(any(isinstance(c, tuple) and c[0] == "upload" for c in client.calls))
+                    else:
+                        self.assertTrue(result.rollback_succeeded)
+                        self.assertIn("rollback", client.calls)
+                self.assertEqual(events[-1]["state"], result.state.name)
 
     def test_renderer_failure_does_not_change_workflow_result(self):
         events = []
