@@ -2,11 +2,35 @@ import re
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReproducibleCiContractTests(unittest.TestCase):
+    def test_schema_validation_jobs_install_the_hashed_development_lock(self):
+        workflow = yaml.safe_load(
+            (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        )
+        lock = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+        self.assertRegex(lock, r"(?m)^jsonschema==[^\n]+\n\s+--hash=sha256:")
+        for job in ("unit-tests", "regression-tests"):
+            with self.subTest(job=job):
+                steps = workflow["jobs"][job]["steps"]
+                install = next(i for i, step in enumerate(steps)
+                               if "pip install" in step.get("run", ""))
+                validation = next(i for i, step in enumerate(steps)
+                                  if "tests/run_tests.py --verbose" in step.get("run", ""))
+                self.assertLess(install, validation)
+                self.assertEqual(
+                    steps[install]["run"],
+                    "python3 -m pip install --require-hashes -r requirements-dev.txt",
+                )
+                setup = next(step for step in steps
+                             if step.get("uses", "").startswith("actions/setup-python@"))
+                self.assertEqual(setup["with"]["cache-dependency-path"], "requirements-dev.txt")
+
     def test_workflow_pins_actions_runners_python_and_hashed_dependencies(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertNotIn("ubuntu-latest", workflow)

@@ -7,6 +7,7 @@ import glob
 import json
 import os
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -53,13 +54,34 @@ def _resign(payload):
 
 
 class BoardContractSchemaTests(unittest.TestCase):
+    def test_schema_gate_fails_instead_of_skipping_without_jsonschema(self):
+        result = unittest.TestResult()
+        with patch.dict("sys.modules", {"jsonschema": None}):
+            BoardContractSchemaTests("test_schema_is_valid_and_all_documents_conform").run(result)
+        self.assertEqual([], result.skipped)
+        self.assertEqual([], result.errors)
+        self.assertEqual(1, len(result.failures))
+        self.assertIn("requirements-dev.txt", result.failures[0][1])
+
+    def test_schema_gate_rejects_a_nonconforming_document(self):
+        result = unittest.TestResult()
+        with patch(__name__ + "._payloads", return_value=[("invalid.yaml", {})]):
+            BoardContractSchemaTests("test_schema_is_valid_and_all_documents_conform").run(result)
+        self.assertEqual([], result.skipped)
+        self.assertEqual([], result.errors)
+        self.assertEqual(1, len(result.failures))
+        self.assertIn("required property", result.failures[0][1])
+
     def test_schema_is_valid_and_all_documents_conform(self):
         with open(SCHEMA_PATH, "r", encoding="utf-8") as source:
             schema = json.load(source)
         try:
             import jsonschema
         except ImportError:
-            self.skipTest("jsonschema is not installed; typed model validation still runs")
+            self.fail(
+                "JSON Schema validation requires jsonschema. Install the development lock: "
+                "python -m pip install --require-hashes -r requirements-dev.txt"
+            )
         jsonschema.Draft202012Validator.check_schema(schema)
         validator = jsonschema.Draft202012Validator(schema)
         for path, payload in _payloads():
