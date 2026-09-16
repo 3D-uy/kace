@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import configparser
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,6 +107,38 @@ SUDO=""
             self.assertEqual(printer.count("enable_force_move: True"), 1)
             self.assertEqual(moonraker.count("[file_manager]"), 1)
             self.assertEqual(moonraker.count("enable_object_processing: True"), 1)
+
+    def test_new_moonraker_trust_is_loopback_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = root / "moonraker.conf"
+            command = 'POWER_RELAY=false\nensure_moonraker_config "$1" "$2"\n'
+            result = self._run_bootstrap_library(command, config, root / "klippy.sock")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            parser = configparser.ConfigParser()
+            parser.read(config)
+            self.assertEqual(parser["authorization"]["trusted_clients"].split(),
+                             ["127.0.0.1", "::1/128"])
+            self.assertEqual(parser["authorization"]["cors_domains"].split(),
+                             ["*.lan", "*.local", "*://my.mainsail.xyz", "*://app.fluidd.xyz"])
+            original = config.read_bytes()
+            result = self._run_bootstrap_library(command, config, root / "klippy.sock")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(config.read_bytes(), original)
+
+    def test_existing_moonraker_authorization_is_not_migrated(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = root / "moonraker.conf"
+            original = (b"[authorization]\ntrusted_clients:\n    192.168.0.0/16\n"
+                        b"    FE80::/10\ncors_domains:\n    https://custom.local\n"
+                        b"[file_manager]\nenable_object_processing: True\n")
+            config.write_bytes(original)
+            result = self._run_bootstrap_library(
+                'POWER_RELAY=false\nensure_moonraker_config "$1" "$2"\n',
+                config, root / "klippy.sock")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(config.read_bytes(), original)
 
     def test_existing_user_values_are_not_overwritten(self):
         with tempfile.TemporaryDirectory() as tmpdir:
