@@ -4,6 +4,10 @@ import re
 import os
 import time
 
+from firmware.boards.upstream import load_klipper_source_contract
+
+KLIPPER_REF = load_klipper_source_contract().validated_commit
+
 CACHE_EXPIRY_SECONDS = 3 * 24 * 3600  # 3 days cache duration
 
 # ── Modular BLTouch database ───────────────────────────────────────────────────
@@ -74,7 +78,7 @@ def get_bltouch_pins_for_board(board_name: str) -> dict:
 
 def fetch_config_list():
     """Fetches the list of generic and printer configs from Klipper GitHub."""
-    cache_file = os.path.expanduser("~/.kace_boards_cache.json")
+    cache_file = os.path.expanduser(f"~/.kace_boards_cache.{KLIPPER_REF}.json")
     
     # 1. Check persistent cache first (valid for CACHE_EXPIRY_SECONDS)
     try:
@@ -88,7 +92,7 @@ def fetch_config_list():
         pass
 
     # 2. Try GitHub API
-    url = "https://api.github.com/repos/Klipper3d/klipper/contents/config"
+    url = f"https://api.github.com/repos/Klipper3d/klipper/contents/config?ref={KLIPPER_REF}"
     req = urllib.request.Request(url, headers={'User-Agent': 'KACE-App'})
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -110,7 +114,7 @@ def fetch_config_list():
     except Exception as api_err:
         # 3. API Limit hit, fallback to scraping GitHub HTML tree
         try:
-            tree_url = "https://github.com/Klipper3d/klipper/tree/master/config"
+            tree_url = f"https://github.com/Klipper3d/klipper/tree/{KLIPPER_REF}/config"
             req_html = urllib.request.Request(tree_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) KACE-App'})
             with urllib.request.urlopen(req_html, timeout=10) as response:
                 html = response.read().decode('utf-8', errors='ignore')
@@ -153,7 +157,7 @@ def fetch_config_list():
 
 def fetch_raw_config(filename):
     """Fetches the raw content of a specific config file."""
-    cache_dir = os.path.expanduser("~/.kace_configs_cache")
+    cache_dir = os.path.expanduser(f"~/.kace_configs_cache/{KLIPPER_REF}")
     # R-08: Use exist_ok=True to eliminate the TOCTOU race between the
     # os.path.exists() check and os.makedirs() call.
     try:
@@ -172,7 +176,7 @@ def fetch_raw_config(filename):
     except Exception:
         pass
 
-    url = f"https://raw.githubusercontent.com/Klipper3d/klipper/master/config/{filename}"
+    url = f"https://raw.githubusercontent.com/Klipper3d/klipper/{KLIPPER_REF}/config/{filename}"
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 KACE-App'})
     try:
         with urllib.request.urlopen(req, timeout=10) as response:

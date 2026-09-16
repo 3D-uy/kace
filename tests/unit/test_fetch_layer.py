@@ -35,7 +35,8 @@ from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from core.scraper import CACHE_EXPIRY_SECONDS
+from core.scraper import CACHE_EXPIRY_SECONDS, KLIPPER_REF
+from firmware.boards.upstream import load_klipper_source_contract
 
 
 # ── Test helpers ──────────────────────────────────────────────────────────────
@@ -73,7 +74,7 @@ class TestFetchConfigList(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._tmp = self._tmpdir.name
-        # Redirect expanduser so "~/.kace_boards_cache.json" lands in tmpdir
+        # Redirect the revision-specific cache into tmpdir.
         self._patch_exp = patch(
             'core.scraper.os.path.expanduser',
             side_effect=lambda p: p.replace('~', self._tmp),
@@ -86,7 +87,25 @@ class TestFetchConfigList(unittest.TestCase):
 
     @property
     def _cache_path(self):
-        return os.path.join(self._tmp, '.kace_boards_cache.json')
+        return os.path.join(self._tmp, f'.kace_boards_cache.{KLIPPER_REF}.json')
+
+    @patch('urllib.request.urlopen')
+    def test_unversioned_cache_cannot_override_pinned_api(self, mock_urlopen):
+        legacy = os.path.join(self._tmp, '.kace_boards_cache.json')
+        with open(legacy, 'w', encoding='utf-8') as f:
+            json.dump(['generic-unreviewed.cfg'], f)
+        expected = ['generic-reviewed.cfg']
+        mock_urlopen.return_value = _fake_response(_github_api_payload(expected))
+
+        from core.scraper import fetch_config_list
+        self.assertEqual(load_klipper_source_contract().validated_commit, KLIPPER_REF)
+        self.assertEqual(fetch_config_list(), expected)
+        self.assertEqual(
+            mock_urlopen.call_args.args[0].full_url,
+            f'https://api.github.com/repos/Klipper3d/klipper/contents/config?ref={KLIPPER_REF}',
+        )
+        with open(legacy, encoding='utf-8') as f:
+            self.assertEqual(json.load(f), ['generic-unreviewed.cfg'])
 
     # ── 1. Fresh cache hit ────────────────────────────────────────────────────
 
@@ -194,6 +213,10 @@ class TestFetchConfigList(unittest.TestCase):
         self.assertIn('generic-creality-v4.2.2.cfg', result)
         self.assertNotIn('README.md', result)
         self.assertEqual(mock_urlopen.call_count, 2)
+        self.assertEqual(
+            mock_urlopen.call_args.args[0].full_url,
+            f'https://github.com/Klipper3d/klipper/tree/{KLIPPER_REF}/config',
+        )
 
     # ── 6. API failure → HTML scrape (href pattern) ───────────────────────────
 
@@ -201,10 +224,10 @@ class TestFetchConfigList(unittest.TestCase):
     def test_api_failure_html_scrape_href_pattern(self, mock_urlopen):
         """The href regex pattern must extract configs from standard GitHub anchors."""
         html = (
-            b'<a href="/Klipper3d/klipper/blob/master/config/generic-bigtreetech-skr-v1.4.cfg">'
-            b'<a href="/Klipper3d/klipper/blob/master/config/printer-creality-ender3.cfg">'
-            b'<a href="/Klipper3d/klipper/blob/master/config/README.md">'
-        )
+            f'<a href="/Klipper3d/klipper/blob/{KLIPPER_REF}/config/generic-bigtreetech-skr-v1.4.cfg">'
+            f'<a href="/Klipper3d/klipper/blob/{KLIPPER_REF}/config/printer-creality-ender3.cfg">'
+            f'<a href="/Klipper3d/klipper/blob/{KLIPPER_REF}/config/README.md">'
+        ).encode()
         mock_urlopen.side_effect = [_url_error(), _fake_response(html)]
 
         from core.scraper import fetch_config_list
@@ -278,7 +301,25 @@ class TestFetchRawConfig(unittest.TestCase):
 
     @property
     def _cache_dir(self):
-        return os.path.join(self._tmp, '.kace_configs_cache')
+        return os.path.join(self._tmp, '.kace_configs_cache', KLIPPER_REF)
+
+    @patch('urllib.request.urlopen')
+    def test_unversioned_raw_cache_cannot_override_pinned_download(self, mock_urlopen):
+        legacy_dir = os.path.dirname(self._cache_dir)
+        os.makedirs(legacy_dir)
+        legacy = os.path.join(legacy_dir, 'generic-board.cfg')
+        with open(legacy, 'w', encoding='utf-8') as f:
+            f.write('unreviewed master content')
+        mock_urlopen.return_value = _fake_response(b'pinned content')
+
+        from core.scraper import fetch_raw_config
+        self.assertEqual(fetch_raw_config('generic-board.cfg'), 'pinned content')
+        self.assertEqual(
+            mock_urlopen.call_args.args[0].full_url,
+            f'https://raw.githubusercontent.com/Klipper3d/klipper/{KLIPPER_REF}/config/generic-board.cfg',
+        )
+        with open(legacy, encoding='utf-8') as f:
+            self.assertEqual(f.read(), 'unreviewed master content')
 
     def _write_cache(self, filename: str, content: str, age_seconds: float = 100):
         os.makedirs(self._cache_dir, exist_ok=True)

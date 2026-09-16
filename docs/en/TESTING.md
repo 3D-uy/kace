@@ -72,7 +72,7 @@ This gate parses `data/boards.yaml`, checks required top-level and entry fields,
 
 ### Generated-config matrix — `tests/matrix/`
 
-The matrix generates each accepted case through KACE, stores it with a deterministic ID, and loads it inside Docker with the exact Klipper commit declared by `tests/klipper_contract.py`.
+The matrix generates each accepted case through KACE, stores it with a deterministic ID, and loads it inside Docker with the exact Klipper commit declared by `data/klipper_contract.yaml` (consumed through `tests/klipper_contract.py`).
 
 Results are classified as:
 
@@ -90,7 +90,9 @@ An expected rejection is not counted as a pass. Reports and generated configurat
 
 ### Full Klipper sweep — `tests/sweep/`
 
-The sweep clones the Klipper `config/` tree at the exact commit declared by `tests/klipper_contract.py`, verifies the detached checkout's `HEAD`, parses its `generic-*.cfg` and `printer-*.cfg` files, and classifies known unsupported inputs separately from unhandled failures. It requires Git and network access. The sweep and generated-config matrix deliberately share the same immutable upstream identity: the sweep tests breadth of upstream examples, while the matrix tests representative KACE output through Klipper's real loader.
+The release-supported Klipper revision is `validated_commit` in `data/klipper_contract.yaml`, already used by BoardContract. The scraper (including revision-scoped caches), sweep, matrix and legacy MCU build tests consume this contract. Standalone bootstrap mirrors it because it runs before KACE is installed; `tests/unit/test_klipper_sweep_contract.py` rejects divergence. To update a release, review the YAML pin and per-board evidence, synchronize `scripts/bootstrap.sh` and Studio's bundled copy/hash, and rerun the contract and compatibility checks. Promote Studio's `bootstrap_ref` to the resulting KACE commit when committing the release. Upstream `master` monitoring remains read-only. Pre-baked installations and user-managed local Klipper checkouts retain their existing ownership policy; these tests do not certify arbitrary installed revisions.
+
+The sweep clones the Klipper `config/` tree at the exact commit declared by `data/klipper_contract.yaml` (consumed through `tests/klipper_contract.py`), verifies the detached checkout's `HEAD`, parses its `generic-*.cfg` and `printer-*.cfg` files, and classifies known unsupported inputs separately from unhandled failures. It requires Git and network access. The sweep and generated-config matrix deliberately share the same immutable upstream identity: the sweep tests breadth of upstream examples, while the matrix tests representative KACE output through Klipper's real loader.
 
 The sweep report is generated output and is not committed.
 

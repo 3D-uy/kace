@@ -7,26 +7,31 @@ import unittest
 
 from firmware.builder import build_firmware_orchestrator, BuildContext
 from firmware.derivation import derive_config
+from tests.klipper_contract import KLIPPER_REF, KLIPPER_REPO_URL
 
 
 class TestMCUBuilds(unittest.TestCase):
-    def setUp(self):
-        # We need a real Klipper clone to compile firmware.
-        self.klipper_path = os.path.expanduser("~/klipper")
-        if not os.path.exists(self.klipper_path):
-            print("Cloning Klipper for compilation tests...", flush=True)
-            subprocess.run(
-                [
-                    "git",
-                    "clone",
-                    "--depth",
-                    "1",
-                    "https://github.com/Klipper3d/klipper.git",
-                    self.klipper_path,
-                ],
-                check=True,
-            )
+    @classmethod
+    def setUpClass(cls):
+        # Never compile an arbitrary branch or modify the user's ~/klipper.
+        source = tempfile.TemporaryDirectory(prefix="kace-mcu-builds-")
+        cls.addClassCleanup(source.cleanup)
+        cls.klipper_path = source.name
+        for command in (
+            ["git", "init", cls.klipper_path],
+            ["git", "remote", "add", "origin", KLIPPER_REPO_URL],
+            ["git", "fetch", "--depth=1", "origin", KLIPPER_REF],
+            ["git", "checkout", "--detach", KLIPPER_REF],
+        ):
+            subprocess.run(command, cwd=cls.klipper_path, check=True)
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=cls.klipper_path,
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        if revision != KLIPPER_REF:
+            raise RuntimeError(f"Klipper checkout mismatch: expected {KLIPPER_REF}, got {revision}")
 
+    def setUp(self):
         self.output_dir = tempfile.TemporaryDirectory()
 
     def tearDown(self):

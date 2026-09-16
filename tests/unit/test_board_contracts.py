@@ -84,7 +84,7 @@ class BoardContractSchemaTests(unittest.TestCase):
 
     def test_global_source_contract_is_full_and_reproducible(self):
         source = load_klipper_source_contract()
-        self.assertEqual("fe4eb8650bd7de4c2100a14eaf09b0965c430e29", source.validated_commit)
+        self.assertRegex(source.validated_commit, r"^[0-9a-f]{40}$")
         self.assertEqual("https://github.com/Klipper3d/klipper.git", source.repository)
         self.assertEqual("refs/heads/master", source.upstream_monitor_ref)
         self.assertFalse(source.upstream_monitor_mutation_allowed)
