@@ -13,6 +13,9 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   release SHA; hash verification against the immutable Git object is unchanged.
 - Runtime safety fixes are unchanged. Repin the versioned candidate and bootstrap
   so Studio installs this exact release.
+- CI runs the Pytest stabilization regressions against real pinned Klipper
+  components; STM32 compilation fixtures provide their explicit reference clocks
+  instead of relying on the removed unsafe MCU-wide default.
 
 ## [0.9.4-rc.1] — 2026-09-17
 

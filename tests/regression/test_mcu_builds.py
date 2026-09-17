@@ -37,7 +37,7 @@ class TestMCUBuilds(unittest.TestCase):
     def tearDown(self):
         self.output_dir.cleanup()
 
-    def _run_build_test(self, mcu, hint, expected_filename, compiler_binary):
+    def _run_build_test(self, mcu, hint, expected_filename, compiler_binary, *, reference_clock=None):
         # Check if compiler is available in the environment, excluding the wrapper directory
         from tests.fixtures.mocks import get_compiler_wrapper_path
         wrapper_dir = get_compiler_wrapper_path()
@@ -48,6 +48,10 @@ class TestMCUBuilds(unittest.TestCase):
 
         # 1. Derive configuration
         config_dict = derive_config(mcu, hint=hint)
+        if reference_clock is not None:
+            # The runtime now requires explicit board facts for STM32. These
+            # clocks belong to the test fixtures, never to an MCU-wide default.
+            config_dict["CONFIG_CLOCK_REF_FREQ"] = reference_clock
 
         # 2. Configure build context to use the real system make
         make_cmd = "make"
@@ -93,11 +97,11 @@ class TestMCUBuilds(unittest.TestCase):
 
     def test_stm32f103_build(self):
         """Verify STM32F103 builds successfully to klipper.bin."""
-        self._run_build_test("stm32f103", "usb", "klipper.bin", "arm-none-eabi-gcc")
+        self._run_build_test("stm32f103", "usb", "klipper.bin", "arm-none-eabi-gcc", reference_clock="8000000")
 
     def test_stm32f446_build(self):
         """Verify STM32F446 builds successfully to klipper.bin."""
-        self._run_build_test("stm32f446", "usb", "klipper.bin", "arm-none-eabi-gcc")
+        self._run_build_test("stm32f446", "usb", "klipper.bin", "arm-none-eabi-gcc", reference_clock="12000000")
 
     def test_rp2040_build(self):
         """Verify RP2040 builds successfully to klipper.uf2."""
