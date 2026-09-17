@@ -92,6 +92,24 @@ jobs:
       - name: Run unit tests
         run: python3 tests/run_tests.py --verbose
 
+      # The unittest runner does not collect pytest function/fixture regressions.
+      # Exercise them explicitly, including real pinned Kconfig/parser behavior.
+      - name: Run stabilization regressions against pinned Klipper
+        run: |
+          readarray -t klipper_source < <(python3 -c "from tests.klipper_contract import KLIPPER_REPO_URL, KLIPPER_REF; print(KLIPPER_REPO_URL); print(KLIPPER_REF)")
+          git init .klipper-contract-source
+          git -C .klipper-contract-source remote add origin "${klipper_source[0]}"
+          git -C .klipper-contract-source fetch --depth 1 origin "${klipper_source[1]}"
+          git -C .klipper-contract-source checkout --detach FETCH_HEAD
+          test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"
+          python3 -m pytest -q \
+            tests/unit/test_audit_followup.py \
+            tests/unit/test_audit_stabilization.py \
+            tests/unit/test_deployment_p1.py \
+            tests/unit/test_final_readiness_fixes.py \
+            tests/unit/test_hardware_readiness.py \
+            tests/unit/test_stabilization_p2.py
+
   # Stateful loopback lab: real Moonraker HTTP adapter, Power API, udev MCU
   # monitor, firmware strategies, verification, upload, and rollback. It never
   # opens a physical serial device, GPIO, or removable disk.
