@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/3D-uy/KACE/actions/workflows/ci.yml"><img src="https://github.com/3D-uy/KACE/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/status-pre--1.0-yellow" alt="Project status: pre-1.0">
+  <img src="https://img.shields.io/badge/release-0.9.4--rc.1-orange" alt="Project status: pre-1.0">
   <img src="https://img.shields.io/badge/Python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Raspberry%20Pi-green" alt="Linux and Raspberry Pi">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0 license"></a>
@@ -24,8 +24,30 @@
 > [!WARNING]
 > KACE is in active pre-1.0 development. The `main` branch can change without backward-compatibility guarantees until a stable release process exists.
 
+## Platforms and firmware
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Linux-host-FCC624?style=for-the-badge&amp;logo=linux&amp;logoColor=black" alt="Linux host">
+  <img src="https://img.shields.io/badge/Raspberry_Pi-host-A22846?style=for-the-badge&amp;logo=raspberrypi&amp;logoColor=white" alt="Raspberry Pi host">
+  <img src="https://img.shields.io/badge/Klipper-firmware-F2A900?style=for-the-badge" alt="Klipper firmware">
+  <img src="https://img.shields.io/badge/Moonraker-API-2471A3?style=for-the-badge" alt="Moonraker API">
+</p>
+
+| Platform / integration | Implemented scope | Qualification boundary |
+| --- | --- | --- |
+| 🐧 Linux · 🍓 Raspberry Pi | Debian-family host, Python 3.11+, interactive CLI | Actual host/image must be qualified. |
+| ⚙️ Klipper | Configuration, pinned-source builds, firmware identity verification | Klipper only; no Marlin firmware generation. |
+| ![STM32](https://img.shields.io/badge/STM32-03234B?logo=stmicroelectronics&logoColor=white) | Exact STM32 board/bootloader profiles | Profile-specific SD delivery; physical validation pending. |
+| ![AVR](https://img.shields.io/badge/AVR-00979D?logo=arduino&logoColor=white) | Exact AVR profiles and guarded AVRDUDE route | No generic USB flashing across boards. |
+| ![ARM](https://img.shields.io/badge/LPC176x-0091BD?logo=arm&logoColor=white) · ![RP2040](https://img.shields.io/badge/RP2040-A22846?logo=raspberrypi&logoColor=white) | LPC board contracts; RP2040 UF2 preparation | Method/authority comes from the exact profile; prepare-only is not flashed. |
+| 🌐 Moonraker · Mainsail · Fluidd | API integration and bootstrap dashboard selection | Existing configuration may require manual application. |
+
+> [!IMPORTANT]
+> **0.9.4-rc.1 is a controlled test candidate.** Read the [hardware qualification guide](docs/HARDWARE_TESTING.md) before connecting equipment. Existing-file replacement is blocked where the transport cannot atomically protect concurrent edits; KACE saves a reviewed proposal. Recovery can require manual action. Neither case is reported as a completed deployment.
+
 ## Contents
 
+- [Platforms and firmware](#platforms-and-firmware)
 - [What is KACE?](#what-is-kace)
 - [Quick start](#quick-start)
 - [How the ecosystem flows](#how-the-ecosystem-flows)
@@ -99,7 +121,7 @@ Machine-readable stage and error markers in `scripts/bootstrap.sh` are consumed 
 | --- | --- |
 | Collect board, motion, endstop, heater, sensor, probe, display, and software details across separate steps. | Gather those choices in one guided CLI flow. |
 | Assemble configuration and firmware artifacts manually. | Resolve maintained board and MCU profiles, then generate configuration, macros, and optional firmware artifacts. |
-| Choose transfer and recovery steps ad hoc. | Use supported local/removable-media, SSH/SFTP, Moonraker, or safety-gated firmware deployment paths with backup, validation, and rollback support where implemented. |
+| Choose transfer and recovery steps ad hoc. | Use supported local/removable-media, SSH/SFTP, Moonraker, or safety-gated firmware deployment paths with review, validation, durable snapshots and explicit manual recovery when atomic replacement is unavailable. |
 | Validate the physical printer after each change. | Validate the physical printer after each change; KACE makes artifacts and workflow more repeatable, but does not replace commissioning. |
 
 ## Features
@@ -112,7 +134,7 @@ Machine-readable stage and error markers in `scripts/bootstrap.sh` are consumed 
 | 🖥️ Displays | Compatibility checks and generated display configuration where supported. |
 | 📄 Generated artifacts | Klipper configuration and macro generation from project templates, stored under `~/kace/` on the printer host. |
 | ⚙️ Firmware | Optional Klipper MCU firmware derivation and build; exact board strategies for validated AVRDUDE, SD-card, and UF2 preparation workflows, with unsupported boards limited to prepare-only. |
-| 📦 Deployment | Local/removable-media, SSH/SFTP, and Moonraker configuration deployment paths; backup, validation, and rollback support around deployment. |
+| 📦 Deployment | Local/removable-media and remote review/export paths; conditional creation where supported, durable snapshots and explicit activation. Unsafe existing-file replacement is blocked. |
 
 Unsupported or contradictory selections are expected to fail safely rather than produce a configuration that is known to be invalid.
 
@@ -174,15 +196,15 @@ Run `python kace.py --help` for the available CLI options.
 1. Provision or prepare the Linux printer host.
 2. Launch KACE with `kace` after installation, or `python kace.py` from a checkout.
 3. Select language and describe the printer, controller, motion system, endstops, bed, heaters, sensors, probe, display, and software choices.
-4. Let KACE resolve the board profile and generate the Klipper configuration under `~/kace/`.
-5. Build the MCU firmware when required by the selected board workflow.
-6. Review the generated artifacts and deploy them using the chosen local or remote target.
-7. Flash the MCU only according to the controller manufacturer's documented procedure.
-8. Start Klipper and complete its official verification sequence before energizing heaters or commanding unrestricted motion.
+4. Resolve the exact board profile; build and review the MCU artifact when the workflow requires firmware.
+5. Follow its supported physical procedure and verify the original MCU before configuration generation can continue.
+6. Review the generated configuration, includes and proposed changes under `~/kace/`.
+7. Apply through a supported conditional path, or review and apply the saved proposal manually when replacement is blocked. Resolve every recovery/pending state.
+8. Explicitly activate, verify Klipper Ready and the expected firmware identity, then complete controlled printer commissioning.
 
 For an integrated firmware path, KACE displays transactional installation progress directly in an interactive terminal and keeps `Ctrl+C` available for a safe cancellation. Firmware target edits are re-derived as a complete configuration, so changing an architecture or processor cannot retain stale clock, offset, machine, or processor flags; KACE displays the resulting `.config` diff before starting the build. Each real build records the exact Klipper commit, canonical `.config`, toolchain versions, and artifact SHA-256, while a unique build ID embedded in the MCU version prevents an unchanged previous firmware from passing post-flash verification. Physical delivery distinguishes prepared media, safe media installation, bootloader entry, flashing, reenumeration and firmware verification; an action still required from the operator is never reported as success. With a configured relay, KACE receives permission before powering off, waits for confirmed MCU removal, asks the operator to install the media while power is off, and powers on only after a second confirmation. Mock, identity-less, tampered or otherwise non-flashable artifacts are rejected by every deployment method. Redirected output, pipes, CI, and terminals without dynamic capabilities receive plain ASCII progress lines instead. The same canonical workflow events are emitted as `KACE_WORKFLOW_EVENT` JSON lines for KACE Studio; neither terminal view controls or reconstructs the installation state machine.
 
-Post-flash MCU identity is accepted automatically only when a scored assessment includes the captured physical USB port or `by-path` topology and the board profile's expected application VID/PID, with no conflicting evidence. A stable serial adds confidence but never overrides a changed port or incorrect VID/PID. Ambiguous candidates require an explicit physical confirmation and that decision is recorded in the workflow event.
+Post-flash MCU identity is accepted automatically only when a scored assessment includes the captured physical USB port or `by-path` topology and the board profile's expected application VID/PID, with no conflicting evidence. A stable serial adds confidence but never overrides a changed port or incorrect VID/PID. Ambiguous evidence cannot be resolved by matching the MCU model alone. Verification must remain bound to the originally selected physical device; any permitted operator confirmation is recorded in the workflow event.
 
 > [!TIP]
 > Review generated artifacts before deployment, and treat the first power-on, homing, heater, sensor, and movement checks as operator-controlled safety steps.

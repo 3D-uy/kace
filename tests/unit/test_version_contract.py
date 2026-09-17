@@ -24,7 +24,7 @@ class TestKaceVersionContract(unittest.TestCase):
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         current = re.search(
-            r"^## \[([0-9]+(?:\.[0-9]+){2,3})\]",
+            r"^## \[([0-9]+(?:\.[0-9]+){2,3}(?:-[0-9A-Za-z.-]+)?)\]",
             changelog,
             re.MULTILINE,
         )

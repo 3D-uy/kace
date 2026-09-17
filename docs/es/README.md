@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/3D-uy/KACE/actions/workflows/ci.yml"><img src="https://github.com/3D-uy/KACE/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/status-pre--1.0-yellow" alt="Estado del proyecto: pre-1.0">
+  <img src="https://img.shields.io/badge/release-0.9.4--rc.1-orange" alt="Estado del proyecto: pre-1.0">
   <img src="https://img.shields.io/badge/Python-3.11%2B-blue" alt="Python 3.11 o posterior">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Raspberry%20Pi-green" alt="Linux y Raspberry Pi">
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licencia GPL-3.0"></a>
@@ -23,6 +23,25 @@
 
 > [!WARNING]
 > KACE está en desarrollo activo pre-1.0. La rama `main` puede cambiar sin garantías de compatibilidad hacia atrás hasta que exista un proceso de versiones estables.
+
+## Plataformas y firmware
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Linux-host-FCC624?style=for-the-badge&amp;logo=linux&amp;logoColor=black" alt="Linux host">
+  <img src="https://img.shields.io/badge/Raspberry_Pi-host-A22846?style=for-the-badge&amp;logo=raspberrypi&amp;logoColor=white" alt="Raspberry Pi host">
+  <img src="https://img.shields.io/badge/Klipper-firmware-F2A900?style=for-the-badge" alt="Klipper firmware">
+  <img src="https://img.shields.io/badge/Moonraker-API-2471A3?style=for-the-badge" alt="Moonraker API">
+</p>
+
+| Plataforma / integración | Alcance actual | Límite |
+| --- | --- | --- |
+| 🐧 Linux · 🍓 Raspberry Pi | Host Debian, Python 3.11+, CLI interactiva | Validación física pendiente. |
+| ⚙️ Klipper | Configuración, compilación fijada e identidad del firmware | No genera firmware Marlin. |
+| STM32 · AVR · LPC176x · RP2040 | Perfiles exactos de placa/bootloader; SD, AVRDUDE o preparación UF2 según el contrato | Preparar no equivale a flashear; no hay compatibilidad física genérica por familia. |
+| Moonraker · Mainsail · Fluidd | API y selección de interfaz durante bootstrap | La configuración existente puede requerir aplicación manual. |
+
+> [!IMPORTANT]
+> **0.9.4-rc.1 es una candidata para pruebas controladas.** Consulta la [guía de validación física](../HARDWARE_TESTING.md) (EN). Si el transporte no permite proteger atómicamente una edición concurrente, KACE bloquea la sustitución de archivos existentes y conserva una propuesta revisada. La recuperación puede requerir intervención manual; estos estados no se presentan como éxito.
 
 ## Índice
 
@@ -99,7 +118,7 @@ Los marcadores legibles por máquina de etapas y errores en `scripts/bootstrap.s
 | --- | --- |
 | Reunir detalles de placa, movimiento, endstops, calentadores, sensores, sonda, pantalla y software en pasos separados. | Recopilar esas decisiones en un único flujo guiado de CLI. |
 | Montar manualmente los artefactos de configuración y firmware. | Resolver perfiles mantenidos de placa y MCU, y después generar configuración, macros y artefactos de firmware opcionales. |
-| Elegir transferencia y recuperación de manera ad hoc. | Usar rutas compatibles de medio local/extraíble, SSH/SFTP, Moonraker o despliegue de firmware USB protegido, con respaldo, validación y rollback donde estén implementados. |
+| Elegir transferencia y recuperación de manera ad hoc. | Usar rutas compatibles de medio local/extraíble, SSH/SFTP, Moonraker o despliegue de firmware USB protegido, con revisión, respaldo y recuperación manual explícita cuando sea necesaria. |
 | Validar físicamente la impresora después de cada cambio. | Validar físicamente la impresora después de cada cambio; KACE vuelve más repetibles los artefactos y el flujo, pero no reemplaza la puesta en marcha. |
 
 ## Características
@@ -112,7 +131,7 @@ Los marcadores legibles por máquina de etapas y errores en `scripts/bootstrap.s
 | 🖥️ Pantallas | Comprobaciones de compatibilidad y configuración de pantalla generada donde se admite. |
 | 📄 Artefactos generados | Generación de configuración y macros de Klipper desde plantillas del proyecto, almacenadas bajo `~/kace/` en el host de impresora. |
 | ⚙️ Firmware | Derivación y compilación opcionales de firmware Klipper para MCU; estrategias exactas por placa para AVRDUDE, tarjeta SD y preparación UF2 validadas, con placas desconocidas limitadas a solo preparar. |
-| 📦 Despliegue | Rutas de despliegue de configuración por medio local/extraíble, SSH/SFTP y Moonraker; soporte de respaldo, validación y rollback alrededor del despliegue. |
+| 📦 Despliegue | Rutas de despliegue de configuración por medio local/extraíble, SSH/SFTP y Moonraker; revisión, respaldo y activación explícita; sustituciones inseguras bloqueadas y recuperación manual cuando corresponda. |
 
 Se espera que las selecciones incompatibles o contradictorias fallen de forma segura, en lugar de producir una configuración que se sabe inválida.
 
@@ -174,11 +193,11 @@ Ejecuta `python kace.py --help` para ver las opciones disponibles de la CLI.
 1. Aprovisiona o prepara el host Linux de la impresora.
 2. Inicia KACE con `kace` después de instalarlo, o con `python kace.py` desde un clon.
 3. Selecciona el idioma y describe las elecciones de impresora, controladora, sistema de movimiento, endstops, cama, calentadores, sensores, sonda, pantalla y software.
-4. Deja que KACE resuelva el perfil de placa y genere la configuración de Klipper bajo `~/kace/`.
-5. Compila el firmware del MCU cuando lo requiera el flujo de la placa seleccionada.
-6. Revisa los artefactos generados y desplíegalos mediante el destino local o remoto elegido.
-7. Flashea el MCU únicamente de acuerdo con el procedimiento documentado por el fabricante de la controladora.
-8. Inicia Klipper y completa su secuencia oficial de verificación antes de energizar calentadores u ordenar movimiento sin restricciones.
+4. Resuelve el perfil exacto; compila y revisa el firmware cuando el flujo lo requiera.
+5. Completa el procedimiento físico de esa placa y verifica la MCU originalmente seleccionada antes de generar configuración.
+6. Revisa configuración, includes y cambios propuestos bajo `~/kace/`.
+7. Aplica por una ruta condicional compatible o aplica manualmente la propuesta si se bloquea la sustitución. Resuelve estados pendientes y de recuperación.
+8. Activa explícitamente, verifica Klipper Ready y la identidad del firmware, y completa la puesta en marcha controlada.
 
 Para una ruta de firmware integrada, KACE muestra el progreso transaccional de instalación directamente en una terminal interactiva y mantiene `Ctrl+C` disponible para una cancelación segura. La salida redirigida, pipes, CI y terminales sin capacidades dinámicas reciben en su lugar líneas de progreso ASCII simples. Los mismos eventos canónicos de flujo se emiten como líneas JSON `KACE_WORKFLOW_EVENT` para KACE Studio; ninguna vista de terminal controla ni reconstruye la máquina de estados de instalación.
 

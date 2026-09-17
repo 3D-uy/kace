@@ -6,7 +6,87 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [0.9.3.5] — Unreleased
+## [0.9.4-rc.1] — 2026-09-17
+
+Candidate for controlled hardware qualification; no physical qualification is claimed.
+
+### Fixed
+- Verify the compiled firmware fingerprint inside the transaction, before success;
+  bind manual verification to the originally selected MCU's physical evidence.
+- Reject stale checkpoint writers, conflicting MCU identities, altered artifacts,
+  incompatible Kconfig settings and unsafe flash targets before physical delivery.
+- Preserve existing Klipper settings, SAVE_CONFIG data and ordered explicit user
+  includes; reject ambiguous include graphs and serial overrides.
+- Prevent forward writes and recovery from overwriting concurrent edits. Unsupported
+  conditional replacement produces a reviewed proposal and manual recovery guidance.
+- Revalidate the active remote configuration path, transferred bytes, restart,
+  Klipper Ready and build identity, including unchanged-content retries.
+- Preserve bootstrap live configuration and original backups on incomplete power
+  reconciliation instead of performing an unsafe blind rollback.
+- Harden installer publication, exact revision binding, dependency identity and
+  firmware build provenance; keep unsupported physical methods prepare-only.
+
+### Documentation and validation
+- Document the actual deployment limits and controlled hardware test gates; refresh
+  English, Spanish and Portuguese README compatibility tables and release badges.
+- Expand simulated installation, concurrency, recovery, identity, real Klipper parser
+  and Kconfig regressions without accessing hardware.
+- Publish immutable runtime/installer and bootstrap references for Studio; artifact
+  evidence belongs to each Studio executable's external release manifest.
+
+## [0.9.3.5] — 2026-08-23
+
+### Publication and Traceability
+- Published the release-critical firmware workflow at KACE commit
+  `a3a9a73c0124ca7a193be6bb4ac91d5bc43dcaf4`. The immutable runtime
+  candidate consumed by bootstrap is
+  `243d020457942dac9335c411a1b860cbeee6d099`.
+- Updated the KACE Studio integration contract to fetch the exact bootstrap
+  from this KACE release while preserving the immutable installer hash. The
+  corresponding Studio release is
+  `2553a97795d1b535ccc0ba241158e03504840ecf`.
+- The published Studio package was built and independently reproduced in CI
+  from that Studio commit. Its `KACE-studio.exe` SHA-256 is
+  `cd02a61d80d2af6c4b81435fdb63f26974391022d3eb44a0e4779588d5853c2d`.
+
+### Changed
+- **Verified Build Workspace**: Firmware builds now use a disk-backed,
+  disposable Klipper checkout and reject volatile workspaces before a build
+  can start. The installed runtime is bound to the immutable bootstrap commit
+  that selected it.
+- **Firmware Review and Remote Export**: Restored the configuration review
+  before firmware delivery and clarified remote-export outcomes so generated
+  artifacts are not presented as active configurations.
+- **Moonraker Deployment Contract**: Hardened deployment and power-contract
+  handling so the configuration transaction, restart boundary, and firmware
+  identity verification remain explicit.
+
+### Fixed
+- **Durable Firmware Workflow and Recovery**: The firmware → configuration →
+  deploy sequence is now an integrity-checked, resumable state machine. It
+  persists only compatible wizard/hardware/artifact facts, blocks deploy and
+  Klipper restart until firmware flash and MCU re-enumeration are verified,
+  and validates the final `[mcu].serial` against the observed MCU path.
+- **Manual Flashing Gate**: Boards using manual media flashing now stop in a
+  real `AWAITING_FLASH` checkpoint after a verified build artifact, provide
+  their existing board-specific copy/install instructions, and resume only
+  after MCU and serial verification. Non-SD flashing contracts retain their
+  existing delivery methods.
+- **Reconnect Semantics**: Expected SSH loss during firmware or Klipper
+  restart is recoverable rather than a false terminal failure. Studio can
+  reconnect, read the validated KACE checkpoint, and continue from the last
+  legal state without repeating the hardware wizard.
+- **Fail-Closed Preconditions**: A skipped compile, missing or empty serial,
+  unflashed artifact, incompatible checkpoint, corrupted checkpoint, or
+  unverified MCU now prevents configuration deploy from claiming success.
+
+### Tests
+- Added regression coverage for blocked deploy preconditions, manual-flash
+  checkpoints, MCU reappearance and serial validation, expected SSH restart
+  disconnects, safe checkpoint rejection, resume without repeating the
+  wizard, and legacy flashing-method compatibility.
+- The final KACE suite passed with 935 tests (`6` skipped); the synchronized
+  Studio suite passed with 334 tests (`1` skipped and `2` subtests).
 
 ### Added
 - **Versioned Board Contracts**: Added schema-validated, board-specific firmware build and deployment contracts with reproducible Kconfig generation, shadow builds, artifact promotion, and runtime verification.

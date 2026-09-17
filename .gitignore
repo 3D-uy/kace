@@ -91,6 +91,7 @@ tests/matrix/artifacts/
 
 # Dev scratch directory — not part of the public project
 scratch/
+.klipper-contract-source/
 
 # Build and test artifacts
 out/

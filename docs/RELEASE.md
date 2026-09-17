@@ -1,6 +1,6 @@
 # KACE release engineering guide
 
-KACE is currently pre-1.0. This guide describes the intended maintainer procedure; it does not imply that a stable release or binary distribution exists.
+KACE is currently pre-1.0. The `0.9.4-rc.1` candidate is for controlled hardware qualification, not a stable compatibility promise. See [HARDWARE_TESTING.md](HARDWARE_TESTING.md) for the qualification sequence and operational limits.
 
 ## Version source
 
@@ -11,6 +11,10 @@ KACE uses semantic versioning:
 - Major: incompatible schema, workflow, installation, or generated-output contract.
 - Minor: backward-compatible capability or supported hardware family.
 - Patch: backward-compatible correction or documentation-only release.
+
+Use an explicit prerelease suffix (for example `-rc.1`) when physical qualification
+is still pending. Publish the validation gaps with the candidate; do not describe
+unexecuted CI, firmware builds or hardware checks as passed.
 
 ## Pre-release gates
 
@@ -31,13 +35,23 @@ Automated validation does not replace documented physical qualification on repre
 
 KACE must be published before KACE Studio:
 
-1. Finalize and publish the KACE commit.
-2. Choose the immutable KACE commit that Studio will package.
-3. Calculate the SHA-256 of `scripts/bootstrap.sh` from that exact remote commit.
-4. Update KACE Studio's CI bootstrap reference and hash as a pair.
-5. Fetch the remote file and verify the pair independently.
-6. Run Studio tests and build the Windows executable.
-7. Verify the built executable contains the same bootstrap bytes selected by the contract.
+1. Commit runtime fixes, tests and version metadata. This immutable runtime commit
+   is `candidate_ref` and `installer_ref` in Studio's `release-contract.json`.
+2. Hash `install.sh` from that commit's Git bytes. Update bootstrap and every public
+   installer example to that commit/hash pair, then commit the bootstrap separately.
+   A bootstrap cannot embed the hash of its own commit.
+3. Publish KACE's commits; record the second commit as Studio's `bootstrap_ref` and
+   calculate `bootstrap_sha256` from that commit's exact bytes.
+4. Synchronize Studio's bootstrap and required-runtime-file hashes. Verify the
+   local committed candidate, remote installer, every required remote runtime file
+   and bootstrap before changing `runtime_status` from `pending_commit` to `pinned`.
+5. Validate and publish the final Studio source/contract commit before its final
+   build. Keep source mode and packaged mode resource checks.
+6. Build from a clean checkout with the contracted Python/PyInstaller/dependency
+   lock and environment, then verify bundled bytes, PE metadata and renderer smoke.
+7. Write an external manifest identifying the published Studio/KACE commits and
+   executable SHA-256. Signing and independent reproduction are separate claims;
+   a single local build cannot attest either of them.
 
 Inside `scripts/bootstrap.sh`, `KACE_INSTALL_URL`, `KACE_INSTALL_REF`, and `KACE_INSTALL_SHA256` form a second indivisible contract. The referenced KACE commit must already exist remotely, and the remote `install.sh` bytes must match before Studio pins the bootstrap.
 
