@@ -15,8 +15,10 @@ from .build_mode import (
     is_mock_build,
 )
 from .artifacts import BuildArtifact, BuildProvenance
-from .identity import FirmwareIdentityError, create_build_inputs
+from .identity import FirmwareIdentityError, create_build_inputs, fingerprint_makefile
 from core.translations import t
+from core.workspace import exclusive_file_lock
+from pathlib import Path
 
 
 def _tmp_is_noexec() -> bool:
@@ -60,6 +62,20 @@ def build_firmware_orchestrator(
     config_dict=None,
     build_context: Optional[BuildContext] = None,
 ):
+    # The legacy checkout and its out/.config files are shared by all CLI runs.
+    # Keep the lock through artifact publication, not only through make.
+    try:
+        with exclusive_file_lock(Path(klipper_path).expanduser().resolve() / ".kace-build.lock"):
+            return _build_firmware_locked(
+                mcu_path, derived_mcu, hint, klipper_path, output_dir, config_dict, build_context,
+            )
+    except (OSError, TimeoutError) as exc:
+        return {"status": "error", "message": f"Could not lock firmware build workspace: {exc}"}
+
+
+def _build_firmware_locked(
+    mcu_path, derived_mcu, hint, klipper_path, output_dir, config_dict, build_context,
+):
     """
     Orchestrates the firmware derivation, generation, validation, and build process.
     Runs headlessly without questionary prompts.
@@ -95,7 +111,7 @@ def build_firmware_orchestrator(
     print_build_mode_banner(build_context.make_command)
 
     # 2. Generate minimal .config
-    success, msg = generate_firmware_config(config_dict, klipper_path)
+    success, msg = generate_firmware_config(config_dict, klipper_path, processor=derived_mcu)
     if not success:
          return {"status": "error", "message": msg}
 
@@ -103,10 +119,12 @@ def build_firmware_orchestrator(
 
     # Merge execution path overrides safely
     sub_env = dict(os.environ)
+    sub_env.pop("KCONFIG_CONFIG", None)
     if build_context.path_override:
         sub_env["PATH"] = build_context.path_override + os.pathsep + sub_env.get("PATH", "")
 
     wrapper_dir_obj = None
+    makefile_dir_obj = None
 
     try:
         # 3. Resolve full configuration with olddefconfig
@@ -138,7 +156,7 @@ def build_firmware_orchestrator(
             _identity_error = str(exc)
 
         # 4b. Post-olddefconfig Validation
-        val_success, val_msg = validate_config(klipper_path)
+        val_success, val_msg = validate_config(klipper_path, requested=config_dict, processor=derived_mcu)
         if not val_success:
              return {"status": "error", "message": val_msg}
         
@@ -156,7 +174,13 @@ def build_firmware_orchestrator(
         # Embed the unique build ID so Moonraker can return it via the MCU
         # object's mcu_version field for post-flash verification.
         if _klipper_version_override:
-            build_cmd.append(f"KLIPPER_VERSION={_klipper_version_override}")
+            # An alternate makefile leaves the shared, identified checkout clean.
+            makefile_dir_obj = tempfile.TemporaryDirectory(prefix="kace_makefile_")
+            makefile = Path(makefile_dir_obj.name) / "Makefile"
+            makefile.write_text(fingerprint_makefile(
+                (Path(klipper_path) / "Makefile").read_text(encoding="utf-8"),
+                _klipper_version_override), encoding="utf-8")
+            build_cmd.extend(["-f", str(makefile)])
         if build_context.concurrency is not None:
             if build_context.concurrency > 1:
                 build_cmd.append(f"-j{build_context.concurrency}")
@@ -220,7 +244,7 @@ def build_firmware_orchestrator(
                     # the unique embedded build ID while recording that fact in
                     # the signed input identity used by the manifest.
                     if _build_identity is not None:
-                        _build_identity = create_build_inputs(
+                        retry_inputs = create_build_inputs(
                             klipper_path=klipper_path,
                             config_path=_cfg_file,
                             make_command=_make,
@@ -228,12 +252,11 @@ def build_firmware_orchestrator(
                             lto_retry=True,
                             build_id=_build_identity.build_id,
                         )
+                        if (retry_inputs.klipper_commit != _build_identity.klipper_commit
+                                or retry_inputs.canonical_config != _build_identity.canonical_config):
+                            raise FirmwareIdentityError("Build inputs changed before LTO retry; artifact rejected")
+                        _build_identity = retry_inputs
                         _klipper_version_override = _build_identity.reported_version
-                        build_cmd = [
-                            item for item in build_cmd
-                            if not str(item).startswith("KLIPPER_VERSION=")
-                        ]
-                        build_cmd.insert(1, f"KLIPPER_VERSION={_klipper_version_override}")
                     
                     # Clean and compile again
                     subprocess.run(
@@ -252,12 +275,23 @@ def build_firmware_orchestrator(
                         text=True,
                         env=sub_env,
                     )
+                except FirmwareIdentityError:
+                    raise
                 except Exception as retry_err:
                     # Q-08: Preserve the retry failure context in the chain so both
                     # the original LTO error and the retry failure are visible.
                     raise compile_err from retry_err
             else:
                 raise compile_err
+
+        if _build_identity is not None:
+            current_inputs = create_build_inputs(
+                klipper_path=klipper_path, config_path=_cfg_file,
+                make_command=_make, env=sub_env,
+                lto_retry=wrapper_dir_obj is not None, build_id=_build_identity.build_id,
+            )
+            if current_inputs != _build_identity:
+                raise FirmwareIdentityError("Build inputs changed during compilation; artifact rejected")
 
         # After compile: show mock warning if applicable
         print_mock_warning(build_context.make_command)
@@ -283,11 +317,11 @@ def build_firmware_orchestrator(
             mcu_arch = config_dict.get("CONFIG_MCU", "").replace('"', '').strip()
 
         # If the architecture is unrecognized or missing, fall back to the heuristic sequential scan
-        if mcu_arch == "avr":
+        if mcu_arch == "avr" or mcu_arch.startswith(("atmega", "at90", "lgt8")):
             target_binaries = ["klipper.elf.hex"]
         elif mcu_arch == "rp2040":
             target_binaries = ["klipper.uf2"]
-        elif mcu_arch in ("stm32", "lpc176x", "esp32"):
+        elif mcu_arch.startswith(("stm32", "lpc176", "esp32")):
             target_binaries = ["klipper.bin"]
         else:
             target_binaries = expected_outputs
@@ -298,6 +332,10 @@ def build_firmware_orchestrator(
                 # Check modification time to guarantee it was compiled during this run
                 # 2-second buffer for file system time resolution tolerances
                 if os.path.getmtime(p) >= (build_start_time - 2.0):
+                    if _build_identity is not None and not is_mock_build(build_context.make_command):
+                        from .boards.kconfig import artifact_contains_firmware_fingerprint
+                        if not artifact_contains_firmware_fingerprint(Path(p).read_bytes(), _klipper_version_override):
+                            raise FirmwareIdentityError("Compiled artifact does not contain the expected firmware fingerprint")
                     dest = os.path.join(output_dir, binary)
                     shutil.copy2(p, dest)
 
@@ -358,6 +396,8 @@ def build_firmware_orchestrator(
     except Exception as e:
          return {"status": "error", "message": t("builder.unexpected_error", error=str(e))}
     finally:
+        if makefile_dir_obj:
+            makefile_dir_obj.cleanup()
         # Clean up temporary wrapper directory
         if wrapper_dir_obj:
             try:

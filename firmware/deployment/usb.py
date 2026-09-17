@@ -101,7 +101,9 @@ class UsbDeploymentMethod:
             "-c", programmer,
             "-P", prepared.plan.target.device_path,
             "-b", str(baud),
-            "-U", f"flash:w:{prepared.staged_path}:i",
+            # AVRDUDE accepts '-' as stdin. Never reopen a mutable staged path
+            # after the approved digest has been checked.
+            "-U", "flash:w:-:i",
         ]
 
     def execute(
@@ -148,9 +150,15 @@ class UsbDeploymentMethod:
                 error_code="BACKEND_MISSING",
             )
         try:
+            with open(prepared.staged_path, "rb") as source:
+                payload = source.read(plan.artifact.size_bytes + 1)
+            digest = hashlib.sha256(payload).hexdigest()
+            if (len(payload) != plan.artifact.size_bytes
+                    or digest != prepared.sha256 or digest != plan.artifact.sha256):
+                raise ValueError("prepared firmware changed during confirmation")
             command = self._avrdude_command(prepared)
             runner = context.command_runner or subprocess.run
-            runner(command, check=True, timeout=120)
+            runner(command, input=payload, check=True, timeout=120)
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             return DeploymentResult(
                 DeploymentStatus.FAILED,

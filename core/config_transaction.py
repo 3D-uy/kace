@@ -25,8 +25,11 @@ from core.managed_config import (
     ROOT_REMOTE,
     ManagedConfigPlan,
     build_managed_config_plan,
+    config_includes,
 )
-from core.snapshot import DeploymentSnapshot, create_snapshot
+from core.snapshot import (
+    DeploymentSnapshot, create_snapshot, rollback_file_owned, verify_snapshot_restored,
+)
 
 
 _destination_locks = WeakValueDictionary()
@@ -54,7 +57,11 @@ class ConfigConflictError(RuntimeError):
     """The reviewed remote state changed or could not be revalidated."""
 
 
-def read_config_state(transport) -> dict[str, Optional[bytes]]:
+class FirmwareVerificationError(RuntimeError):
+    """The activated MCU does not prove the expected firmware identity."""
+
+
+def read_config_state(transport, generated_hardware: bytes = b"", generated_macros: Optional[bytes] = None) -> dict[str, Optional[bytes]]:
     """Copy a complete byte-level baseline, distinguishing absence from failure."""
     names = ConfigDeploymentTransaction.CANDIDATES
     remote = transport.read_files(names)
@@ -64,13 +71,54 @@ def read_config_state(transport) -> dict[str, Optional[bytes]]:
         if content is not None and not isinstance(content, bytes):
             raise TypeError(f"configuration read did not return bytes for {name}")
         state[name] = content
+    pending = [(ROOT_REMOTE, generated_hardware), (MACROS_REMOTE, generated_macros), (ROOT_REMOTE, state[ROOT_REMOTE])]
+    visited = set()
+    total = 0
+    while pending:
+        source, content = pending.pop()
+        if content is None:
+            continue
+        key = (source, content)
+        if key in visited:
+            continue
+        visited.add(key)
+        total += len(content)
+        if len(state) > 256 or total > 8 * 1024 * 1024:
+            raise ValueError("configuration include graph exceeds review limits")
+        for _, name in config_includes(content, source):
+            if name not in state:
+                value = transport.read_files((name,))[name]
+                if value is not None and not isinstance(value, bytes):
+                    raise TypeError(f"configuration read did not return bytes for {name}")
+                state[name] = value
+            pending.append((name, state[name]))
     return state
+
+
+def require_conditional_writes(transport, plan, *, persist_root=None):
+    """Reject a whole unsafe plan before any live write or firmware action."""
+    unsupported = [item for item in plan.changed_artifacts
+                   if not transport.supports_conditional_write(item.previous)]
+    if unsupported:
+        proposal = create_snapshot(
+            {item.remote_name: item.content for item in plan.artifacts},
+            deployment_id=f"{uuid.uuid4()}-proposed", persist_root=persist_root,
+        )
+        raise ConfigConflictError(
+            "transport cannot atomically condition these writes on reviewed content: "
+            + ", ".join(item.remote_name for item in unsupported)
+            + f"; live files preserved; manually apply reviewed proposal from {proposal.storage_path}"
+        )
 
 
 def revalidate_config_state(transport, reviewed) -> dict[str, Optional[bytes]]:
     """Fail closed on content changes, creations, removals or unreadable files."""
     try:
-        current = read_config_state(transport)
+        transport.validate_activation_target()
+        remote = transport.read_files(tuple(reviewed))
+        current = {name: remote[name] for name in reviewed}
+        if any(value is not None and not isinstance(value, bytes) for value in current.values()):
+            raise TypeError("configuration read did not return bytes")
     except Exception as exc:
         raise ConfigConflictError(f"configuration revalidation failed: {exc}") from exc
     changed = [name for name in current if current[name] != reviewed[name]]
@@ -88,6 +136,7 @@ class ConfigTransactionState(Enum):
     UPLOAD_FAILED = auto()
     VERIFY_FAILED = auto()
     ACTIVATION_FAILED = auto()
+    FIRMWARE_FAILED = auto()
     ROLLBACK_FAILED = auto()
     DEPLOYED_PENDING_ACTIVATION = auto()
     COMMITTED = auto()
@@ -114,7 +163,8 @@ class ConfigDeploymentTransaction:
     """Execute the same preflight/snapshot/upload/verify flow for any transport.
 
     The transport must expose a stable ``destination_key`` tuple, ``read_files``,
-    ``upload_bytes``, ``delete_file``,
+    ``validate_activation_target``, ``supports_conditional_write``,
+    ``upload_if_unchanged``,
     ``restart``, ``restart_moonraker``, ``moonraker_online`` and
     ``klipper_state``. Read failures must raise; ``None`` is reserved for a
     positively confirmed absent file.
@@ -146,6 +196,7 @@ class ConfigDeploymentTransaction:
         poll_interval: float = 1.0,
         state_sink: Optional[Callable[[str, str], None]] = None,
         verify_existing_ready: bool = False,
+        verify_firmware: Optional[Callable[[], None]] = None,
     ):
         if activation not in {"firmware", "service", "none"}:
             raise ValueError(f"Unsupported activation mode: {activation}")
@@ -165,9 +216,11 @@ class ConfigDeploymentTransaction:
         self.transaction_id = str(uuid.uuid4())
         self.snapshot: Optional[DeploymentSnapshot] = None
         self.plan: Optional[ManagedConfigPlan] = None
+        self._expected_config_state: dict[str, Optional[bytes]] = {}
         self._written_names: set[str] = set()
         self.state_sink = state_sink
         self.verify_existing_ready = bool(verify_existing_ready)
+        self.verify_firmware = verify_firmware
 
     def _emit(self, state: str, detail: str) -> None:
         if self.state_sink is None:
@@ -178,6 +231,13 @@ class ConfigDeploymentTransaction:
             # Studio progress is observational and cannot change transaction
             # authority or rollback behavior.
             pass
+
+    def _verify_firmware(self) -> None:
+        if self.verify_firmware is not None:
+            try:
+                self.verify_firmware()
+            except Exception as exc:
+                raise FirmwareVerificationError(str(exc)) from exc
 
     @staticmethod
     def _sha256(data: bytes) -> str:
@@ -228,52 +288,55 @@ class ConfigDeploymentTransaction:
 
     def _verify_plan(self) -> None:
         assert self.plan is not None
-        for artifact in self.plan.changed_artifacts:
-            remote = self.transport.read_files((artifact.remote_name,))[artifact.remote_name]
-            if remote is None:
-                raise RuntimeError(f"uploaded file disappeared: {artifact.remote_name}")
-            if self._sha256(remote) != self._sha256(artifact.content):
-                raise RuntimeError(f"checksum mismatch for {artifact.remote_name}")
+        self.transport.validate_activation_target()
+        current = self.transport.read_files(tuple(self._expected_config_state))
+        planned = {item.remote_name: item.content for item in self.plan.artifacts}
+        for name, expected in planned.items():
+            if current[name] is None:
+                raise RuntimeError(f"uploaded file disappeared: {name}")
+            if current[name] != expected:
+                raise RuntimeError(f"checksum mismatch for {name}")
+        changed = [name for name, expected in self._expected_config_state.items()
+                   if name not in planned and current[name] != expected]
+        if changed:
+            raise ConfigConflictError("concurrent configuration modification detected: " + ", ".join(changed))
 
     def _rollback(self) -> tuple[Optional[bool], str]:
-        if self.snapshot is None:
-            return False, "no snapshot is available"
         if not self._written_names:
             return None, "rollback not required: the failed upload created no remote file"
-        failures: list[str] = []
-        names = [
-            name for name in self.snapshot.config_files
-            if name in self._written_names
-        ]
-        names.sort(key=lambda name: name == ROOT_REMOTE)
-        for name in names:
-            try:
-                self.transport.upload_bytes(name, self.snapshot.config_files[name])
-            except Exception as exc:
-                failures.append(f"restore {name}: {exc}")
-        missing = [
-            name for name in self.snapshot.missing_files
-            if name in self._written_names
-        ]
-        for name in missing:
-            try:
-                self.transport.delete_file(name)
-            except Exception as exc:
-                failures.append(f"delete {name}: {exc}")
-        if failures:
-            return False, "; ".join(failures)
+        if self.snapshot is None:
+            return False, "no snapshot is available"
+        expected = {item.remote_name: item.content for item in self.plan.changed_artifacts}
+
+        def owned(name):
+            current = self.transport.read_files((name,))[name]
+            return rollback_file_owned(
+                name, current, self.snapshot.config_files.get(name), expected[name],
+            )
+
+        # Diagnose conflicts without performing a read-then-write rollback.
+        try:
+            for name in self._written_names:
+                owned(name)
+        except Exception as exc:
+            return False, f"rollback conflict; current files preserved: {exc}; manual recovery from {self.snapshot.storage_path}"
+        restored_names = tuple(self._written_names)
+        try:
+            verify_snapshot_restored(self.snapshot,
+                self.transport.read_files(restored_names), restored_names)
+        except Exception:
+            # None of the supported transports offers atomic compare-and-swap.
+            # Keep current bytes and the durable snapshot for operator recovery.
+            return False, ("automatic rollback unavailable: transport has no atomic conditional restore; "
+                           f"current files preserved; manual recovery from snapshot {self.snapshot.storage_path}")
+
+        def verify_restoration():
+            verify_snapshot_restored(
+                self.snapshot, self.transport.read_files(restored_names), restored_names,
+            )
 
         try:
-            restored = self.transport.read_files(tuple(
-                names + missing
-            ))
-            for name in names:
-                original = self.snapshot.config_files[name]
-                if restored.get(name) != original:
-                    return False, f"rollback checksum mismatch for {name}"
-            for name in missing:
-                if restored.get(name) is not None:
-                    return False, f"rollback did not remove newly created {name}"
+            verify_restoration()
             if self.activation == "none":
                 return True, "rollback restored byte-identical inactive files"
             if MOONRAKER_REMOTE in self.snapshot.config_files or MOONRAKER_REMOTE in self.snapshot.missing_files:
@@ -284,8 +347,9 @@ class ConfigDeploymentTransaction:
             ready, state = self._wait_ready()
             if not ready:
                 return False, f"Klipper did not become Ready after rollback (state={state})"
+            verify_restoration()
         except Exception as exc:
-            return False, f"rollback activation failed: {exc}"
+            return False, f"rollback verification or activation failed: {exc}"
         return True, "rollback restored byte-identical state and Klipper Ready"
 
     def _record_possible_write(self, name: str) -> None:
@@ -346,10 +410,14 @@ class ConfigDeploymentTransaction:
     def _run_locked(self) -> ConfigTransactionResult:
         self._emit("BACKUP", "validating configuration and preparing snapshot")
         try:
-            remote = read_config_state(self.transport)
+            self.transport.validate_activation_target()
+            remote = read_config_state(self.transport, self.generated_hardware, self.generated_macros)
             self.plan = build_managed_config_plan(
                 self.generated_hardware, self.generated_macros, remote
             )
+            self._expected_config_state = {
+                **remote, **{item.remote_name: item.content for item in self.plan.artifacts},
+            }
             diff = self.plan.dry_run_diff()
             configuration_review = build_configuration_review(self.plan)
             if self.review is None:
@@ -375,39 +443,6 @@ class ConfigDeploymentTransaction:
                 self.transaction_id,
             )
 
-        if not self.plan.changed_artifacts:
-            try:
-                revalidate_config_state(self.transport, remote)
-            except ConfigConflictError as exc:
-                return ConfigTransactionResult(
-                    ConfigTransactionState.PRECONDITION_FAILED,
-                    f"{exc}; no configuration files were written",
-                    self.transaction_id,
-                )
-            if self.verify_existing_ready:
-                self._emit(
-                    "VERIFYING_CONFIG",
-                    "configuration already matches; verifying Klipper Ready",
-                )
-                ready, state = self._wait_ready()
-                if not ready:
-                    self._emit("CONFIG_ERROR", f"Klipper state={state}")
-                    return ConfigTransactionResult(
-                        ConfigTransactionState.ACTIVATION_FAILED,
-                        f"configuration matches but Klipper is not Ready (state={state})",
-                        self.transaction_id,
-                    )
-                self._emit("DONE", "configuration matches and Klipper is Ready")
-            return ConfigTransactionResult(
-                ConfigTransactionState.COMMITTED,
-                (
-                    "configuration is already reconciled and Klipper Ready"
-                    if self.verify_existing_ready
-                    else "configuration is already reconciled; no files were written"
-                ),
-                self.transaction_id,
-            )
-
         try:
             if not (accepted if self.review is not None else self.confirm(diff)):
                 return ConfigTransactionResult(
@@ -421,6 +456,7 @@ class ConfigDeploymentTransaction:
                     raise ValueError(f"Unsupported activation mode: {selected}")
                 self.activation = selected
             current = revalidate_config_state(self.transport, remote)
+            require_conditional_writes(self.transport, self.plan, persist_root=self.snapshot_root)
             originals = {
                 item.remote_name: current[item.remote_name] for item in self.plan.changed_artifacts
             }
@@ -430,7 +466,7 @@ class ConfigDeploymentTransaction:
                 board=self.board,
                 kace_version=self.kace_version,
                 persist_root=self.snapshot_root,
-            )
+            ) if originals else None
         except ConfigConflictError as exc:
             return ConfigTransactionResult(
                 ConfigTransactionState.PRECONDITION_FAILED,
@@ -465,8 +501,9 @@ class ConfigDeploymentTransaction:
 
         try:
             for artifact in self._ordered_artifacts():
+                revalidate_config_state(self.transport, {artifact.remote_name: current[artifact.remote_name]})
                 try:
-                    self.transport.upload_bytes(artifact.remote_name, artifact.content)
+                    self.transport.upload_if_unchanged(artifact.remote_name, artifact.content, current[artifact.remote_name])
                     self._written_names.add(artifact.remote_name)
                 except (Exception, KeyboardInterrupt):
                     self._record_possible_write(artifact.remote_name)
@@ -481,7 +518,8 @@ class ConfigDeploymentTransaction:
                     self.snapshot,
                 )
 
-            if any(item.remote_name == MOONRAKER_REMOTE for item in self.plan.changed_artifacts):
+            self.transport.validate_activation_target()
+            if self._expected_config_state.get(MOONRAKER_REMOTE) is not None:
                 self._emit("WAITING_MOONRAKER", "restarting Moonraker before Klipper activation")
                 self.transport.restart_moonraker()
                 if not self._wait_moonraker():
@@ -492,6 +530,8 @@ class ConfigDeploymentTransaction:
             ready, state = self._wait_ready()
             if not ready:
                 raise RuntimeError(f"Klipper did not become Ready (state={state})")
+            self._verify_firmware()
+            self._verify_plan()
             self._emit("DONE", "configuration activated and Klipper Ready")
             return ConfigTransactionResult(
                 ConfigTransactionState.COMMITTED,
@@ -503,13 +543,16 @@ class ConfigDeploymentTransaction:
             self._emit("CONFIG_ERROR", str(exc))
             rollback_ok, rollback_detail = self._rollback()
             state = (
-                ConfigTransactionState.ACTIVATION_FAILED
+                ConfigTransactionState.FIRMWARE_FAILED
+                if isinstance(exc, FirmwareVerificationError)
+                else ConfigTransactionState.ACTIVATION_FAILED
                 if "Ready" in str(exc) or "restart" in str(exc).lower()
                 else ConfigTransactionState.VERIFY_FAILED
                 if "checksum" in str(exc)
                 else ConfigTransactionState.UPLOAD_FAILED
             )
             failure_label = {
+                ConfigTransactionState.FIRMWARE_FAILED: "firmware verification error",
                 ConfigTransactionState.ACTIVATION_FAILED: "activation error",
                 ConfigTransactionState.VERIFY_FAILED: "verification error",
                 ConfigTransactionState.UPLOAD_FAILED: "upload error",
@@ -537,6 +580,28 @@ class MoonrakerConfigTransport:
         self.host = host
         self.port = port
         self.api_key = api_key
+
+    def _active_config(self):
+        from core.moonraker import _get, _base_url
+        ok, detail, body = _get(_base_url(self.host, self.port) + "/printer/info", api_key=self.api_key)
+        path = body.get("result", {}).get("config_file") if ok else None
+        if not isinstance(path, str) or not path.startswith("/"):
+            raise ConfigConflictError(f"active Klipper config_file is unavailable: {detail}")
+        return posixpath.normpath(path)
+
+    def validate_activation_target(self):
+        from core.moonraker import _get, _base_url
+        active = self._active_config()
+        ok, detail, body = _get(_base_url(self.host, self.port) + "/server/files/roots", api_key=self.api_key)
+        roots = [entry.get("path") for entry in body.get("result", []) if entry.get("name") == "config"] if ok else []
+        if len(roots) != 1 or not isinstance(roots[0], str) or active != posixpath.join(roots[0], ROOT_REMOTE):
+            raise ConfigConflictError("Moonraker config root does not match active Klipper printer.cfg")
+
+    def supports_conditional_write(self, previous):
+        return False  # Moonraker's upload API offers no content precondition.
+
+    def upload_if_unchanged(self, name, content, previous):
+        raise ConfigConflictError("Moonraker has no atomic conditional upload")
 
     @property
     def destination_key(self) -> tuple:
@@ -630,6 +695,19 @@ class SftpConfigTransport(MoonrakerConfigTransport):
         self.sftp = sftp
         self.config_dir = config_dir.rstrip("/")
 
+    def validate_activation_target(self):
+        active = self._active_config()
+        if self.sftp.normalize(active) != self.sftp.normalize(self._path(ROOT_REMOTE)):
+            raise ConfigConflictError("SFTP destination does not match active Klipper printer.cfg")
+
+    def supports_conditional_write(self, previous):
+        return previous is None
+
+    def upload_if_unchanged(self, name, content, previous):
+        if previous is not None:
+            raise ConfigConflictError("SFTP has no atomic conditional replacement")
+        self.upload_bytes(name, content, exclusive=True)
+
     def _path(self, name: str) -> str:
         return posixpath.join(self.config_dir, *name.split("/"))
 
@@ -669,7 +747,7 @@ class SftpConfigTransport(MoonrakerConfigTransport):
                     raise
                 self.sftp.mkdir(current, mode=0o755)
 
-    def upload_bytes(self, name: str, content: bytes) -> None:
+    def upload_bytes(self, name: str, content: bytes, *, exclusive=False) -> None:
         remote = self._path(name)
         temporary_remote = f"{remote}.kace-part-{uuid.uuid4().hex}"
         self._ensure_parent(remote)
@@ -680,12 +758,12 @@ class SftpConfigTransport(MoonrakerConfigTransport):
                 handle.flush()
                 os.fsync(handle.fileno())
             self.sftp.put(local, temporary_remote)
-            # Standard SFTP rename may refuse to replace an existing target.
-            # OpenSSH's POSIX extension is both overwrite-capable and atomic;
-            # refusing servers without it is safer than creating a delete gap.
-            posix_rename = getattr(self.sftp, "posix_rename", None)
+            # Standard SFTP rename must not replace an existing target. The
+            # POSIX extension is reserved for explicit unconditional callers.
+            posix_rename = getattr(self.sftp, "rename" if exclusive else "posix_rename", None)
             if not callable(posix_rename):
-                raise RuntimeError("SFTP server/client does not support atomic POSIX rename")
+                mode = "no-replace" if exclusive else "POSIX"
+                raise RuntimeError(f"SFTP server/client does not support atomic {mode} rename")
             posix_rename(temporary_remote, remote)
         except BaseException:
             try:
@@ -722,6 +800,17 @@ class LocalConfigTransport:
     def destination_key(self) -> tuple:
         return ("local", os.path.normcase(self.config_dir))
 
+    def validate_activation_target(self):
+        pass  # Offline export has no activation endpoint.
+
+    def supports_conditional_write(self, previous):
+        return previous is None
+
+    def upload_if_unchanged(self, name, content, previous):
+        if previous is not None:
+            raise ConfigConflictError("local filesystem has no atomic conditional replacement")
+        self.upload_bytes(name, content, exclusive=True)
+
     def _path(self, name: str) -> str:
         if not name or name.startswith(("/", "\\")):
             raise ValueError(f"invalid relative config path: {name!r}")
@@ -743,7 +832,7 @@ class LocalConfigTransport:
                 result[name] = source.read()
         return result
 
-    def upload_bytes(self, name: str, content: bytes) -> None:
+    def upload_bytes(self, name: str, content: bytes, *, exclusive=False) -> None:
         path = self._path(name)
         parent = os.path.dirname(path)
         existing_ancestor = parent
@@ -771,7 +860,11 @@ class LocalConfigTransport:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.chmod(temporary, mode)
-            os.replace(temporary, path)
+            if exclusive:
+                os.link(temporary, path)  # Atomic create-if-absent, never replace.
+                os.unlink(temporary)
+            else:
+                os.replace(temporary, path)
             if os.name == "posix":
                 directory_fd = os.open(
                     parent,

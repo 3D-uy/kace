@@ -100,7 +100,10 @@ rollback_publication() {
     echo "Installation publication failed; restoring the previous runtime." >&2
     local item failed_path
     for item in $PUBLISHED_PATHS; do
-        if [ -e "$INSTALL_DIR/$item" ] || [ -L "$INSTALL_DIR/$item" ]; then
+        # A failed backup rename leaves the original in INSTALL_DIR and the
+        # new runtime in staging. Only displace a successfully published path.
+        if [ ! -e "$STAGING_DIR/$item" ] && [ ! -L "$STAGING_DIR/$item" ] &&
+                { [ -e "$INSTALL_DIR/$item" ] || [ -L "$INSTALL_DIR/$item" ]; }; then
             failed_path="$STAGING_DIR/.failed-${item#.}"
             mv -- "$INSTALL_DIR/$item" "$failed_path" || return 1
         fi
@@ -115,7 +118,10 @@ _cleanup_installer() {
     local status=$?
     trap - EXIT INT TERM
     if [ "$status" -ne 0 ]; then
-        rollback_publication || status=1
+        if ! rollback_publication; then
+            echo "Recovery failed; preserved runtime copies in $STAGING_DIR and $BACKUP_DIR for manual recovery." >&2
+            exit 1
+        fi
     fi
     _safe_remove_transaction_dir "$STAGING_DIR" || status=1
     _safe_remove_transaction_dir "$BACKUP_DIR" || status=1

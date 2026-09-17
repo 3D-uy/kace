@@ -410,25 +410,28 @@ rollback_power_reconciliation() {
     if [ "$POWER_RECONCILIATION_COMMITTED" -eq 1 ] || [ -z "$POWER_RECONCILE_CONFIG" ]; then
         return 0
     fi
-    if [ "$POWER_RECONCILE_BACKUP" = "__ABSENT__" ]; then
-        rm -f "$POWER_RECONCILE_CONFIG"
-    elif [ -n "$POWER_RECONCILE_BACKUP" ] && [ -f "$POWER_RECONCILE_BACKUP" ]; then
-        mv -f "$POWER_RECONCILE_BACKUP" "$POWER_RECONCILE_CONFIG"
-    fi
-    if [ -n "$POWER_RECONCILE_STATE" ]; then
-        if [ "$POWER_RECONCILE_STATE_BACKUP" = "__ABSENT__" ]; then
-            rm -f "$POWER_RECONCILE_STATE"
-        elif [ -n "$POWER_RECONCILE_STATE_BACKUP" ] && [ -f "$POWER_RECONCILE_STATE_BACKUP" ]; then
-            mv -f "$POWER_RECONCILE_STATE_BACKUP" "$POWER_RECONCILE_STATE"
+    # A backup is evidence, not permission to overwrite a later editor. There
+    # is no atomic content-conditional restore for these ordinary files.
+    # Keep both live paths and backups, including evidence of prior absence.
+    local path backup conflict=0
+    for path in "$POWER_RECONCILE_CONFIG" "$POWER_RECONCILE_STATE"; do
+        [ -z "$path" ] && continue
+        if [ "$path" = "$POWER_RECONCILE_CONFIG" ]; then
+            backup="$POWER_RECONCILE_BACKUP"
+        else
+            backup="$POWER_RECONCILE_STATE_BACKUP"
         fi
-    fi
-    POWER_RECONCILIATION_COMMITTED=1
-    log_warn "Rolled back moonraker.conf and power.json because power reconciliation did not commit."
-    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet moonraker 2>/dev/null; then
-        if ! $SUDO systemctl restart moonraker; then
-            log_warn "Moonraker could not be restarted after restoring its previous configuration."
+        if [ "$backup" = "__ABSENT__" ]; then
+            [ ! -e "$path" ] && [ ! -L "$path" ] && continue
+        elif [ -n "$backup" ] && [ -f "$backup" ] && cmp -s "$backup" "$path"; then
+            continue
         fi
-    fi
+        log_err "Power reconciliation requires manual recovery: live file preserved: $path; original: $backup"
+        conflict=1
+    done
+    [ "$conflict" -eq 0 ] || return 1
+    log_warn "Power reconciliation aborted; original bytes are already present. Backups retained."
+    return 0
 }
 
 commit_power_reconciliation() {
@@ -1389,7 +1392,8 @@ cleanup() {
 exit_handler() {
     local exit_status=$?
     if [ "$exit_status" -ne 0 ]; then
-        rollback_power_reconciliation
+        # Report the original failure even when manual recovery is required.
+        rollback_power_reconciliation || true
     fi
     if [ "$BOOTSTRAP_TERMINAL_EMITTED" -ne 1 ]; then
         if [ "$exit_status" -eq 2 ]; then

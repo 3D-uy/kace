@@ -125,9 +125,10 @@ gcode:
         self.assertIn(MANAGED_BEGIN, root)
         self.assertIn("[include user-extra.cfg]", root)
         self.assertIn("[gcode_macro USER_MACRO]", root)
-        self.assertNotIn("[extruder]", root)
+        self.assertIn("[extruder]", root)
         self.assertNotIn("[force_move]", root)
-        self.assertIn("pid_Kp: 31.5", hardware)
+        self.assertIn("pid_Kp: 31.5", root)
+        self.assertNotIn("pid_Kp:", hardware)
         self.assertIn("enable_force_move: False", hardware)
         self.assertIn(MACROS_REMOTE, root)
 
@@ -155,7 +156,7 @@ gcode:
                 first = build_managed_config_plan(generated, None, remote)
                 files = {item.remote_name: item.content for item in first.artifacts}
                 for option in tuning.splitlines():
-                    self.assertIn(option.encode(), files[HARDWARE_REMOTE])
+                    self.assertIn(option.encode(), files[ROOT_REMOTE] if section == "heater_bed" else files[HARDWARE_REMOTE])
                 second = build_managed_config_plan(generated, None, files)
                 self.assertEqual(
                     files, {item.remote_name: item.content for item in second.artifacts},
@@ -173,8 +174,8 @@ gcode:
         original = dict(remote)
         plan = build_managed_config_plan(GENERATED, None, remote)
         files = {item.remote_name: item.content for item in plan.artifacts}
-        self.assertIn(b"pid_Kp: 31.5", files[HARDWARE_REMOTE])
-        self.assertIn(b"pid_Ki: 2.2", files[HARDWARE_REMOTE])
+        self.assertIn(b"pid_Kp: 31.5", files[ROOT_REMOTE])
+        self.assertIn(b"pid_Ki: 2.2", files[ROOT_REMOTE])
         self.assertEqual(remote, original)
         second = build_managed_config_plan(GENERATED, None, files)
         self.assertEqual(second.changed_artifacts, ())
@@ -195,7 +196,7 @@ gcode:
         self.assertIn(b"kinematics: corexy", hardware)
         self.assertIn(b"[fan]\npin: PA8", hardware)
         self.assertIn(b"max_velocity: 80", hardware)
-        self.assertIn(b"pid_Kp: 33", hardware)
+        self.assertIn(b"pid_Kp: 33", files[ROOT_REMOTE])
         self.assertEqual([item.remote_name for item in second.changed_artifacts], [HARDWARE_REMOTE])
         self.assertEqual(build_managed_config_plan(generated, None, files).changed_artifacts, ())
 
@@ -205,7 +206,7 @@ gcode:
                 first = build_managed_config_plan(GENERATED, None, previous)
                 files = {item.remote_name: item.content for item in first.artifacts}
                 self.assertIn(b"max_velocity: 300", files[HARDWARE_REMOTE])
-                self.assertIn(b"pid_Kp: 22.2", files[HARDWARE_REMOTE])
+                self.assertIn(b"pid_Kp: 22.2", files[ROOT_REMOTE])
                 self.assertIn(b"enable_force_move: True", files[HARDWARE_REMOTE])
                 self.assertEqual(build_managed_config_plan(GENERATED, None, files).changed_artifacts, ())
 
@@ -232,7 +233,9 @@ pid_Kd: 140
         hardware = next(
             item.content.decode() for item in plan.artifacts if item.remote_name == HARDWARE_REMOTE
         )
-        self.assertIn("control: watermark", hardware)
+        root = next(item.content.decode() for item in plan.artifacts if item.remote_name == ROOT_REMOTE)
+        self.assertIn("control: watermark", root)
+        self.assertNotIn("control:", hardware)
         self.assertNotIn("pid_Kp", hardware)
         self.assertNotIn("pid_Ki", hardware)
         self.assertNotIn("pid_Kd", hardware)
@@ -246,7 +249,7 @@ pid_Kd: 140
         )
         plan = build_managed_config_plan(generated, None, remote)
         files = {item.remote_name: item.content for item in plan.artifacts}
-        self.assertIn(b"control: watermark", files[HARDWARE_REMOTE])
+        self.assertIn(b"control: watermark", files[ROOT_REMOTE])
         self.assertNotIn(b"pid_", files[HARDWARE_REMOTE])
         self.assertEqual(build_managed_config_plan(generated, None, files).changed_artifacts, ())
 

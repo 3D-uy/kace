@@ -22,6 +22,7 @@ from typing import Callable, ClassVar, Mapping, Optional
 
 from core.mcu_monitor import McuIdentityMismatch, McuMonitorCancelled, McuMonitorError
 from core.terminal_progress import TerminalProgressRenderer, WorkflowEventEmitter
+from core.snapshot import verify_snapshot_restored
 
 _NETWORK_ERRORS: tuple = (OSError, ConnectionError, TimeoutError)
 try:
@@ -211,6 +212,7 @@ class Deployer:
         event_sink: Optional[Callable[[dict], None]] = None,
         snapshot_loader: Optional[Callable[[], object]] = None,
         before_config_upload: Optional[Callable[[], object]] = None,
+        verify_config_state: Optional[Callable[[], object]] = None,
         firmware_copy: Optional[Callable[[], bool]] = None,
         firmware_deploy: Optional[Callable[[], object]] = None,
         monitor_before_firmware: bool = False,
@@ -230,6 +232,7 @@ class Deployer:
         self.cancel_event = cancel_event or threading.Event()
         self.snapshot_loader = snapshot_loader
         self.before_config_upload = before_config_upload
+        self.verify_config_state = verify_config_state
         self.firmware_copy = firmware_copy
         self.firmware_deploy = firmware_deploy
         self.monitor_before_firmware = monitor_before_firmware
@@ -371,12 +374,13 @@ class Deployer:
         return None
 
     def _check_versions(self, actual: dict) -> tuple:
+        from firmware.identity import firmware_version_matches
         wrong, missing = [], []
         for target in self.manifest.targets:
             reported = actual.get(target.name)
             if reported is None:
                 missing.append(target.name)
-            elif reported != target.expected_version:
+            elif not firmware_version_matches(reported, target.expected_version):
                 wrong.append(target.name)
         return wrong, missing
 
@@ -396,6 +400,11 @@ class Deployer:
         return summaries
 
     def _verify_uploads(self) -> tuple[bool, str]:
+        if self.verify_config_state is not None:
+            try:
+                self.verify_config_state()
+            except Exception as exc:
+                return False, f"configuration verification failed: {exc}"
         for artifact in self.manifest.artifacts():
             ok, remote = self.client.download_config(artifact.remote_name)
             if not ok or not isinstance(remote, bytes):
@@ -405,17 +414,25 @@ class Deployer:
                 return False, f"checksum mismatch for {artifact.remote_name}"
         return True, ""
 
+    def _verify_rollback_bytes(self) -> None:
+        names = tuple(self._attempted_config_writes)
+        verify_snapshot_restored(self.snapshot, self.client.read_config_files(names), names)
+
     def _rollback(self) -> tuple[bool, str]:
         if self.snapshot is None:
             return False, "no pre-deployment snapshot is available"
         self._transition(DeployState.ROLLING_BACK, "restoring previous configuration")
         try:
-            failed = self.client.restore_snapshot(self.snapshot)
+            failed = self.client.restore_snapshot(self.snapshot, expected_files=self._attempted_config_writes)
         except Exception as exc:
             return False, f"rollback failed: {exc}"
         if failed:
             return False, "rollback upload failed: " + ", ".join(failed)
-        self._transition(DeployState.VERIFYING_ROLLBACK, "waiting for Klipper Ready after rollback")
+        self._transition(DeployState.VERIFYING_ROLLBACK, "verifying restored bytes and Klipper Ready")
+        try:
+            self._verify_rollback_bytes()
+        except Exception as exc:
+            return False, f"rollback verification failed: {exc}"
         snapshot_names = set(self.snapshot.config_files) | set(
             getattr(self.snapshot, "missing_files", ())
         )
@@ -433,13 +450,18 @@ class Deployer:
         ready, state = self._wait_klipper_ready(fail_on_config_error=True)
         if not ready:
             return False, f"Klipper did not become Ready after rollback (state={state})"
-        return True, "rollback restored Klipper Ready"
+        try:
+            self._verify_rollback_bytes()
+        except Exception as exc:
+            return False, f"rollback verification failed after restart: {exc}"
+        return True, "rollback restored byte-identical configuration and Klipper Ready"
 
     def run(self) -> DeployResult:
         versions = {}
         monitor_armed = False
         media_prepared = False
         config_write_started = False
+        self._attempted_config_writes = {}
         try:
             if self.snapshot_loader is not None:
                 self._transition(DeployState.BACKUP, "capturing pre-deployment configuration")
@@ -449,6 +471,16 @@ class Deployer:
                         DeployState.FAILED_PRECONDITION,
                         "configuration backup failed; firmware deployment was not started",
                     )
+
+            # Validate publication capability before any physical action. A
+            # final read followed by an unconditional upload is not a CAS.
+            for artifact in self.manifest.artifacts():
+                if (self.snapshot is None or artifact.remote_name not in (
+                        set(self.snapshot.config_files) | set(self.snapshot.missing_files))
+                        or not self.client.supports_conditional_config_write(
+                        self.snapshot.config_files.get(artifact.remote_name))):
+                    return self._result(DeployState.FAILED_PRECONDITION,
+                        "atomic conditional config upload unavailable; firmware deployment was not started")
 
             if self.monitor_before_firmware and self.mcu_monitor is not None:
                 self.mcu_monitor.arm()
@@ -681,10 +713,21 @@ class Deployer:
                         f"{exc}; no configuration files were written",
                         versions,
                     )
-            for artifact in self.manifest.artifacts():
+            for artifact in sorted(self.manifest.artifacts(), key=lambda item: (item.remote_name == "printer.cfg", item.remote_name)):
+                name = artifact.remote_name
+                if self.snapshot is None or name not in (
+                    set(self.snapshot.config_files) | set(self.snapshot.missing_files)
+                ):
+                    raise RuntimeError(f"No original configuration evidence for {name}")
+                current = self.client.read_config_files((name,))[name]
+                if current != self.snapshot.config_files.get(name):
+                    raise RuntimeError(f"Concurrent configuration modification detected: {name}")
                 # An interrupted upload may have written before returning.
                 config_write_started = True
-                self.client.upload_config(artifact.local_path, artifact.remote_name)
+                with open(artifact.local_path, "rb") as source:
+                    self._attempted_config_writes[artifact.remote_name] = source.read()
+                self.client.upload_config_if_unchanged(
+                    self._attempted_config_writes[name], name, self.snapshot.config_files.get(name))
 
             self._transition(DeployState.VERIFYING_UPLOAD, "verifying uploaded checksums")
             upload_ok, detail = self._verify_uploads()
@@ -718,6 +761,20 @@ class Deployer:
                 rollback_ok, rollback_detail = self._rollback()
                 return self._result(DeployState.CONFIG_ERROR, f"new configuration state={state}; {rollback_detail}", versions, rollback_ok)
 
+            if self.verify_firmware:
+                versions = self._safe_mcu_versions()
+                wrong, missing = self._check_versions(versions)
+                if wrong or missing:
+                    rollback_ok, rollback_detail = self._rollback()
+                    return self._result(
+                        DeployState.FAILED_FLASH,
+                        f"firmware identity changed or is unavailable after activation; {rollback_detail}",
+                        versions, rollback_ok,
+                    )
+            upload_ok, detail = self._verify_uploads()
+            if not upload_ok:
+                rollback_ok, rollback_detail = self._rollback()
+                return self._result(DeployState.FAILED_UPLOAD, f"{detail}; {rollback_detail}", versions, rollback_ok)
             return self._result(DeployState.DONE, "deployment validated", versions)
         except (KeyboardInterrupt, McuMonitorCancelled):
             if config_write_started:

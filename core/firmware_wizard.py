@@ -24,6 +24,7 @@ from firmware.configuration import (
     bootloader_offset_from_config,
     render_config_diff,
     validate_firmware_configuration,
+    board_reference_clock,
 )
 from firmware.builder import build_firmware_orchestrator, BuildContext
 from firmware.artifacts import BuildArtifact
@@ -66,6 +67,27 @@ def _read_deployment_usb_identity(device_path):
 def _cancel_firmware_configuration():
     print(f"\n\033[93m{t('kace.cancelled')}\033[0m")
     raise WizardExit()
+
+
+def resolve_initial_mcu(user_data: dict) -> str:
+    """Resolve the target before capturing the pre-flash physical checkpoint."""
+    if user_data.get("mcu_type"):
+        return str(user_data["mcu_type"])
+    decision = resolve_firmware_authority(user_data.get("board"))
+    if decision.authority is FirmwareAuthority.BOARD_CONTRACT:
+        variant = load_default_catalog().by_id(decision.board_id).variant(decision.hardware_variant_id)
+        model = variant.processor.model.lower()
+    else:
+        if os.environ.get("KACE_AUTO") == "1":
+            raise FirmwareConfigurationError("The selected MCU model must be supplied before firmware preparation")
+        model = simple_input("Enter the exact MCU processor printed on the selected board",
+                             validate=questionary_processor_validator)
+        if not model:
+            _cancel_firmware_configuration()
+        from firmware.configuration import resolve_processor_profile
+        resolve_processor_profile(model)
+    user_data["mcu_type"] = model
+    return model
 
 
 def _board_contract_filename_preview(artifact_policy) -> str:
@@ -261,19 +283,21 @@ def _run_board_contract_firmware(user_data, decision):
             run_sd_card_contract_deployment,
         )
         try:
-            deployment_proof = run_sd_card_contract_deployment(user_data, plan)
+            deployment_proof = run_sd_card_contract_deployment(
+                user_data, plan, defer_firmware_verification=True,
+            )
         except BoardContractPhysicalDeploymentError as exc:
             message = f"BoardContract physical deployment failed: {exc}"
             print(f"\n\033[91mERROR:\033[0m {message}")
             return failed(WorkflowOutcome.DEPLOYMENT_FAILED, message)
-        if deployment_proof.final_state.value != "VERIFIED":
-            message = "BoardContract physical deployment did not reach VERIFIED"
+        if deployment_proof.final_state.value not in {"MCU_REENUMERATED", "VERIFIED"}:
+            message = "BoardContract physical deployment did not confirm MCU reenumeration"
             return failed(WorkflowOutcome.DEPLOYMENT_FAILED, message)
         print(
             "\033[92mSUCCESS:\033[0m physical BoardContract deployment "
-            f"verified; proof={deployment_proof.digest}"
+            f"MCU reenumerated; firmware verification awaits configuration activation; proof={deployment_proof.digest}"
         )
-        return success("BoardContract firmware and physical SD deployment verified.")
+        return success("BoardContract SD delivery completed; firmware verification awaits configuration activation.")
     return success(
         "BoardContract firmware built and a non-executing DeploymentPlan was created."
     )
@@ -345,6 +369,28 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
         arch = config_dict.get("CONFIG_MCU", "Unknown").replace('"', '')
         model = current_mcu if current_mcu else "Unknown"
         flash = config_dict.get("CONFIG_FLASH_START")
+        required_clock = None
+        if arch == "stm32":
+            try:
+                required_clock = board_reference_clock(user_data.get("board", ""), current_mcu)
+            except FirmwareConfigurationError as exc:
+                return failed(WorkflowOutcome.FIRMWARE_FAILED, str(exc))
+            if required_clock:
+                config_dict["CONFIG_CLOCK_REF_FREQ"] = required_clock
+            elif "CONFIG_CLOCK_REF_FREQ" not in config_dict:
+                if os.environ.get("KACE_AUTO") == "1":
+                    return failed(WorkflowOutcome.FIRMWARE_FAILED,
+                                  "An explicit board reference clock is required; automatic guessing is disabled.")
+                reference = numbered_select(
+                    "Select the clock reference specified for this exact board (check its Klipper config):",
+                    choices=[{"name": f"{mhz} MHz crystal", "value": str(mhz * 1000000)}
+                             for mhz in (8, 12, 16, 20, 24, 25)] +
+                            [{"name": "Internal clock", "value": "1"}],
+                )
+                if not reference:
+                    _cancel_firmware_configuration()
+                config_dict["CONFIG_CLOCK_REF_FREQ"] = reference
+
         comm = "USB" if config_dict.get("CONFIG_USB") == "y" else \
                "CAN" if config_dict.get("CONFIG_CANBUS") == "y" else \
                "UART" if config_dict.get("CONFIG_SERIAL") == "y" else \
@@ -363,9 +409,10 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
         print(_fw_row(t("builder.bootloader"),             format_flash(flash)))
         print(_fw_row(t("builder.comm_interface"),         comm))
 
-        clock = config_dict.get("CONFIG_CLOCK_FREQ")
+        clock_key = "CONFIG_CLOCK_REF_FREQ" if arch == "stm32" else "CONFIG_CLOCK_FREQ"
+        clock = config_dict.get(clock_key)
         if clock:
-            print(_fw_row(t("builder.clock"), f"{int(clock)//1000000} MHz"))
+            print(_fw_row(t("builder.clock"), "Internal" if clock == "1" else f"{int(clock)//1000000} MHz"))
 
         mcu_path = user_data.get('mcu_path')
         print(_fw_row(t("builder.usb_path"),    mcu_path if mcu_path else t("builder.not_detected")))
@@ -379,7 +426,7 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
         if flash is not None:
             choices.append(t("builder.edit_boot"))
         choices.append(t("builder.edit_comm"))
-        if clock:
+        if clock and not required_clock:
             choices.append(t("builder.edit_clock"))
         choices.append(t("builder.abort"))
 
@@ -457,7 +504,7 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
             clk = simple_input(t("builder.enter_clock"), default=clock)
             if clk:
                 candidate = dict(config_dict)
-                candidate["CONFIG_CLOCK_FREQ"] = clk
+                candidate[clock_key] = clk
                 try:
                     validate_firmware_configuration(candidate, processor=current_mcu)
                     config_dict = candidate

@@ -408,6 +408,30 @@ class BoardContractExecutorTests(unittest.TestCase):
         self.assertEqual(proof.expected_fingerprint, proof.observed_fingerprint)
         self.assertEqual("MCU1", proof.observed_mcu_identity.serial)
 
+    def test_first_install_defers_firmware_until_configuration_activation(self):
+        verifier = FakeFirmwareVerifier(FirmwareVerificationResult(False, "", {}, "no printer.cfg yet"))
+        executor = self._executor(verifier=verifier)
+        session = executor.prepare_media(self.plan)
+        proof = executor.confirm_manual_power_cycle(
+            session, confirmed=True, defer_firmware_verification=True,
+        )
+        self.assertEqual(ContractDeploymentState.MCU_REENUMERATED, proof.final_state)
+        self.assertTrue(proof.manual_confirmation)
+        self.assertFalse(proof.observed_fingerprint)
+        self.assertEqual([], verifier.calls)
+        self.assertIn("pending configuration", proof.klipper_connection_result)
+
+    def test_full_klipper_version_preserves_and_verifies_build_suffix(self):
+        expected = self.plan.artifact.firmware_identity.reported_version
+        version = "v0.13.0-734-gfe4eb865-20260917-host-" + expected
+        verifier = FakeFirmwareVerifier(FirmwareVerificationResult(True, version, {"mcu": version}, "ready"))
+        executor = self._executor(verifier=verifier)
+        session = executor.prepare_media(self.plan)
+        proof = executor.confirm_manual_power_cycle(session, confirmed=True)
+        self.assertEqual(ContractDeploymentState.VERIFIED, proof.final_state)
+        self.assertEqual(expected, proof.expected_fingerprint)
+        self.assertEqual(version, proof.observed_fingerprint)
+
     def test_post_flash_failures_never_verify(self):
         cases = (
             (FakeMonitor(error=TimeoutError("gone")), FakeFirmwareVerifier(), "MCU_REENUMERATION_TIMEOUT"),

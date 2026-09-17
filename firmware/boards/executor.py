@@ -1049,6 +1049,7 @@ class SdCardDeploymentExecutor:
         session: ContractDeploymentSession,
         *,
         confirmed: bool,
+        defer_firmware_verification: bool = False,
     ) -> DeploymentProof:
         if session.state is not ContractDeploymentState.WAITING_FOR_MANUAL_POWER_CYCLE:
             raise ContractDeploymentExecutionError(
@@ -1077,6 +1078,12 @@ class SdCardDeploymentExecutor:
                 ContractDeploymentState.MCU_REENUMERATED,
                 session.reenumeration_result,
             )
+            if defer_firmware_verification:
+                # First installation has no usable printer.cfg yet. The caller
+                # must activate configuration and verify the fingerprint in its
+                # configuration transaction; this proof deliberately isn't VERIFIED.
+                session.klipper_connection_result = "pending configuration activation and firmware verification"
+                return session.proof()
             self._transition(
                 session,
                 ContractDeploymentState.WAITING_FOR_KLIPPER,
@@ -1099,7 +1106,8 @@ class SdCardDeploymentExecutor:
                 ContractDeploymentState.VERIFYING_FIRMWARE,
                 "verifying exact firmware build-id/fingerprint",
             )
-            if result.observed_fingerprint != expected:
+            from firmware.identity import firmware_version_matches
+            if not firmware_version_matches(result.observed_fingerprint, expected):
                 raise PostFlashVerificationError(
                     f"firmware fingerprint mismatch: expected {expected!r}, "
                     f"observed {result.observed_fingerprint!r}",
@@ -1136,6 +1144,7 @@ class SdCardDeploymentExecutor:
             if session.state in {
                 ContractDeploymentState.VERIFIED,
                 ContractDeploymentState.FAILED,
+                ContractDeploymentState.MCU_REENUMERATED,
             }:
                 try:
                     self.mcu_monitor.close()

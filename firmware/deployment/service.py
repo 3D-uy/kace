@@ -105,7 +105,7 @@ class FirmwareDeploymentService:
         self._emit(
             deployment_id,
             "DEPLOYMENT_PLANNED",
-            f"{method.value} deployment planned",
+            self.translate("deployment.event.planned", method=method.value),
             method=method.value,
             final_filename=plan.final_filename,
             automation=plan.to_dict()["automation"],
@@ -114,7 +114,11 @@ class FirmwareDeploymentService:
 
     def prepare(self, plan) -> PreparedDeployment:
         require_deployable_artifact(plan.artifact)
-        self._emit(plan.deployment_id, "PREPARING_ARTIFACT", "preparing deployment artifact")
+        self._emit(
+            plan.deployment_id,
+            "PREPARING_ARTIFACT",
+            self.translate("deployment.event.preparing"),
+        )
         deployment_dir = os.path.join(self.output_dir, "deploy", plan.deployment_id)
         os.makedirs(deployment_dir, exist_ok=True)
         staged_path = os.path.join(deployment_dir, plan.final_filename)
@@ -140,7 +144,7 @@ class FirmwareDeploymentService:
         self._emit(
             plan.deployment_id,
             "ARTIFACT_READY",
-            f"{plan.final_filename} ready",
+            self.translate("deployment.event.ready", filename=plan.final_filename),
             method=plan.method.value,
             final_filename=plan.final_filename,
             staged_path=staged_path,
@@ -185,7 +189,7 @@ class FirmwareDeploymentService:
         self._emit(
             plan.deployment_id,
             state,
-            f"executing {plan.method.value} deployment",
+            self.translate("deployment.event.executing", method=plan.method.value),
             method=plan.method.value,
             instructions=[item.__dict__ for item in plan.instructions],
         )

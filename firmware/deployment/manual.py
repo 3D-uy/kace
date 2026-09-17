@@ -7,6 +7,8 @@ import shutil
 import hashlib
 import tempfile
 
+from core.translations import t
+
 from .models import (
     DeploymentArtifactError,
     DeploymentExecutionContext,
@@ -83,9 +85,10 @@ class ManualDeploymentMethod:
         if prepared.plan.profile.strategy is DeploymentStrategyId.PREPARE_ONLY:
             return DeploymentResult(
                 DeploymentStatus.ACTION_REQUIRED,
-                (
-                    f"{prepared.plan.final_filename} is prepared at {prepared.staged_path}; "
-                    "KACE has no safe automatic or removable-media flash procedure for this profile"
+                t(
+                    "deployment.manual.prepare_only_detail",
+                    filename=prepared.plan.final_filename,
+                    path=prepared.staged_path,
                 ),
                 prepared,
                 error_code="PREPARE_ONLY",
@@ -136,7 +139,14 @@ class ManualDeploymentMethod:
                         os.remove(tmp_path)
                     except OSError:
                         pass
-            detail = f"{prepared.plan.final_filename} copied to {destination}"
+            detail = t(
+                "deployment.manual.copied_detail",
+                filename=prepared.plan.final_filename,
+                destination=destination,
+            )
         else:
-            detail = f"{prepared.plan.final_filename} is ready for manual installation"
+            detail = t(
+                "deployment.manual.ready_detail",
+                filename=prepared.plan.final_filename,
+            )
         return DeploymentResult(DeploymentStatus.MEDIA_PREPARED, detail, prepared)

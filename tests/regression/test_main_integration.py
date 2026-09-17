@@ -657,7 +657,7 @@ class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
         checkpoint = transition_checkpoint(create_checkpoint(data), State.ARTIFACT_READY, artifact={
             "path": path, "final_filename": "firmware.bin",
             "sha256": hashlib.sha256(payload).hexdigest(), "size_bytes": len(payload),
-            "method": "MANUAL", "strategy": "SD_CARD", "build": {},
+            "method": "MANUAL", "strategy": "SD_CARD", "build": {"mcu": "lpc1769"},
             "instructions": [{"text": "Copy firmware.bin to the SD card."}],
         })
         checkpoint = transition_checkpoint(checkpoint, State.AWAITING_FLASH)
@@ -670,7 +670,8 @@ class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
         if state == "READY_TO_DEPLOY":
             checkpoint = transition_checkpoint(checkpoint, State.CONFIG_GENERATED)
             checkpoint = transition_checkpoint(checkpoint, State.READY_TO_DEPLOY)
-        write_checkpoint(checkpoint)
+        from core.firmware_workflow import checkpoint_revision
+        write_checkpoint(checkpoint, expected_revision=checkpoint_revision())
         return checkpoint
 
     def test_obtain_only_displays_artifact_and_returns_to_same_menu(self):
@@ -892,7 +893,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
                 "method": "MANUAL",
                 "strategy": "SD_CARD",
                 "instructions": [],
-                "build": {},
+                "build": {"mcu": "lpc1769"},
             },
         )
         checkpoint = transition_checkpoint(
@@ -959,7 +960,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
                 "method": "MANUAL",
                 "strategy": "SD_CARD",
                 "instructions": [],
-                "build": {},
+                "build": {"mcu": "lpc1769"},
             },
         )
         checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.VERIFYING_MCU)
@@ -1014,7 +1015,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
             "method": "MANUAL",
             "strategy": "SD_CARD",
             "instructions": [],
-            "build": {},
+            "build": {"mcu": "lpc1769"},
         }
         with open(evidence["path"], "wb") as output:
             output.write(b"x")
@@ -1076,7 +1077,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
                 "id": "deployment.manual.copy",
                 "text": "Copie firmware.bin en la raíz de la tarjeta SD.",
             }],
-            "build": {},
+            "build": {"mcu": "lpc1769"},
         }
         user_data = {
             **_WIZARD_USER_DATA_WITH_PARSED,
@@ -1092,7 +1093,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         )
         verification_attempts = []
 
-        def verify_after_flash(checkpoint, *, flash_evidence=False):
+        def verify_after_flash(checkpoint, *, flash_evidence=False, ambiguity_resolver=None):
             verification_attempts.append(checkpoint["workflow_id"])
             self.assertTrue(flash_evidence)
             self.assertEqual(

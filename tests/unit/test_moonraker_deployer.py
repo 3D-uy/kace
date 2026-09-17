@@ -46,13 +46,22 @@ class Monitor:
 
 
 class Client:
+    def supports_conditional_config_write(self, previous):
+        return True
+
+    def upload_config_if_unchanged(self, content, name, previous):
+        if self.remote.get(name) != previous:
+            raise RuntimeError("Concurrent configuration modification detected")
+        self.calls.append(("upload", name))
+        self.remote[name] = content
+
     def __init__(self, payloads, *, online=None, states=None, versions=None):
         self.payloads = payloads
         self.online = list(online or [True])
         self.states = list(states or ["ready", "ready"])
         self.versions = list(versions or [{"mcu": "kace-good"}])
         self.calls = []
-        self.remote = {}
+        self.remote = {"printer.cfg": b"[printer]\nold: true\n"}
         self.rollback = False
 
     @staticmethod
@@ -86,11 +95,14 @@ class Client:
     def restart_moonraker(self):
         self.calls.append("restart_moonraker")
 
-    def restore_snapshot(self, snapshot):
+    def restore_snapshot(self, snapshot, *, expected_files=None):
         self.calls.append("rollback")
         self.rollback = True
         self.remote = dict(snapshot.config_files)
         return []
+
+    def read_config_files(self, names):
+        return {name: self.remote.get(name) for name in names}
 
 
 class InstallationWorkflowTests(unittest.TestCase):
@@ -108,14 +120,18 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.snapshot = DeploymentSnapshot(
             "id", "now", "board", "version", "", ("mcu",), False,
             {"printer.cfg": b"[printer]\nold: true\n"},
+            missing_files=("macros.cfg",),
         )
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def make(self, client=None, monitor=None, events=None, prompt=None):
+        client = client or Client({})
+        # The fake remote must start at the state actually captured by backup.
+        client.remote.update(self.snapshot.config_files)
         deployer = Deployer(
-            client or Client({}), self.manifest, snapshot=self.snapshot,
+            client, self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor or Monitor(),
             power_cycle_prompt=prompt or (lambda: True),
             event_sink=(events if events is not None else []).append,
@@ -345,10 +361,12 @@ class InstallationWorkflowTests(unittest.TestCase):
             ],
         )
         client = Client({})
+        from dataclasses import replace
+        snapshot = replace(self.snapshot, missing_files=self.snapshot.missing_files + ("moonraker.conf",))
         deployer = Deployer(
             client,
             manifest,
-            snapshot=self.snapshot,
+            snapshot=snapshot,
             event_sink=lambda _event: None,
         )
         deployer.POLL_INTERVAL_S = 0.001
@@ -380,7 +398,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         monitor = Monitor()
         deployer = Deployer(
             Client({}), self.manifest, mcu_monitor=monitor,
-            firmware_copy=lambda: False, event_sink=lambda _event: None,
+            firmware_copy=lambda: False, event_sink=lambda _event: None, snapshot=self.snapshot,
         )
         result = deployer.run()
         self.assertEqual(result.state, DeployState.FAILED_FLASH)
@@ -435,22 +453,22 @@ class InstallationWorkflowTests(unittest.TestCase):
                     target, method = deployer, "_verify_uploads"
                     operation = deployer._verify_uploads
                 else:
-                    target, method = client, "firmware_restart" if phase == "restart" else "upload_config"
+                    target, method = client, "firmware_restart" if phase == "restart" else "upload_config_if_unchanged"
                     operation = getattr(target, method)
 
                 def interrupt_once(*args):
                     nonlocal interrupted
                     if not interrupted:
                         interrupted = True
-                        if method == "upload_config":
+                        if method == "upload_config_if_unchanged":
                             operation(*args)
                         raise KeyboardInterrupt
                     return operation(*args)
 
                 if phase == "rollback_failure":
-                    client.restore_snapshot = lambda _snapshot: ["printer.cfg"]
+                    client.restore_snapshot = lambda _snapshot, **_kwargs: ["printer.cfg"]
                 elif phase == "rollback_interrupt":
-                    def interrupt_restore(_snapshot):
+                    def interrupt_restore(_snapshot, **_kwargs):
                         raise KeyboardInterrupt
                     client.restore_snapshot = interrupt_restore
                 with patch.object(target, method, side_effect=interrupt_once):

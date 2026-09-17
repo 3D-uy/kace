@@ -7,11 +7,21 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock
 import time
+from pathlib import Path
+from firmware.derivation import derive_config
 
 from firmware.builder import build_firmware_orchestrator
 from firmware.identity import FirmwareBuildInputs, ToolchainIdentity
 
 class TestFirmwareBuilder(unittest.TestCase):
+    def setUp(self):
+        from contextlib import nullcontext
+        from core.workspace import exclusive_file_lock
+        # Format-selection tests simulate the entire filesystem at /fake.
+        lock = patch('firmware.builder.exclusive_file_lock', side_effect=lambda path:
+                     nullcontext() if "/fake/" in path.as_posix() else exclusive_file_lock(path))
+        lock.start()
+        self.addCleanup(lock.stop)
 
     def test_real_artifact_embeds_and_returns_complete_build_identity(self):
         import tempfile
@@ -25,6 +35,7 @@ class TestFirmwareBuilder(unittest.TestCase):
         compile_commands = []
 
         with tempfile.TemporaryDirectory() as tmp_klipper, tempfile.TemporaryDirectory() as tmp_output:
+            Path(tmp_klipper, "Makefile").write_text("$(PYTHON) ./scripts/buildcommands.py -d $(OUT)klipper.dict")
             config_path = os.path.join(tmp_klipper, ".config")
             with open(config_path, "w", encoding="utf-8") as config_file:
                 config_file.write('CONFIG_MCU="stm32"\nCONFIG_USB=y\n')
@@ -33,9 +44,10 @@ class TestFirmwareBuilder(unittest.TestCase):
             def run_make(command, **_kwargs):
                 if "olddefconfig" not in command and "clean" not in command:
                     compile_commands.append(list(command))
+                    self.assertIn("--extra=-" + inputs.reported_version, Path(command[command.index("-f") + 1]).read_text())
                     os.makedirs(out_dir, exist_ok=True)
                     with open(os.path.join(out_dir, "klipper.bin"), "wb") as artifact:
-                        artifact.write(b"firmware" * 2048)
+                        artifact.write(b"firmware" * 2048 + inputs.reported_version.encode())
                 return MagicMock(stdout="", stderr="", returncode=0)
 
             with patch('firmware.builder.generate_firmware_config', return_value=(True, "")), \
@@ -58,9 +70,7 @@ class TestFirmwareBuilder(unittest.TestCase):
         self.assertEqual(identity.artifact_sha256, result["artifact"].sha256)
         self.assertEqual(result["klipper_version"], inputs.reported_version)
         self.assertEqual(len(compile_commands), 1)
-        self.assertIn(
-            f"KLIPPER_VERSION={inputs.reported_version}", compile_commands[0]
-        )
+        self.assertIn("-f", compile_commands[0])
 
     @patch('firmware.builder.generate_firmware_config', return_value=(True, ""))
     @patch('firmware.builder.validate_config', return_value=(True, ""))
@@ -205,7 +215,7 @@ class TestFirmwareBuilder(unittest.TestCase):
                 f.write('CONFIG_MCU="avr"\nCONFIG_USB=y\n')
 
             # Touch a minimal Makefile so _ensure_klipper_source() sees a valid source tree
-            open(os.path.join(tmp_klipper, "Makefile"), "w").close()
+            Path(tmp_klipper, "Makefile").write_text("$(PYTHON) ./scripts/buildcommands.py -d $(OUT)klipper.dict")
 
             mock_out = os.path.join(tmp_klipper, "out")
             os.makedirs(mock_out, exist_ok=True)
@@ -215,7 +225,7 @@ class TestFirmwareBuilder(unittest.TestCase):
                 os.makedirs(mock_out, exist_ok=True)
                 for f_name in ["klipper.bin", "klipper.uf2", "klipper.elf.hex"]:
                     with open(os.path.join(mock_out, f_name), "w") as f:
-                        f.write("MOCK CONTENT")
+                        f.write("MOCK CONTENT" + inputs.reported_version)
                     
             with tempfile.TemporaryDirectory() as tmp_output:
                 # Patch validator, compile subprocess calls, and getmtime to return future timestamp
@@ -229,7 +239,7 @@ class TestFirmwareBuilder(unittest.TestCase):
                          derived_mcu="atmega2560",
                          klipper_path=tmp_klipper,
                          output_dir=tmp_output,
-                         config_dict={"CONFIG_MCU": '"avr"'}
+                         config_dict=derive_config("atmega2560", "uart")
                      )
                      
                      self.assertEqual(result.get("status"), "success")

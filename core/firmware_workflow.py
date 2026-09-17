@@ -7,9 +7,10 @@ revalidated evidence.
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass, replace
 from enum import Enum
 import hashlib
+import glob
 import json
 import os
 import re
@@ -18,9 +19,16 @@ import time
 import uuid
 from typing import Any, Callable, Mapping, Optional
 
+from core.mcu_monitor import (
+    McuIdentity, McuIdentityReader, McuIdentityVerdict, McuMonitorError,
+    assess_mcu_identity,
+)
+from core.workspace import exclusive_file_lock
+
 
 CHECKPOINT_SCHEMA = "kace-firmware-workflow/v1"
 DEFAULT_CHECKPOINT_PATH = "~/kace/firmware-workflow.json"
+_STORAGE_REVISION = "_storage_revision"
 
 
 class FirmwareWorkflowError(RuntimeError):
@@ -33,6 +41,10 @@ class CheckpointCorrupt(FirmwareWorkflowError):
 
 class CheckpointIncompatible(FirmwareWorkflowError):
     """The checkpoint does not describe the currently observed hardware."""
+
+
+class CheckpointConflict(FirmwareWorkflowError):
+    """A concurrent writer changed the checkpoint since this workflow read it."""
 
 
 class DeploymentInvariantError(FirmwareWorkflowError):
@@ -124,9 +136,39 @@ _DEPLOYABLE_STATES = {
 _STABLE_SERIAL_PREFIX = "/dev/serial/by-id/"
 
 
+def _same_mcu_model(board: str, expected: str, observed: str) -> bool:
+    """Allow only exact model/resolved-name aliases from the selected contract."""
+    if expected == observed:
+        return True
+    # Legacy Octopus variants predate BoardContract, but have verified Kconfig
+    # spellings. Do not generalize this to arbitrary suffixes or other boards.
+    if board == "generic-bigtreetech-octopus-v1.1.cfg":
+        if any({expected, observed} <= pair for pair in (
+            {"stm32f446", "stm32f446xx"}, {"stm32f429", "stm32f429xx"},
+        )):
+            return True
+    from firmware.boards.catalog import load_default_catalog
+    contract = load_default_catalog().resolve_exact(board)
+    return bool(contract and any(
+        {expected, observed} <= {variant.processor.model.lower(), variant.processor.resolved_mcu.lower()}
+        for variant in contract.hardware_variants
+    ))
+
+
 def checkpoint_path(path: Optional[str] = None) -> str:
     configured = path or os.environ.get("KACE_FIRMWARE_WORKFLOW_PATH") or DEFAULT_CHECKPOINT_PATH
     return os.path.abspath(os.path.expanduser(configured))
+
+
+def checkpoint_revision(path: Optional[str] = None) -> tuple[str, Optional[str]]:
+    """Capture a replacement precondition, including corrupt/legacy checkpoints."""
+    destination = checkpoint_path(path)
+    try:
+        with open(destination, "rb") as source:
+            digest = hashlib.sha256(source.read()).hexdigest()
+    except FileNotFoundError:
+        digest = None
+    return destination, digest
 
 
 def _jsonable(value: Any) -> Any:
@@ -165,6 +207,7 @@ def persistable_wizard_data(user_data: Mapping[str, Any]) -> dict[str, Any]:
 def _canonical_payload(checkpoint: Mapping[str, Any]) -> bytes:
     payload = dict(checkpoint)
     payload.pop("integrity_sha256", None)
+    payload.pop(_STORAGE_REVISION, None)
     return json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
@@ -190,14 +233,38 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     artifact_data = artifact.to_dict() if hasattr(artifact, "to_dict") else None
     plan = user_data.get("board_contract_deployment_plan")
     prepared = user_data.get("prepared_firmware_deployment")
+    if artifact_data is None:
+        return None
+    digest = str(artifact_data.get("sha256") or "")
+    size = int(artifact_data.get("size_bytes") or 0)
+    identity = artifact_data.get("firmware_identity") or {}
+    if not digest or identity.get("artifact_sha256") != digest or identity.get("artifact_size") != size:
+        raise FirmwareWorkflowError("firmware build identity is missing or inconsistent")
 
     path = str(user_data.get("firmware_path") or "")
     final_filename = os.path.basename(path) if path else ""
     method = ""
     strategy = ""
     instructions: list[dict[str, str]] = []
+    expected_vid_pids = ()
+    bootloader_vid_pids = ()
     if plan is not None:
+        from firmware.boards.catalog import load_default_catalog
+
+        contract = load_default_catalog().by_id(plan.board_id)
+        variant = contract.variant(plan.hardware_variant_id) if contract else None
+        target = variant.target(plan.build_target_id) if variant else None
+        if target is None:
+            raise FirmwareWorkflowError("firmware plan target is absent from the catalog")
+        application_id = target.transport.endpoint.get("application_vid_pid")
+        bootloader_id = target.transport.endpoint.get("bootloader_vid_pid")
+        expected_vid_pids = (application_id,) if application_id else ()
+        bootloader_vid_pids = (bootloader_id,) if bootloader_id else ()
         transformation = getattr(plan, "transformation", None)
+        if (getattr(transformation, "native_sha256", None) != digest
+                or getattr(transformation, "final_sha256", None) != digest
+                or getattr(transformation, "size_bytes", None) != size):
+            raise FirmwareWorkflowError("firmware transformation does not match the immutable build")
         path = str(getattr(transformation, "final_path", "") or path)
         final_filename = str(getattr(transformation, "final_filename", "") or final_filename)
         strategy = str(getattr(getattr(plan, "strategy", None), "value", "") or "")
@@ -206,11 +273,16 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
             for item in getattr(plan, "instructions", ())
         ]
     if prepared is not None:
+        if prepared.sha256 != digest or prepared.plan.artifact.sha256 != digest:
+            raise FirmwareWorkflowError("prepared firmware does not match the immutable build")
         legacy_plan = getattr(prepared, "plan", None)
         path = str(getattr(prepared, "staged_path", "") or path)
         final_filename = str(getattr(legacy_plan, "final_filename", "") or final_filename)
         method = str(getattr(getattr(legacy_plan, "method", None), "value", "") or "")
         profile = getattr(legacy_plan, "profile", None)
+        usb = getattr(profile, "usb", None)
+        expected_vid_pids = tuple(getattr(usb, "application_vid_pids", ()))
+        bootloader_vid_pids = tuple(getattr(usb, "bootloader_vid_pids", ()))
         strategy = str(getattr(getattr(profile, "strategy", None), "value", "") or strategy)
         instructions = [
             {"id": str(getattr(item, "id", "")), "text": str(getattr(item, "text", ""))}
@@ -218,14 +290,13 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         ]
 
     expanded = os.path.abspath(os.path.expanduser(path)) if path else ""
-    digest = ""
-    size = 0
-    if expanded and os.path.isfile(expanded):
-        digest = _file_sha256(expanded)
-        size = os.path.getsize(expanded)
-    elif isinstance(artifact_data, dict):
-        digest = str(artifact_data.get("sha256") or "")
-        size = int(artifact_data.get("size_bytes") or 0)
+    try:
+        if not expanded or not os.path.isfile(expanded):
+            raise FirmwareWorkflowError("verified firmware artifact is missing")
+        if os.path.getsize(expanded) != size or _file_sha256(expanded) != digest:
+            raise FirmwareWorkflowError("firmware bytes changed after the verified build; rebuild required")
+    except OSError as exc:
+        raise FirmwareWorkflowError(f"verified firmware artifact could not be read: {exc}") from exc
 
     if not expanded or not digest:
         return None
@@ -238,6 +309,8 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         "strategy": strategy,
         "instructions": instructions,
         "build": artifact_data or {},
+        "expected_vid_pids": list(expected_vid_pids),
+        "bootloader_vid_pids": list(bootloader_vid_pids),
     }
 
 
@@ -245,12 +318,20 @@ def create_checkpoint(
     user_data: Mapping[str, Any],
     *,
     state: FirmwareWorkflowState = FirmwareWorkflowState.HARDWARE_SELECTED,
+    identity_reader=None,
 ) -> dict[str, Any]:
     board = str(user_data.get("board") or "").strip()
     mcu = str(user_data.get("mcu_type") or user_data.get("derived_mcu") or "").strip().lower()
     if not board or not mcu:
         raise FirmwareWorkflowError("a selected board and detected MCU are required")
     now = int(time.time())
+    baseline = None
+    try:
+        baseline = (identity_reader or McuIdentityReader()).read(str(user_data.get("mcu_path") or ""))
+    except (McuMonitorError, OSError):
+        # Missing evidence must require physical confirmation later, never be
+        # reconstructed from a potentially different MCU after flashing.
+        pass
     checkpoint = {
         "schema": CHECKPOINT_SCHEMA,
         "workflow_id": f"firmware-{uuid.uuid4().hex}",
@@ -262,6 +343,7 @@ def create_checkpoint(
             "board": board,
             "mcu": mcu,
             "baseline_serial_path": str(user_data.get("mcu_path") or ""),
+            "baseline_identity": baseline.to_dict() if baseline is not None else None,
             "verified_serial_path": "",
             "flash_evidence_recorded_at": 0,
         },
@@ -317,22 +399,35 @@ def transition_checkpoint(
     return _with_integrity(updated)
 
 
-def write_checkpoint(checkpoint: Mapping[str, Any], path: Optional[str] = None) -> str:
+def write_checkpoint(
+    checkpoint: Mapping[str, Any], path: Optional[str] = None,
+    *, expected_revision: Optional[tuple[str, Optional[str]]] = None,
+) -> str:
     validated = validate_checkpoint(checkpoint, verify_artifact=False)
     destination = checkpoint_path(path)
     directory = os.path.dirname(destination)
     os.makedirs(directory, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix="firmware-workflow-", suffix=".json", dir=directory)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as target:
-            json.dump(validated, target, indent=2, sort_keys=True)
-            target.write("\n")
-            target.flush()
-            os.fsync(target.fileno())
-        os.replace(temporary, destination)
-    finally:
-        if os.path.exists(temporary):
-            os.remove(temporary)
+    expected = expected_revision or validated.get(_STORAGE_REVISION) or (destination, None)
+    # Runtime CAS evidence travels with transitions, but never enters the v1
+    # checkpoint format or its integrity hash.
+    validated.pop(_STORAGE_REVISION, None)
+    encoded = (json.dumps(validated, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    with exclusive_file_lock(destination + ".lock", timeout_seconds=30):
+        current = checkpoint_revision(destination)
+        if current != tuple(expected):
+            raise CheckpointConflict("firmware checkpoint changed on disk; reload it before continuing")
+        fd, temporary = tempfile.mkstemp(prefix="firmware-workflow-", suffix=".json", dir=directory)
+        try:
+            with os.fdopen(fd, "wb") as target:
+                target.write(encoded)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, destination)
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        if isinstance(checkpoint, dict):
+            checkpoint[_STORAGE_REVISION] = (destination, hashlib.sha256(encoded).hexdigest())
     return destination
 
 
@@ -346,13 +441,16 @@ def load_checkpoint(
     if not os.path.exists(source_path):
         return None
     try:
-        with open(source_path, "r", encoding="utf-8") as source:
-            value = json.load(source)
+        with open(source_path, "rb") as source:
+            encoded = source.read()
+        value = json.loads(encoded.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise CheckpointCorrupt(f"could not read firmware workflow checkpoint: {exc}") from exc
-    return validate_checkpoint(
+    value = validate_checkpoint(
         value, current_hardware=current_hardware, verify_artifact=verify_artifact
     )
+    value[_STORAGE_REVISION] = (source_path, hashlib.sha256(encoded).hexdigest())
+    return value
 
 
 def validate_checkpoint(
@@ -396,7 +494,7 @@ def validate_checkpoint(
             raise CheckpointIncompatible(
                 f"checkpoint board {board} does not match current board {current_board}"
             )
-        if current_mcu and current_mcu != expected_mcu:
+        if current_mcu and not _same_mcu_model(board, expected_mcu, current_mcu):
             raise CheckpointIncompatible(
                 f"checkpoint MCU {expected_mcu} does not match detected MCU {current_mcu}"
             )
@@ -416,6 +514,18 @@ def validate_checkpoint(
             raise CheckpointCorrupt("firmware workflow checkpoint has no build artifact evidence")
         artifact_path = str(artifact.get("path") or "")
         digest = str(artifact.get("sha256") or "").lower()
+        build = artifact.get("build") or {}
+        built_mcu = str(build.get("mcu") or "").lower()
+        if not built_mcu or not _same_mcu_model(board, expected_mcu, built_mcu):
+            raise CheckpointIncompatible("compiled MCU does not match the originally selected hardware")
+        identity = build.get("firmware_identity") or {}
+        # Reject old checkpoints which blessed changed bytes with a fresh hash.
+        for recorded in (build.get("sha256"), identity.get("artifact_sha256")):
+            if recorded is not None and recorded != digest:
+                raise CheckpointIncompatible("checkpoint artifact differs from its immutable build")
+        for recorded in (build.get("size_bytes"), identity.get("artifact_size")):
+            if recorded is not None and recorded != artifact.get("size_bytes"):
+                raise CheckpointIncompatible("checkpoint artifact size differs from its immutable build")
         if not artifact_path or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise CheckpointCorrupt("firmware artifact evidence is incomplete")
         if verify_artifact:
@@ -464,6 +574,8 @@ def verify_reappeared_mcu(
     *,
     detector: Optional[Callable[[], Mapping[str, Any]]] = None,
     flash_evidence: bool = False,
+    identity_reader=None,
+    ambiguity_resolver=None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Observe the current MCU and persist only stable, compatible serial evidence."""
     checked = validate_checkpoint(checkpoint, verify_artifact=True)
@@ -476,25 +588,94 @@ def verify_reappeared_mcu(
         raise FirmwareWorkflowError(
             "explicit evidence that the board-specific flashing step completed is required"
         )
-    if detector is None:
-        from firmware.detector import discover_mcu_hardware
-
-        detector = lambda: discover_mcu_hardware(interactive=False)
-    observed = dict(detector() or {})
     expected_mcu = str(checked["hardware"]["mcu"]).lower()
-    actual_mcu = str(observed.get("derived_mcu") or "").lower()
-    serial_path = str(observed.get("mcu_path") or "").strip()
-    if not actual_mcu:
-        raise CheckpointIncompatible("the expected MCU has not reappeared")
-    if actual_mcu != expected_mcu:
-        raise CheckpointIncompatible(
-            f"detected MCU {actual_mcu} does not match checkpoint MCU {expected_mcu}"
+    reader = identity_reader or McuIdentityReader()
+    baseline_data = checked["hardware"].get("baseline_identity")
+    if baseline_data:
+        try:
+            baseline = McuIdentity(**{f.name: baseline_data[f.name] for f in fields(McuIdentity)})
+        except (KeyError, TypeError) as exc:
+            raise CheckpointCorrupt("invalid original MCU identity evidence") from exc
+    else:
+        baseline = McuIdentity(str(checked["hardware"].get("baseline_serial_path") or ""), "")
+    evidence = checked.get("artifact") or {}
+    expected = evidence.get("expected_vid_pids") or ((baseline.vid_pid,) if baseline.vid_pid else ())
+    bridge_ids = None
+    if detector is None:
+        from firmware.detector import mcu_context_from_path
+
+        observations = [mcu_context_from_path(path) for path in sorted(glob.glob(_STABLE_SERIAL_PREFIX + "*"))]
+    else:
+        observations = [dict(detector() or {})]
+    candidates = []
+    for observed in observations:
+        serial_path = str(observed.get("mcu_path") or "").strip()
+        derived = str(observed.get("derived_mcu") or "").lower()
+        if derived and not _same_mcu_model(checked["hardware"]["board"], expected_mcu, derived):
+            continue
+        if not derived and bridge_ids is None:
+            from firmware.deployment.profiles import load_profiles
+            from firmware.deployment.models import UsbTopology
+            bridge_ids = {
+                vid_pid for profile in load_profiles()
+                if str(checked["hardware"]["board"]).lower() in profile.board_patterns
+                and expected_mcu in profile.mcu_patterns
+                and profile.usb.topology is UsbTopology.USB_SERIAL_BRIDGE
+                for vid_pid in profile.usb.application_vid_pids
+            }
+            # A native UART target keeps the originally selected USB adapter's
+            # identity. The adapter cannot expose the MCU model after flashing.
+            from firmware.boards.runtime import resolve_firmware_authority, FirmwareAuthority
+            from firmware.boards.catalog import load_default_catalog
+            decision = resolve_firmware_authority(checked["hardware"]["board"], detected_mcu=expected_mcu)
+            if decision.authority is FirmwareAuthority.BOARD_CONTRACT and baseline.vid_pid:
+                variant = load_default_catalog().by_id(decision.board_id).variant(decision.hardware_variant_id)
+                target = variant.target(decision.build_target_id)
+                if target.transport.kind.value == "UART":
+                    bridge_ids.add(baseline.vid_pid)
+        if not derived and not bridge_ids:
+            continue
+        if not serial_path.startswith(_STABLE_SERIAL_PREFIX) or not os.path.exists(serial_path):
+            continue
+        try:
+            candidate = reader.read(serial_path)
+        except (McuMonitorError, OSError):
+            candidate = None
+        if candidate is None:
+            # A present by-id path alone cannot prove USB topology or VID:PID.
+            candidate = McuIdentity(serial_path, os.path.realpath(serial_path))
+        if expected and candidate.vid_pid and candidate.vid_pid not in expected:
+            continue
+        assessment = assess_mcu_identity(
+            baseline, candidate, expected_vid_pids=expected,
+            bootloader_vid_pids=evidence.get("bootloader_vid_pids") or (),
         )
-    stable_path = serial_path.startswith(_STABLE_SERIAL_PREFIX) and len(serial_path) > len(_STABLE_SERIAL_PREFIX)
-    if not serial_path or not stable_path or not os.path.exists(serial_path):
+        if not baseline_data or not candidate.has_topology:
+            if assessment.verdict not in {McuIdentityVerdict.MISMATCH, McuIdentityVerdict.TRANSIENT}:
+                assessment = replace(
+                    assessment, verdict=McuIdentityVerdict.AMBIGUOUS,
+                    reasons=assessment.reasons + ("original or current physical identity evidence is unavailable",),
+                )
+        if not derived:
+            # A bridge keeps its Arduino/CH340 by-id name across MCU flashes.
+            # Accept only the contracted bridge with positive physical evidence.
+            if candidate.vid_pid not in bridge_ids or assessment.verdict is not McuIdentityVerdict.MATCH:
+                continue
+            observed = {**observed, "derived_mcu": expected_mcu}
+        if assessment.verdict in {McuIdentityVerdict.MATCH, McuIdentityVerdict.AMBIGUOUS}:
+            candidates.append((observed, assessment))
+    matches = [item for item in candidates if item[1].verdict is McuIdentityVerdict.MATCH]
+    eligible = matches or candidates
+    if len(eligible) != 1:
         raise CheckpointIncompatible(
-            "the MCU did not provide a present, stable /dev/serial/by-id path"
+            "MCU physical identity is absent, conflicting, or ambiguous across multiple devices; "
+            "connect only the originally selected MCU and retry"
         )
+    observed, assessment = eligible[0]
+    manual = assessment.verdict is not McuIdentityVerdict.MATCH
+    if manual and (ambiguity_resolver is None or ambiguity_resolver(assessment) is not True):
+        raise CheckpointIncompatible("MCU physical identity requires explicit confirmation: " + assessment.describe())
+    serial_path = observed["mcu_path"]
     verifying = checked
     if FirmwareWorkflowState(checked["state"]) is FirmwareWorkflowState.AWAITING_FLASH:
         verifying = transition_checkpoint(checked, FirmwareWorkflowState.VERIFYING_MCU)
@@ -504,6 +685,12 @@ def verify_reappeared_mcu(
         verified_serial_path=serial_path,
         flash_evidence_recorded_at=int(time.time()),
     )
+    verified["hardware"] = {
+        **verified["hardware"],
+        "identity_assessment": assessment.to_dict(),
+        "identity_manually_confirmed": manual,
+    }
+    verified = _with_integrity(verified)
     return verified, observed
 
 
@@ -593,7 +780,8 @@ def verify_running_firmware(
         raise RunningFirmwareMismatch(
             f"Klipper did not report a firmware version for MCU object {mcu_name!r}"
         )
-    if actual != expected:
+    from firmware.identity import firmware_version_matches
+    if not firmware_version_matches(actual, expected):
         raise RunningFirmwareMismatch(
             f"MCU {mcu_name!r} reports {actual!r}, expected compiled build {expected!r}"
         )

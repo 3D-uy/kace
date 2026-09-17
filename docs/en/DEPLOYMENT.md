@@ -1,124 +1,217 @@
 # KACE Deployment System: SSH vs. Moonraker API
 
-This document explains in detail how KACE deploys generated configuration files (`printer.cfg` and `macros.cfg`) to a Klipper-enabled 3D printer. It covers the underlying mechanisms, protocols, security considerations, verification processes, automatic rollback logic, and a comparison to help you choose the best deployment method.
+This document explains in detail how KACE deploys generated configuration files (`printer.cfg` and `macros.cfg`) to a Klipper-enabled 3D printer. It covers the underlying mechanisms, protocols, security considerations, verification processes, manual recovery policy, and a comparison to help you choose the best deployment method.
 
 ---
+
+## Transaction safety and MCU identity
+
+Firmware checkpoint deployments verify the running build fingerprint inside the
+configuration transaction, after activation and Klipper `Ready`, before emitting
+`DONE` or returning `COMMITTED`. A mismatched or unavailable fingerprint triggers
+configuration recovery. Idempotent deployments still require review acceptance,
+explicit activation and fingerprint verification, but have no new writes to roll
+back. Matching files and an already-Ready service do not prove those files were
+loaded. Explicitly deferred activation remains pending, including on retries.
+The physical installation transaction rechecks its firmware targets after the
+final restart as well.
+
+The normal configuration review lists existing settings that will be replaced or
+removed, including their file, section, option and previous/planned values. This
+also covers removed managed sections and customized managed macro bodies; opening
+the advanced diff is not required to see these warnings. Established tuning
+preservation rules and user-owned sections still apply.
+
+Checkpoint publication compares the exact revision originally read while holding
+the shared cross-process file lock. Stale writers fail even if they locally
+advanced to a higher sequence. Starting a new workflow uses an explicit expected
+revision captured before the wizard; it cannot overwrite a concurrent update.
+Persistence failure stops the CLI before subsequent actions. Runtime revision
+evidence is not serialized, so existing v1 checkpoint consumers remain compatible.
+
+Manual MCU verification compares all compatible, present serial candidates with
+the physical identity captured when the original MCU was selected: USB topology,
+VID/PID and serial evidence. A matching model alone is insufficient. Missing or
+changed evidence requires explicit cable-tracing confirmation; multiple ambiguous
+candidates require disconnecting the other devices and retrying. Older checkpoints
+without captured physical evidence require the same confirmation. Auto mode cannot
+confirm ambiguity. Accepted evidence and any manual confirmation are persisted.
+
+Automatic recovery never performs a read-then-write restore. The current local,
+SFTP and Moonraker file APIs provide no atomic content-conditional replacement or
+deletion against independent editors. When an attempted write differs from its
+snapshot, KACE preserves current files, reports `ROLLBACK_FAILED` (or a failed
+physical recovery), retains the durable snapshot and does not restart services
+as if restoration had succeeded. Files already restored externally are verified
+without mutation.
+
+For manual recovery, stop deployment and coordinate with other editors. Open the
+reported snapshot directory: `snapshot.json` lists original files, SHA-256 values
+and originally absent paths. Original bytes are stored there with `/` encoded as
+`__` in filenames. Compare live edits before restoring the chosen originals or
+removing newly created files; then restart and verify Klipper and the firmware
+identity. Do not blindly copy the entire snapshot over a concurrently edited
+configuration.
+
+Both configuration and physical rollback use `snapshot.verify_snapshot_restored`
+to compare each attempted target to the
+snapshot before restarting and again before reporting recovery success. Files
+originally absent must be absent, and unreadable state cannot count as successful
+recovery. Klipper `Ready` alone does not prove that restoration succeeded.
+
+Hardware-free regression command:
+`python -m unittest tests.unit.test_deployment_p1 tests.unit.test_stabilization_p2 -v`.
+
+### Maintenance decision after P1/P2 stabilization
+
+The two rollback routes had diverged: physical recovery rechecked restored bytes
+after restart, while configuration-only recovery could report success after an
+external edit during that restart. They now share the exact snapshot postcondition
+and check it before activation and before reporting recovery success. Their distinct
+physical/configuration orchestration remains separate.
+
+The remaining size and concentration of orchestration in `core/deployer.py`,
+`kace.py` and Studio's `main.py` are maintenance debt, not a demonstrated reason
+to split modules or unify state machines. No broad refactor is scheduled on size
+alone; revisit extraction when a concrete behavioral divergence requires it.
 
 ## 1. Overview of KACE Deployment
 
 After KACE generates `printer.cfg` and `macros.cfg` (stored locally in `~/kace/`), it offers two primary methods to push these configurations directly to your printer:
 
-1. **SSH / SFTP (Push to Host)**: Directly communicates with the host operating system (e.g. Raspberry Pi) filesystem and systemd manager.
+1. **SSH / SFTP (Push to Host)**: Transfers configuration through the host filesystem; Moonraker handles activation and readiness.
 2. **Moonraker API (Web Push & Control)**: Communicates with Moonraker (the API server for Klipper web interfaces like Mainsail/Fluidd) via HTTP.
 
 Additionally, KACE supports **local copying** and **USB/SD card export** for manual installations.
 
 ---
 
-## 2. SSH / SFTP Deployment
+## 2. Shared configuration transaction
 
-The SSH deployment mode directly targets the underlying Linux host filesystem.
+SSH/SFTP and Moonraker use `ConfigDeploymentTransaction`. Both read the root,
+managed includes and existing Moonraker configuration, build the same plan,
+present the semantic review and diff, and capture a persistent snapshot before
+writing. Snapshots contain original bytes and explicit evidence of absent files;
+they are not `.bak` renames or memory-only backups.
 
-### How It Works Under the Hood
-1. **Library**: KACE uses `paramiko` for SSH and SFTP protocols. This library is imported lazily. If it's not installed, KACE will automatically offer to install it via pip (with hash verification pointing to `requirements-ssh.txt`).
-2. **Host Verification**: Unlike basic scripts that insecurely auto-accept SSH keys (making them vulnerable to Man-in-the-Middle attacks), KACE implements a custom interactive host key policy (`_InteractiveHostKeyPolicy`). If a host key is unknown:
-   - It displays the key's algorithm and fingerprint.
-   - It asks the user for explicit confirmation before connecting.
-   - Once trusted, it saves the key to `~/.ssh/known_hosts` for future passwordless verification.
-3. **SFTP File Upload**:
-   - Establish SFTP channel over SSH.
-   - Expand relative destination paths (e.g., `~/printer_data/config/` is resolved relative to the user's home directory).
-   - If `printer.cfg` or `macros.cfg` already exists on the remote system, they are renamed to `.bak` files (backup).
-   - Upload new files using `sftp.put()`.
-4. **Service Restart**:
-   - First, KACE probes if Moonraker is active on port 7125.
-   - If Moonraker is reachable, Klipper is restarted gracefully via the Moonraker API (using a service restart request).
-   - If Moonraker is not reachable, KACE executes a remote shell command to restart the systemd unit:
-     ```bash
-     sudo -n systemctl restart klipper || systemctl --user restart klipper || systemctl restart klipper
-     ```
-5. **Post-Deployment Verification**:
-   - KACE loops for up to 10 seconds to verify Klipper restarted successfully.
-   - It checks systemd status (`systemctl is-active klipper`) and verifies via SFTP that files exist on the host.
-   - **On Success**: Backup `.bak` files are deleted automatically.
-   - **On Failure**: If Klipper fails to start or files are missing:
-     - It fetches logs using `journalctl -u klipper -n 50 --no-pager` (or user/systemd fallbacks) and prints them to assist in troubleshooting.
-     - **Automatic Rollback**: It connects back to SFTP, deletes the bad files, renames the `.bak` files back to their original names, and triggers another restart to ensure the printer returns to a working state.
+KACE revalidates the reviewed state after snapshot persistence and each file
+immediately before replacing it. Includes are uploaded before the root. Every
+planned artifact is read back and compared with its planned bytes. Activation
+uses Moonraker for both transports: firmware restart, Klipper service restart,
+or explicit deferred activation. SFTP has no automatic systemd fallback.
 
----
+After activation, KACE waits for stable Klipper Ready, checks the expected MCU
+build fingerprint when a firmware checkpoint is involved, and rechecks config
+bytes before committing. Deferred activation remains pending. A failure invokes
+recovery only for files still owned by KACE's attempted writes; external edits
+are preserved and reported as conflicts. Restored bytes are checked before and
+after the recovery restart. The physical deployment route has equivalent upload
+and post-activation checks.
 
-## 3. Moonraker API Deployment
+These checks detect changes between workflow stages. Remote HTTP/SFTP APIs do
+not provide atomic compare-and-swap against arbitrary external editors: avoid
+editing configuration during deployment. A conflict requires operator review;
+KACE does not claim successful recovery when another writer's content survives.
 
-The Moonraker REST API deployment utilizes the official HTTP API provided by Moonraker to manage configurations.
+## 3. Calibration and generated macros
 
-### How It Works Under the Hood
-1. **Library**: KACE uses Python’s built-in `urllib` library. This ensures zero external dependencies are required for HTTP deployment, making KACE extremely lightweight.
-2. **Authentication**: If your Moonraker instance requires an API key, you can provide it. KACE sends it securely via the `X-Api-Key` header.
-   - *Security warning*: KACE warns the user if they input an API key over unencrypted HTTP, prompting confirmation before proceeding.
-3. **Backup Mechanism**:
-   - Queries `server/files/list?root=config` to verify if files already exist.
-   - If files exist, KACE downloads `printer.cfg` and `macros.cfg` via GET requests:
-     ```http
-     GET /server/files/config/printer.cfg
-     ```
-   - These backups are stored **in-memory** during the transition.
-4. **Multipart File Upload**:
-   - Uploads files using a manually constructed `multipart/form-data` payload (to avoid external dependencies like `requests`).
-   - Endpoint:
-     ```http
-     POST /server/files/upload
-     ```
-     With form fields `root="config"` and the file binary.
-5. **Granular Restart Options**:
-   The user is prompted to select a restart behavior:
-   - **Firmware Restart (`firmware`)**: Triggers `POST /printer/firmware_restart`. This reloads Klipper configurations and restarts the MCU connection. Equivalent to sending the `FIRMWARE_RESTART` gcode.
-   - **Klipper Service Restart (`service`)**: Triggers `POST /machine/services/restart?service=klipper`. Restarts the host systemd service via Moonraker's OS manager.
-   - **Skip (`skip`)**: Does not issue any restart commands.
-6. **Post-Deployment Verification**:
-   - Loops for 10 seconds checking `GET /printer/info`.
-   - Verifies the state changes to `"ready"`.
-   - Queries `GET /server/files/list?root=config` to ensure the uploaded files are present.
-   - **On Failure / Error State**:
-     - **Automatic Rollback**: The in-memory backups are written to temporary files on the host computer and uploaded back to Moonraker. A restart command is sent to restore the previous working state.
+Klipper `SAVE_CONFIG` calibration values must remain effective. KACE keeps
+calibratable defaults (heater PID, probe offset, endstop position and input
+shaper settings) in its marked root block rather than in generated includes.
+Existing autosave values suppress corresponding generated defaults. Klipper can
+then comment root values out on a later SAVE_CONFIG without include conflicts.
+The semantic review considers root calibration and effective autosave values.
+A saved heater calibration conflicting with a newly selected control mode
+requires explicit resolution before deployment.
 
----
+A macros artifact is loaded only when the current generated configuration
+includes it. An old `~/kace/macros.cfg` is not implicitly reactivated by a later
+run that omitted macros. User-owned includes retain their existing ownership.
 
-## 4. SSH vs. Moonraker API: A Detailed Comparison
+## 4. Choosing the transport
 
-| Feature | SSH / SFTP Deployment | Moonraker API Deployment |
-| :--- | :--- | :--- |
-| **Dependencies** | Requires `paramiko` (installed dynamically) | Standard library only (`urllib`) |
-| **Credentials Needed**| OS Username and Password / SSH Key | Moonraker IP/Port and optional API Key |
-| **Security** | Safe SSH key verification, but exposes OS credentials | Uses API keys; warns on unencrypted HTTP |
-| **Restart Capability**| Restarts via Moonraker or fallback Linux commands | Can restart Firmware (graceful) or Klipper Service |
-| **Troubleshooting** | Fetches `journalctl` host systemd logs on failure | Limited to state message returned by Moonraker |
-| **Backup Storage** | Renamed `.bak` files on the host filesystem | Temporary in-memory download on client |
-| **Fallback System** | Rolls back via SFTP filesystem rename | Rolls back via uploading in-memory backups |
-| **Reliability** | Works even if Moonraker is completely down | Requires Moonraker API service to be functional |
+| Property | SSH/SFTP | Moonraker |
+| --- | --- | --- |
+| Upload access | OS account, verified SSH host key, Paramiko | Moonraker endpoint and optional API key |
+| File destination | Explicit host configuration directory | Moonraker config root |
+| Activation and Ready checks | Moonraker | Moonraker |
+| Recovery | Preserve live files and durable snapshot; manual reconciliation when restoration is needed | Same conservative recovery policy via HTTP |
+| Publication | Atomic creation of absent files only; replacements require manual application | Reviewed proposal requires manual application |
+| API unavailable | Cannot bind destination to active Klipper; deployment stops | Cannot review or confirm activation |
 
----
+Unknown SSH host keys require explicit fingerprint confirmation and are stored
+in known_hosts. API keys sent over unencrypted HTTP require confirmation.
+Neither route claims success from systemd status alone or automatically fetches
+journalctl logs. A Moonraker connection failure may offer the SFTP transport;
+this changes file transfer, not the activation authority.
 
-## 5. What is the Best Way to Deploy?
+## 5. Firmware staging and first installation
 
-### The Recommended Path: **Moonraker API**
-For 95% of setups, **Moonraker API is the best choice**. 
+The legacy builder serializes use of its shared Klipper checkout through artifact
+publication and rejects build inputs that changed during compilation. USB serial
+bridges may retain their Arduino-style by-id name after flashing; accepting one
+requires the contracted bridge identity and positive evidence of the originally
+selected physical device. The final MCU fingerprint check is still required.
 
-#### Why Moonraker is preferred:
-* **Minimal Privileges**: You don't need to share Linux OS credentials (e.g., username/password for SSH) with KACE. You only need the API key or local network access.
-* **Graceful restarts**: In Klipper, most configuration changes only require a **Firmware Restart** (`FIRMWARE_RESTART`), which reloads the configuration in seconds without restarting the host service. SSH usually defaults to a service restart, which is slower and drops connection to other services.
-* **Compatibility**: Moonraker manages the directories internally (handling the virtual `config` root), meaning KACE doesn't need to know the exact path structure (e.g. `~/printer_data/config` vs `~/klipper_config` vs `~/.config`).
-* **Zero Overhead**: Does not require compiling or downloading compilation libraries like `paramiko`.
+During first installation, the opt-in BoardContract SD path may produce a
+`MCU_REENUMERATED` proof while configuration is still absent. That proof is not
+`VERIFIED`; the main workflow continues through generation and the configuration
+transaction, which verifies the running firmware before completion. Standalone
+physical execution retains its full Klipper/fingerprint verification behavior.
 
-### When to use SSH Fallback:
-* **Initial Setup / Stuck Service**: If Klipper/Moonraker is crashed, frozen, or has not been fully configured yet, SSH can access the host even when the API is dead.
-* **Deep Debugging**: When Klipper fails to start due to a major system or driver error, KACE's SSH mode can fetch systemd `journalctl` logs. The Moonraker API cannot provide these detailed OS-level system logs if the daemon is failing to initialize.
-* **Multi-Instance OS Configs**: If you run complex custom service wrappers that require physical OS interaction.
+The legacy editor's MCU/offset fields are translated to writable Klipper
+Kconfig choices before `olddefconfig`. Resolution must retain every requested
+choice and application address; unsupported or ambiguous targets fail closed.
+Build fingerprints use Klipper's `buildcommands.py --extra` API and are checked
+in the binary metadata before publication (including UF2 and Intel HEX payloads).
+Runtime verification accepts the exact build marker as Klipper's version suffix.
 
----
+Final configuration verification includes unchanged reviewed files. Explicit
+active calibration overrides retain precedence over older SAVE_CONFIG values;
+generated defaults do not override saved calibration. Installer recovery leaves
+the original runtime untouched when its backup rename fails, and retains both
+transaction directories if restoration fails.
 
-## 6. How KACE Combines Both (Hybrid Fallback)
-KACE is designed to be resilient. When you run a Moonraker deployment:
-1. It tries to connect to the Moonraker REST API.
-2. If Moonraker is unreachable (e.g., service is down or blocked), KACE automatically prompts you: 
-   > *"Would you like to fall back to SSH deployment instead?"*
-3. If accepted, KACE asks for your SSH credentials and leverages the SSH pipeline to copy the files and reboot Klipper via systemd.
+STM32 legacy builds require an explicit board reference clock. The exact Octopus
+v1.1 F446/F429 selections use the pinned upstream 12/8 MHz crystal requirements;
+other legacy STM32 boards require an operator selection and cannot guess in auto
+mode. The selected clock survives real Kconfig resolution and enters build identity.
+Deployment profiles understand resolved MCU models and application addresses.
+
+Checkpoint artifact hashes come from immutable build identity, never from
+re-baselining a potentially replaced output file. Staged/transformed hashes and
+sizes must agree before checkpoint publication, and contradictory saved evidence
+is rejected on resume. Missing generated printer.cfg is regenerated from the
+verified checkpoint without repeating firmware compilation or flashing.
+
+## Conditional publication and final readiness gates
+
+Forward publication has the same concurrency requirement as recovery. Local and
+SFTP transports can atomically create a previously absent target without replacing
+a file that appeared meanwhile. They cannot condition replacement on its previous
+contents; Moonraker uploads cannot condition either operation. A plan containing
+an unsupported write is rejected as a whole before any live write or firmware
+action. The reviewed proposed bytes are retained in a `*-proposed` snapshot using
+the filename/metadata layout described above. Coordinate with other editors,
+compare current files, apply the intended changes manually, then rerun KACE and
+select activation. Offline export to a new directory still supports publication.
+
+Preflight reads explicit relative user includes recursively and reviews their
+actual linear precedence, matching Klipper. Included files remain user-owned and
+are revalidated through activation. Missing, cyclic, wildcard, absolute and
+out-of-root includes fail closed; enumerate wildcard dependencies explicitly
+before retrying. An include cannot override the selected MCU serial. SFTP checks
+the destination's resolved `printer.cfg` against Moonraker `/printer/info`'s
+active `config_file`; Moonraker checks its `config` file root against that path.
+Unavailable or mismatched activation evidence prevents deployment.
+
+Bootstrap power recovery likewise preserves `moonraker.conf`, `power.json` and
+their adjacent `.kace-power-backup.*` backups. It reports prior absence or each
+backup path and requires manual recovery when bytes differ, without restarting
+Moonraker under a false restoration claim.
+
+AVRDUDE consumes the exact bytes rehashed after operator confirmation through
+stdin (`flash:w:-:i`); it never reopens the staged filename. Legacy Octopus v1.1
+F446/F429 verification accepts only the pinned Kconfig model spellings for those
+same variants. Model aliases do not weaken physical identity checks, and a build
+for another model cannot advance the original hardware checkpoint.

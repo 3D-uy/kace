@@ -171,7 +171,7 @@ class TestE2ERuntimeFlow(unittest.TestCase):
         # Create a temp file representing the generated config
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_file = os.path.join(tmpdir, "printer.cfg")
-            with open(cfg_file, "w") as f:
+            with open(cfg_file, "w", encoding="utf-8") as f:
                 f.write(generated_cfg)
                 
             # Mock core.menu functions used by deploy_moonraker

@@ -191,11 +191,11 @@ class LocalExportBoundaryTests(unittest.TestCase):
             with open(os.path.join(destination, "printer.cfg"), "wb") as output:
                 output.write(b"[gcode_macro USER]\ngcode: M117 keep\n")
             with patch("core.deployer.os.path.expanduser", side_effect=lambda p: p.replace("~/", home + os.sep)):
-                self.assertTrue(_copy_artifacts({}, destination, "config"))
+                self.assertFalse(_copy_artifacts({}, destination, "config"))
             with open(os.path.join(destination, "printer.cfg"), "rb") as source:
                 root = source.read()
         self.assertIn(b"[gcode_macro USER]", root)
-        self.assertIn(b"kace/generated-hardware.cfg", root)
+        self.assertEqual(root, b"[gcode_macro USER]\ngcode: M117 keep\n")
 
     def test_explicit_firmware_path_is_copied(self):
         with tempfile.TemporaryDirectory() as source_dir, tempfile.TemporaryDirectory() as destination:
@@ -315,8 +315,9 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
 
     @patch("core.deployer._preflight_check", return_value=True)
     @patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", b"[mcu]\n[printer]\n", None))
+    @patch("core.config_transaction.MoonrakerConfigTransport.validate_activation_target")
     @patch("core.config_transaction.MoonrakerConfigTransport.read_files", side_effect=ConnectionError("offline"))
-    def test_backup_read_failure_prevents_firmware_action(self, _read, _generated, _preflight):
+    def test_backup_read_failure_prevents_firmware_action(self, _read, _target, _generated, _preflight):
         user = self._user()
         result = deploy_firmware_installation(user)
         self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
@@ -333,6 +334,8 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
 
         with patch("core.deployer._preflight_check", return_value=True), \
                 patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", generated, None)), \
+                patch("core.config_transaction.MoonrakerConfigTransport.validate_activation_target"), \
+                patch("core.config_transaction.MoonrakerConfigTransport.supports_conditional_write", return_value=True), \
                 patch("core.config_transaction.MoonrakerConfigTransport.read_files", side_effect=lambda names: {n: files.get(n) for n in names}), \
                 patch("core.deployer._interactive_configuration_review", side_effect=approve), \
                 patch("core.snapshot.create_snapshot") as snapshot, \
@@ -355,6 +358,8 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, \
                 patch("core.deployer._preflight_check", return_value=True), \
                 patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", generated, None)), \
+                patch("core.config_transaction.MoonrakerConfigTransport.validate_activation_target"), \
+                patch("core.config_transaction.MoonrakerConfigTransport.supports_conditional_write", return_value=True), \
                 patch("core.config_transaction.MoonrakerConfigTransport.read_files", side_effect=lambda names: {n: files.get(n) for n in names}), \
                 patch("core.deployer._interactive_configuration_review", return_value=True), \
                 patch("core.snapshot.create_snapshot", side_effect=lambda originals, **kwargs: create_snapshot(originals, persist_root=root, **kwargs)), \

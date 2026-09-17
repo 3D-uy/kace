@@ -24,6 +24,7 @@ from firmware.deployment.profiles import (
     DeploymentProfileError,
     load_profiles,
 )
+from core.translations import get_lang, set_lang
 
 
 _DEFAULT = object()
@@ -168,6 +169,41 @@ class FirmwareDeploymentTests(unittest.TestCase):
             self.assertTrue(manifest["deployment"]["profile"]["fallback"])
             self.assertEqual(events[-1]["state"], "ARTIFACT_READY")
 
+    def test_manual_deployment_events_follow_selected_spanish_language(self):
+        events = []
+        previous_language = get_lang()
+        try:
+            set_lang("Español")
+            with tempfile.TemporaryDirectory() as root:
+                source = write_artifact(root)
+                service = FirmwareDeploymentService(
+                    output_dir=root, event_sink=events.append
+                )
+                plan = service.plan(
+                    artifact(source),
+                    DeploymentTarget("generic-unknown.cfg", "stm32g0b1"),
+                    DeploymentMethodId.MANUAL,
+                )
+                prepared = service.prepare(plan)
+                result = service.execute(prepared)
+        finally:
+            set_lang(previous_language)
+
+        self.assertEqual(result.status, DeploymentStatus.ACTION_REQUIRED)
+        self.assertEqual(
+            [event["detail"] for event in events[:4]],
+            [
+                "Despliegue MANUAL planificado",
+                "Preparando el artefacto de despliegue",
+                "klipper.bin listo",
+                "Ejecutando el despliegue MANUAL",
+            ],
+        )
+        self.assertIn("está preparado", events[-1]["detail"])
+        instructions = events[-2]["data"]["instructions"]
+        self.assertTrue(instructions)
+        self.assertIn("No existe una estrategia exacta", instructions[0]["text"])
+
     def test_prepare_only_never_copies_to_arbitrary_media_or_reports_success(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as media:
             source = write_artifact(root)
@@ -301,7 +337,8 @@ class FirmwareDeploymentTests(unittest.TestCase):
         self.assertEqual(result.status, DeploymentStatus.FLASHED)
         command = runner.call_args.args[0]
         self.assertEqual(command[:5], ["avrdude", "-p", "atmega2560", "-c", "wiring"])
-        self.assertIn("klipper.elf.hex:i", command[-1])
+        self.assertEqual("flash:w:-:i", command[-1])
+        self.assertIsInstance(runner.call_args.kwargs["input"], bytes)
         self.assertNotIn("shell", runner.call_args.kwargs)
         self.assertEqual(runner.call_args.kwargs["timeout"], 120)
 

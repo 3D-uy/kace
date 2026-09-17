@@ -115,20 +115,18 @@ def discover_mcu_hardware(interactive=True):
             klipper_ports = [p for p in ports if "klipper" in p.lower()]
             choice = klipper_ports[0] if klipper_ports else ports[0]
 
-        context["mcu_path"] = choice
+        return mcu_context_from_path(choice)
 
-        # Parse MCU chip name and connection type from the symlink name
-        # e.g. usb-Klipper_stm32f446xx_1D003600105350534E303620-if00
-        #      usb-Klipper_lpc1769_16A0FF0AA8943BAF26B5685CC22000F5-if00
-        match = re.search(r'(usb|can|uart)[_-]Klipper_([a-zA-Z0-9]+)', choice, re.IGNORECASE)
-        if match:
-            context["hint"] = match.group(1).lower()
-            context["derived_mcu"] = match.group(2).lower()
-        else:
-            # Unrecognised path — derive hint from device name only
-            if "usb" in choice.lower() or "ttyUSB" in choice or "ttyACM" in choice:
-                context["hint"] = "usb"
-            elif "can" in choice.lower():
-                context["hint"] = "can"
 
-        return context
+def mcu_context_from_path(choice):
+    """Parse an explicitly selected path without selecting another device."""
+    context = {"mcu_path": choice, "derived_mcu": None, "hint": None}
+    match = re.search(r'(usb|can|uart)[_-]Klipper_([a-zA-Z0-9]+)', choice, re.IGNORECASE)
+    if match:
+        context["hint"] = match.group(1).lower()
+        context["derived_mcu"] = match.group(2).lower()
+    elif "usb" in choice.lower() or "ttyUSB" in choice or "ttyACM" in choice:
+        context["hint"] = "usb"
+    elif "can" in choice.lower():
+        context["hint"] = "can"
+    return context

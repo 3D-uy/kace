@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ from core.firmware_workflow import (
     FirmwareWorkflowError,
     FirmwareWorkflowState,
     create_checkpoint,
+    checkpoint_revision,
     deployment_blockers,
     enforce_deployment_invariants,
     load_checkpoint,
@@ -20,6 +22,16 @@ from core.firmware_workflow import (
     verify_running_firmware,
     write_checkpoint,
 )
+from core.mcu_monitor import McuIdentity
+
+
+def physical_identity(path, port="usb-1", serial="original"):
+    return McuIdentity(path, "/dev/ttyACM1", physical_port=port,
+                       vendor_id="1d50", model_id="614e", serial=serial)
+
+
+def identity_reader():
+    return SimpleNamespace(read=lambda path: physical_identity(path))
 
 
 def base_user_data():
@@ -33,7 +45,7 @@ def base_user_data():
     }
 
 
-def artifact(root: Path, *, strategy="SD_CARD", method="MANUAL"):
+def artifact(root: Path, *, strategy="SD_CARD", method="MANUAL", model="lpc1769"):
     path = root / ("firmware.bin" if strategy == "SD_CARD" else "klipper.uf2")
     path.write_bytes(b"verified firmware payload")
     return {
@@ -45,14 +57,14 @@ def artifact(root: Path, *, strategy="SD_CARD", method="MANUAL"):
         "strategy": strategy,
         "instructions": [{"id": "copy", "text": f"Copy {path.name}"}],
         "build": {
-            "mcu": "lpc1769",
+            "mcu": model,
             "firmware_identity": {"reported_version": "kace-b1-" + "2" * 32},
         },
     }
 
 
 def awaiting_flash(root: Path):
-    checkpoint = create_checkpoint(base_user_data())
+    checkpoint = create_checkpoint(base_user_data(), identity_reader=identity_reader())
     checkpoint = transition_checkpoint(
         checkpoint, FirmwareWorkflowState.ARTIFACT_READY, artifact=artifact(root)
     )
@@ -104,6 +116,7 @@ class FirmwareWorkflowTests(unittest.TestCase):
                 checkpoint,
                 detector=lambda: {"derived_mcu": "lpc1769", "mcu_path": serial},
                 flash_evidence=True,
+                identity_reader=identity_reader(),
             )
         self.assertEqual(observed["mcu_path"], serial)
         self.assertEqual(verified["state"], FirmwareWorkflowState.MCU_VERIFIED.value)
@@ -136,6 +149,7 @@ class FirmwareWorkflowTests(unittest.TestCase):
                 checkpoint,
                 detector=lambda: {"derived_mcu": "lpc1769", "mcu_path": serial},
                 flash_evidence=True,
+                identity_reader=identity_reader(),
             )
         checkpoint = transition_checkpoint(
             checkpoint, FirmwareWorkflowState.CONFIG_GENERATED
@@ -146,6 +160,8 @@ class FirmwareWorkflowTests(unittest.TestCase):
         checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.DEPLOYING)
         expected = "kace-b1-" + "2" * 32
         self.assertEqual(verify_running_firmware(checkpoint, {"mcu": expected}), expected)
+        full_version = "v0.13.0-734-gfe4eb865-20260917-host-" + expected
+        self.assertEqual(verify_running_firmware(checkpoint, {"mcu": full_version}), full_version)
         with self.assertRaisesRegex(FirmwareWorkflowError, "expected compiled build"):
             verify_running_firmware(checkpoint, {"mcu": "old-firmware"})
 
@@ -168,7 +184,9 @@ class FirmwareWorkflowTests(unittest.TestCase):
         path.write_text(json.dumps(payload), encoding="utf-8")
         with self.assertRaises(CheckpointCorrupt):
             load_checkpoint(str(path))
-        write_checkpoint(checkpoint, str(path))
+        with self.assertRaises(FirmwareWorkflowError):
+            write_checkpoint(checkpoint, str(path))
+        write_checkpoint(checkpoint, str(path), expected_revision=checkpoint_revision(str(path)))
         with self.assertRaises(CheckpointIncompatible):
             load_checkpoint(str(path), current_hardware={"derived_mcu": "stm32f103"})
         verified = transition_checkpoint(checkpoint, FirmwareWorkflowState.VERIFYING_MCU)

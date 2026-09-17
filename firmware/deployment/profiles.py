@@ -251,15 +251,32 @@ def profile_artifact_blockers(
 
     identity = getattr(artifact, "firmware_identity", None)
     values = _config_values(getattr(identity, "canonical_config", ""))
-    if values.get("CONFIG_MCU") != profile.config_mcu:
+    # CONFIG_MCU is Klipper's resolved model, not its architecture selector.
+    resolved_mcu = values.get("CONFIG_MCU", "")
+    architecture_flags = {"avr": "CONFIG_MACH_AVR", "stm32": "CONFIG_MACH_STM32",
+                          "lpc176x": "CONFIG_MACH_LPC176X", "rp2040": "CONFIG_MACH_RPXXXX"}
+    resolved = values.get(architecture_flags.get(profile.config_mcu, "")) == "y"
+    model_matches = any(resolved_mcu.startswith(pattern) for pattern in profile.mcu_patterns)
+    if not (resolved and model_matches) and resolved_mcu != profile.config_mcu:
         blockers.append(
             f"build CONFIG_MCU={values.get('CONFIG_MCU')!r} does not match {profile.config_mcu!r}"
         )
     expected_offset = profile.bootloader_offset
     actual_offset = values.get("CONFIG_FLASH_START")
+    if resolved and "CONFIG_FLASH_APPLICATION_ADDRESS" in values:
+        try:
+            address = int(values["CONFIG_FLASH_APPLICATION_ADDRESS"], 0)
+            if profile.config_mcu == "stm32":
+                address -= 0x08000000
+            actual_offset = hex(address)
+        except ValueError:
+            blockers.append("invalid resolved application address")
     if expected_offset is not None:
         if expected_offset.kind is BootloaderOffsetKind.NOT_APPLICABLE:
-            if actual_offset is not None:
+            if profile.config_mcu == "rp2040" and resolved:
+                if actual_offset != "0x10000100":
+                    blockers.append("RP2040 application address differs from its boot stage")
+            elif actual_offset is not None:
                 blockers.append("build unexpectedly defines CONFIG_FLASH_START")
         elif actual_offset != str(expected_offset.kconfig_value).lower():
             blockers.append(

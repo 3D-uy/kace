@@ -797,6 +797,41 @@ UI_STRINGS: dict = {
         "Español":   "Se canceló el flujo manual de firmware.",
         "Português": "O fluxo manual de firmware foi cancelado.",
     },
+    "deployment.event.planned": {
+        "English":   "{method} deployment planned",
+        "Español":   "Despliegue {method} planificado",
+        "Português": "Implantação {method} planejada",
+    },
+    "deployment.event.preparing": {
+        "English":   "Preparing deployment artifact",
+        "Español":   "Preparando el artefacto de despliegue",
+        "Português": "Preparando o artefato de implantação",
+    },
+    "deployment.event.ready": {
+        "English":   "{filename} ready",
+        "Español":   "{filename} listo",
+        "Português": "{filename} pronto",
+    },
+    "deployment.event.executing": {
+        "English":   "Executing {method} deployment",
+        "Español":   "Ejecutando el despliegue {method}",
+        "Português": "Executando a implantação {method}",
+    },
+    "deployment.manual.ready_detail": {
+        "English":   "{filename} is ready for manual installation",
+        "Español":   "{filename} está listo para la instalación manual",
+        "Português": "{filename} está pronto para a instalação manual",
+    },
+    "deployment.manual.copied_detail": {
+        "English":   "{filename} copied to {destination}",
+        "Español":   "{filename} copiado en {destination}",
+        "Português": "{filename} copiado para {destination}",
+    },
+    "deployment.manual.prepare_only_detail": {
+        "English":   "{filename} is prepared at {path}; KACE has no safe automatic or removable-media flash procedure for this profile",
+        "Español":   "{filename} está preparado en {path}; KACE no dispone de un procedimiento seguro de flasheo automático ni mediante un medio extraíble para este perfil",
+        "Português": "{filename} está preparado em {path}; o KACE não dispõe de um procedimento seguro de gravação automática nem por mídia removível para este perfil",
+    },
     "deployment.prepare_failed": {
         "English":   "Could not prepare firmware deployment: {error}",
         "Español":   "No se pudo preparar el despliegue de firmware: {error}",

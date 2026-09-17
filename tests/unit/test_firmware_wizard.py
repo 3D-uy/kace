@@ -86,6 +86,7 @@ class TestFirmwareWizard(unittest.TestCase):
     ):
         mock_select.side_effect = [
             t("builder.edit_proc"),
+            "8000000",
             t("builder.compile_now"),
             "none",
         ]
@@ -117,6 +118,7 @@ class TestFirmwareWizard(unittest.TestCase):
         self, mock_build, mock_input, mock_select, _mock_confirm
     ):
         mock_select.side_effect = [
+            "8000000",
             t("builder.edit_arch"),
             t("builder.compile_now"),
             "none",
@@ -217,6 +219,7 @@ class TestFirmwareWizard(unittest.TestCase):
             "stm32",
             "No bootloader (0x0)",
             "USB",
+            "8000000",
             "🚀  Compile Firmware Now",
             "none"
         ]
@@ -255,6 +258,7 @@ class TestFirmwareWizard(unittest.TestCase):
         # Third select: deploy method "none"
         mock_select.side_effect = [
             "8KiB bootloader (0x2000)",
+            "8000000",
             "🚀  Compile Firmware Now",
             "none"
         ]
@@ -289,6 +293,7 @@ class TestFirmwareWizard(unittest.TestCase):
     ):
         """The wizard plans/stages firmware but defers physical execution."""
         mock_select.side_effect = [
+            "8000000",
             t("builder.compile_now"),
             "MANUAL",
         ]

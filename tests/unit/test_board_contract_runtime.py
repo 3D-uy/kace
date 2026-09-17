@@ -278,6 +278,21 @@ class BoardContractRuntimeTests(unittest.TestCase):
         self.assertEqual(source.proof.digest, result.artifact.build_proof_digest)
         self.assertEqual(source.proof.digest, result.deployment_plan.build_proof_digest)
 
+    def test_opt_in_sd_wizard_continues_after_physical_reenumeration(self):
+        from types import SimpleNamespace
+        alias, _, _, _, mcu = MIGRATED[0]
+        bundle = self._bundle(alias, mcu)
+        physical = SimpleNamespace(final_state=SimpleNamespace(value="MCU_REENUMERATED"), digest="test-proof")
+        data = {"board": alias, "mcu_type": mcu, "mcu_hint": "uart"}
+        with patch.dict("os.environ", {"KACE_BOARD_CONTRACT_SD_DEPLOY": "1"}), \
+             patch("core.firmware_wizard.yes_no", return_value=True), \
+             patch("core.firmware_wizard.build_board_contract_runtime", return_value=bundle), \
+             patch("core.board_contract_deployment.run_sd_card_contract_deployment", return_value=physical) as deploy:
+            result = run_firmware_wizard(data)
+        self.assertEqual(result.outcome, WorkflowOutcome.SUCCESS)
+        deploy.assert_called_once_with(data, bundle.deployment_plan, defer_firmware_verification=True)
+        self.assertIn("awaits configuration activation", result.detail)
+
     @patch("core.firmware_wizard.FirmwareDeploymentService")
     @patch("core.firmware_wizard.build_firmware_orchestrator")
     @patch("core.firmware_wizard._resolve_firmware_configuration")

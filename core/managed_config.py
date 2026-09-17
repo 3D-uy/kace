@@ -8,6 +8,7 @@ pure: callers supply remote bytes and receive immutable artifacts plus a diff.
 from __future__ import annotations
 
 import difflib
+import posixpath
 import re
 from dataclasses import dataclass
 from typing import Mapping, Optional
@@ -45,9 +46,12 @@ _PRESERVED_OPTIONS = {
     },
     "heater_bed": {"pid_kp", "pid_ki", "pid_kd"},
     "force_move": {"enable_force_move"},
+    "probe": {"z_offset"},
+    "bltouch": {"z_offset"},
+    "input_shaper": {"shaper_freq_x", "shaper_freq_y", "shaper_type_x", "shaper_type_y"},
 }
 _PRESERVED_PREFIX_OPTIONS = {
-    "stepper_": {"microsteps", "rotation_distance", "gear_ratio", "homing_speed"},
+    "stepper_": {"microsteps", "rotation_distance", "gear_ratio", "homing_speed", "position_endstop"},
     "tmc": {"run_current", "hold_current", "stealthchop_threshold", "interpolate"},
 }
 
@@ -83,6 +87,7 @@ class ManagedConfigPlan:
     artifacts: tuple[PlannedConfigArtifact, ...]
     legacy_migration: bool = False
     warnings: tuple[str, ...] = ()
+    source_files: tuple[tuple[str, Optional[bytes]], ...] = ()
 
     @property
     def remote_names(self) -> tuple[str, ...]:
@@ -116,14 +121,44 @@ def _section_options(text: str) -> dict[str, dict[str, str]]:
         options: dict[str, str] = {}
         header_end = text.find("\n", start, end)
         body = text[header_end + 1:end] if header_end >= 0 else ""
+        previous_option = None
+        option_indent = 0
         for line in body.splitlines():
             if not line.strip() or line.lstrip().startswith(("#", ";")):
                 continue
+            indent = len(line) - len(line.lstrip())
+            if previous_option is not None and indent > option_indent:
+                options[previous_option] += "\n" + line.strip()
+                continue
             match = re.match(r"^\s*([^:=#;]+?)\s*[:=]\s*(.*?)\s*(?:[#;].*)?$", line)
             if match:
-                options[match.group(1).strip().casefold()] = match.group(2).strip()
-        result[name.casefold()] = options
+                previous_option = match.group(1).strip().casefold()
+                option_indent = indent
+                options[previous_option] = match.group(2).strip()
+            else:
+                previous_option = None
+        result.setdefault(name.casefold(), {}).update(options)
     return result
+
+
+def _setting_loss_warnings(source: str, before: str, after: str) -> tuple[str, ...]:
+    """Expose replaced/removed settings in the normal pre-deployment review."""
+    planned = _section_options(after)
+    warnings = []
+    for section, options in _section_options(before).items():
+        if section.startswith("include "):
+            continue  # Expanded dependencies are not removed config sections.
+        if not options and section not in planned:
+            warnings.append(f"{source}: [{section}] will be removed.")
+        for option, value in options.items():
+            replacement = planned.get(section, {}).get(option)
+            if replacement == value:
+                continue
+            action = "removed" if replacement is None else f"replaced with {replacement!r}"
+            warnings.append(
+                f"{source}: [{section}] {option} = {value!r} will be {action}."
+            )
+    return tuple(warnings)
 
 
 def _preserved_names(section: str) -> set[str]:
@@ -219,7 +254,108 @@ def _remove_include(text: str, remote_name: str) -> str:
     return text
 
 
-def _reconcile_root(existing: str, generated: str, include_macros: bool) -> tuple[str, str, bool]:
+def _autosave_text(text: str) -> str:
+    return "\n".join(line[4:] for line in text.splitlines() if line.startswith("#*# "))
+
+
+def _root_calibration(generated: str, saved: str, active: str = "") -> tuple[str, str]:
+    """Keep SAVE_CONFIG-writable defaults in the root, outside includes.
+
+    Klipper comments options out of its root when saving; it cannot do that
+    inside an include. Existing autosave values must not be shadowed by defaults.
+    """
+    saved_options = _section_options(_autosave_text(saved))
+    active_options = _section_options(active)
+    fragments = []
+    for section, start, end in reversed(list(_section_spans(generated))):
+        folded = section.casefold()
+        options = _section_options(generated[start:end]).get(folded, {})
+        names = set(saved_options.get(folded, {}))
+        if folded in {"extruder", "heater_bed"} or folded.startswith("heater_generic "):
+            names.add("control")
+            if options.get("control", "").casefold() == "pid":
+                names.update({"control", "pid_kp", "pid_ki", "pid_kd"})
+            elif set(saved_options.get(folded, {})) & {"control", "pid_kp", "pid_ki", "pid_kd"}:
+                raise ValueError(f"[{section}] saved heater calibration conflicts with the selected control mode; resolve SAVE_CONFIG first")
+        if folded in {"probe", "bltouch"} or folded.startswith("probe "):
+            names.add("z_offset")
+        if folded.startswith("stepper_"):
+            names.add("position_endstop")
+        if folded == "input_shaper":
+            names.update({"shaper_freq_x", "shaper_freq_y", "shaper_type_x", "shaper_type_y"})
+        kept, moved = [], []
+        moving = False
+        for line in generated[start:end].splitlines(True):
+            match = re.match(r"^([^\s#;\[=:]+)\s*[:=]", line)
+            if match:
+                option = match.group(1).casefold()
+                moving = option in names
+                retain_default = (option not in saved_options.get(folded, {})
+                                  or (option in active_options.get(folded, {})
+                                      and options.get(option) == active_options[folded][option]))
+            elif line.strip() and not line[0].isspace():
+                moving = False
+            if moving:
+                if retain_default:
+                    moved.append(line)
+            else:
+                kept.append(line)
+        if moved:
+            fragments.insert(0, f"[{section}]\n" + "".join(moved).rstrip() + "\n")
+        generated = generated[:start] + "".join(kept) + generated[end:]
+    return generated, "\n".join(fragments)
+
+
+def config_includes(content: bytes, source: str):
+    """Resolve explicit relative includes; reject unreviewable path patterns."""
+    for line in content.decode("utf-8").splitlines():
+        # Klipper processes includes at column zero, stripping '#' first.
+        match = re.match(r"\[include ([^\]]+)\]", line.split("#", 1)[0])
+        if not match:
+            continue
+        spec = match.group(1).strip()
+        name = posixpath.normpath(posixpath.join(posixpath.dirname(source), spec))
+        if (not spec or spec.startswith("/") or "\\" in spec
+                or name == ".." or name.startswith("../") or ":" in spec
+                or any(char in spec for char in "*?[")):
+            raise ValueError(f"Include {spec!r} in {source} cannot be reviewed safely; use explicit files inside the config root")
+        yield line, name
+
+
+def effective_hardware_text(plan: ManagedConfigPlan, *, strict: bool = True) -> str:
+    """Expand includes in Klipper's linear order, including user-owned files."""
+    files = {name: value.decode("utf-8") for name, value in plan.source_files if value is not None}
+    files.update({item.remote_name: item.content.decode("utf-8") for item in plan.artifacts})
+    expanded_bytes = 0
+
+    def expand(name, stack=()):
+        nonlocal expanded_bytes
+        if name in stack or len(stack) >= 32:
+            raise ValueError(f"recursive or excessively nested include: {name}")
+        if name not in files:
+            if not strict:
+                return ""
+            raise ValueError(f"Include file was not read for review: {name}")
+        expanded_bytes += len(files[name].encode("utf-8"))
+        if expanded_bytes > 8 * 1024 * 1024:
+            raise ValueError("expanded configuration exceeds review limits")
+        includes = dict(config_includes(files[name].encode("utf-8"), name))
+        return "\n".join(expand(includes[line], (*stack, name)) if line in includes else line
+                         for line in files[name].splitlines()) + "\n"
+
+    text = expand(ROOT_REMOTE)
+    active = _section_options(text)
+    saved = _section_options(_autosave_text(files.get(ROOT_REMOTE, "")))
+    for section, options in saved.items():
+        missing = {key: value for key, value in options.items() if key not in active.get(section, {})}
+        if missing:
+            text += f"\n[{section}]\n" + "\n".join(
+                f"{key}: " + value.replace("\n", "\n    ") for key, value in missing.items()
+            ) + "\n"
+    return text
+
+
+def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: str = "", active: str = "") -> tuple[str, str, bool]:
     nl = _newline(existing or generated)
     generated, generated_includes = _extract_generated_includes(generated)
     owned = {name.casefold() for name, _, _ in _section_spans(generated)}
@@ -247,6 +383,9 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool) -> tupl
     }
     extra = [line for line in generated_includes if line[1:-1].casefold() not in existing_include_names]
     block = _managed_block(extra, include_macros, nl)
+    generated, calibration = _root_calibration(generated, saved, active)
+    if calibration:
+        block = block.replace(MANAGED_END, calibration.replace("\n", nl) + MANAGED_END)
     base = base.lstrip("\r\n")
     reconciled = block + (nl if base else "") + base
     if not reconciled.endswith(nl):
@@ -291,7 +430,8 @@ def build_managed_config_plan(
     )
     effective_macros = None if preserve_existing_macros else generated_macros
     root, generated, migrated = _reconcile_root(
-        existing_root, generated, effective_macros is not None
+        existing_root, generated, effective_macros is not None, save_config,
+        existing_hardware + "\n" + existing_root,
     )
     root += save_config
 
@@ -323,7 +463,20 @@ def build_managed_config_plan(
             existing_moonraker,
         ))
 
-    warnings: tuple[str, ...] = ()
+    # Compare the effective destination, including sections migrated from the
+    # user root. A retained setting must not be reported as lost just because
+    # its section moved into the managed include.
+    sources = tuple(remote_files.items())
+    # Missing sources may be supplied by a pure planner's caller later. Live
+    # semantic review always requires complete evidence (strict=True).
+    final_hardware = effective_hardware_text(ManagedConfigPlan(tuple(artifacts), source_files=sources), strict=False)
+    warnings = _setting_loss_warnings(ROOT_REMOTE, existing_root, final_hardware)
+    warnings += _setting_loss_warnings(HARDWARE_REMOTE, existing_hardware, final_hardware)
+    if effective_macros is not None and remote_files.get(MACROS_REMOTE) is not None:
+        warnings += _setting_loss_warnings(
+            MACROS_REMOTE, remote_files[MACROS_REMOTE].decode("utf-8", errors="strict"),
+            effective_macros.decode("utf-8", errors="strict"),
+        )
     if preserve_existing_macros and generated_macros is not None:
         warnings += (
             "Existing macros.cfg remains user-owned; generated starter macros were not deployed to avoid duplicate macro definitions.",
@@ -336,4 +489,5 @@ def build_managed_config_plan(
         tuple(artifacts),
         legacy_migration=migrated,
         warnings=warnings,
+        source_files=sources,
     )

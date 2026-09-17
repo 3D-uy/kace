@@ -21,7 +21,7 @@ import stat
 import tempfile
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from core.moonraker import (
     delete_config_file,
@@ -255,6 +255,38 @@ def capture_snapshot(
     )
 
 
+def rollback_file_owned(name: str, current: Optional[bytes], original: Optional[bytes], written: bytes) -> bool:
+    """Allow recovery only over our exact write; an original is already restored.
+
+    Unknown/partial content is not evidence of ownership. In particular, a
+    failed upload must never grant permission to overwrite an external edit.
+    """
+    if current == original:
+        return False
+    if current == written:
+        return True
+    raise RuntimeError(f"concurrent modification of {name}; current content preserved")
+
+
+def verify_snapshot_restored(
+    snapshot: DeploymentSnapshot,
+    current: Mapping[str, Optional[bytes]],
+    names: Iterable[str],
+) -> None:
+    """Shared recovery postcondition; an omitted read is never proven absence."""
+    for name in names:
+        if name not in current:
+            raise RuntimeError(f"rollback has no current-state evidence for {name}")
+        if name in snapshot.config_files:
+            if current[name] != snapshot.config_files[name]:
+                raise RuntimeError(f"rollback checksum mismatch for {name}")
+        elif name in snapshot.missing_files:
+            if current[name] is not None:
+                raise RuntimeError(f"rollback did not remove newly created {name}")
+        else:
+            raise RuntimeError(f"rollback has no original state for {name}")
+
+
 def restore_snapshot(
     snapshot: DeploymentSnapshot,
     host: str,
@@ -262,6 +294,7 @@ def restore_snapshot(
     *,
     api_key: Optional[str] = None,
     issue_restart: bool = True,
+    expected_files: Optional[Dict[str, bytes]] = None,
 ) -> List[str]:
     """Re-upload all files from a snapshot in safe order, then restart Klipper.
 
@@ -281,15 +314,33 @@ def restore_snapshot(
     issue_restart : bool
         If True (default), issue a FIRMWARE_RESTART after all files are uploaded.
         Set to False in tests or when the caller wants to control the restart.
+    expected_files : dict[str, bytes] | None
+        Transaction writes to verify against the original snapshot. The HTTP
+        API cannot restore conditionally and atomically: if any differs, preserve
+        the live state and report manual recovery without writes or restart.
+        None retains explicit, operator-requested snapshot restoration.
 
     Returns
     -------
     list[str]
-        Names of files that failed to upload.  An empty list means full success.
-        The restart is still attempted even if some files failed, to leave Klipper
-        in the best possible state with whatever was successfully restored.
+        Failed filenames or conflict details. An empty list means full success.
+        Transaction rollback suppresses restart on any restoration failure.
+        Explicit snapshot restore retains its best-effort restart behavior.
     """
     failed: List[str] = []
+
+    if expected_files is not None:
+        # Moonraker's public upload/delete endpoints have no atomic expected-
+        # content precondition. Preserve the live state instead of a racy restore.
+        from core.config_transaction import MoonrakerConfigTransport
+        try:
+            verify_snapshot_restored(snapshot,
+                MoonrakerConfigTransport(host, port, api_key).read_files(tuple(expected_files)),
+                tuple(expected_files))
+            return []
+        except Exception as exc:
+            return ["rollback conflict or automatic rollback unavailable: Moonraker has no atomic conditional restore; "
+                    f"current files preserved; manual recovery from {snapshot.storage_path}: {exc}"]
 
     # Build upload order: includes first, printer.cfg last.
     ordered = [f for f in snapshot.config_files if f != "printer.cfg"]
@@ -310,8 +361,8 @@ def restore_snapshot(
             ok, msg = upload_printer_cfg(host, port, tmp_path, filename=filename, api_key=api_key)
             if not ok:
                 failed.append(filename)
-        except Exception:
-            failed.append(filename)
+        except Exception as exc:
+            failed.append(f"{filename}: {exc}")
         finally:
             if tmp_path:
                 try:
@@ -325,8 +376,8 @@ def restore_snapshot(
             ok, _ = delete_config_file(host, port, filename, api_key=api_key)
             if not ok:
                 failed.append(filename)
-        except Exception:
-            failed.append(filename)
+        except Exception as exc:
+            failed.append(f"{filename}: {exc}")
 
     if issue_restart:
         try:

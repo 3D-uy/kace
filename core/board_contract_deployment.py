@@ -112,6 +112,7 @@ def run_sd_card_contract_deployment(
     verifier=None,
     relay_control=None,
     event_sink=None,
+    defer_firmware_verification=False,
 ):
     """Execute one typed plan and return its immutable DeploymentProof."""
     if not isinstance(plan, DeploymentPlan):
@@ -219,7 +220,10 @@ def run_sd_card_contract_deployment(
             if action == "confirm" and yes_no(
                 "Continue with MCU/Klipper verification now?", default=False
             ):
-                proof = executor.confirm_manual_power_cycle(session, confirmed=True)
+                proof = executor.confirm_manual_power_cycle(
+                    session, confirmed=True,
+                    defer_firmware_verification=defer_firmware_verification,
+                )
                 path = write_deployment_proof(proof, proof_directory)
                 user_data["board_contract_deployment_proof"] = proof
                 user_data["board_contract_deployment_proof_path"] = path

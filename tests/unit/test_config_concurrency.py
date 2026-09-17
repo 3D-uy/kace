@@ -215,7 +215,8 @@ class TestConfigConcurrency(unittest.TestCase):
             result = self.make(transport, root).run()
         self.assertEqual(result.state, ConfigTransactionState.COMMITTED)
         first_upload = next(i for i, call in enumerate(transport.calls) if call[0] == "upload")
-        self.assertEqual(sum(call[0] == "read" for call in transport.calls[:first_upload]), 3)
+        self.assertEqual(sum(call[0] == "read" for call in transport.calls[:first_upload]), 4)
+        self.assertEqual(transport.calls[first_upload - 1], ("read", ("kace/generated-hardware.cfg",)))
         self.assertEqual(result.snapshot.config_files["printer.cfg"], b"# initial\n")
 
     def test_edit_while_snapshot_is_persisted_aborts_before_first_write(self):
@@ -285,7 +286,8 @@ class TestConfigConcurrency(unittest.TestCase):
         self.assertEqual(result_a.state, ConfigTransactionState.COMMITTED)
         self.assertEqual(result_b.state, ConfigTransactionState.COMMITTED)
         self.assertLess(order.index("DONE"), order.index("second read"))
-        self.assert_no_remote_mutation(second)
+        self.assertFalse(any(c[0] in {"upload", "delete"} for c in second.calls))
+        self.assertIn(("restart", "firmware"), second.calls)
 
     def test_different_destinations_can_finish_while_first_snapshot_is_blocked(self):
         first = FakeTransport({"printer.cfg": b"# first\n"})

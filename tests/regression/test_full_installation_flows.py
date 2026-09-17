@@ -1,6 +1,7 @@
 """Filesystem-level bootstrap -> generation -> managed deployment regressions."""
 
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,6 +38,9 @@ class TestFullInstallationFlows(unittest.TestCase):
         self.config = os.path.join(self.temp.name, "printer_data", "config")
         os.makedirs(self.kace_home)
         os.makedirs(self.config)
+        # Existing UI/user include dependencies are part of the reviewed input.
+        Path(self.config, "mainsail.cfg").write_bytes(b"# simulated UI include\n")
+        Path(self.config, "user.cfg").write_bytes(b"# simulated user include\n")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -58,13 +62,28 @@ class TestFullInstallationFlows(unittest.TestCase):
             moonraker.write_text("[server]\nport: 7125\n", encoding="utf-8")
         reconcile_config_directory(self.config)
 
-    def _generate_and_deploy(self):
+    def _generate_and_manually_apply_proposal(self):
         output = os.path.join(self.kace_home, "printer.cfg")
         with (
             patch("os.path.expanduser", side_effect=self._expand),
             patch("core.menu.yes_no", return_value=True),
         ):
             generate_config(PARSED, dict(USER), output_path=output)
+            before = {p.relative_to(self.config): p.read_bytes() for p in Path(self.config).rglob("*") if p.is_file()}
+            proposals = set(Path(self.kace_home, "snapshots").glob("*-proposed"))
+            if _copy_artifacts(dict(USER), self.config, "config"):
+                return True
+            after = {p.relative_to(self.config): p.read_bytes() for p in Path(self.config).rglob("*") if p.is_file()}
+            self.assertEqual(before, after)  # Unsupported replacement wrote nothing.
+            new = set(Path(self.kace_home, "snapshots").glob("*-proposed")) - proposals
+            self.assertEqual(len(new), 1)
+            proposal = new.pop()
+            metadata = json.loads((proposal / "snapshot.json").read_text(encoding="utf-8"))
+            # Explicit operator application, in a fixture with no other writer.
+            for name in metadata["files"]:
+                target = Path(self.config, name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((proposal / name.replace("/", "__")).read_bytes())
             return _copy_artifacts(dict(USER), self.config, "config")
 
     def _read_outputs(self):
@@ -76,7 +95,7 @@ class TestFullInstallationFlows(unittest.TestCase):
 
     def test_bootstrap_generation_and_deployment_preserve_user_owned_content(self):
         self._bootstrap()
-        self.assertTrue(self._generate_and_deploy())
+        self.assertTrue(self._generate_and_manually_apply_proposal())
         output = self._read_outputs()
 
         self.assertIn(MANAGED_BEGIN, output["root"])
@@ -99,22 +118,23 @@ class TestFullInstallationFlows(unittest.TestCase):
             encoding="utf-8",
         )
         self._bootstrap()
-        self.assertTrue(self._generate_and_deploy())
+        self.assertTrue(self._generate_and_manually_apply_proposal())
         output = self._read_outputs()
 
         self.assertIn("enable_force_move: False", output["hardware"])
-        self.assertIn("pid_Kp: 31.5", output["hardware"])
+        self.assertIn("pid_Kp: 31.5", output["root"])
+        self.assertNotIn("pid_Kp:", output["hardware"])
         self.assertIn("[gcode_macro USER]", output["root"])
         self.assertIn("custom_option: custom_value", output["moonraker"])
         self.assertEqual(output["moonraker"].count("[file_manager]"), 1)
 
     def test_three_runs_are_byte_idempotent(self):
         self._bootstrap()
-        self.assertTrue(self._generate_and_deploy())
+        self.assertTrue(self._generate_and_manually_apply_proposal())
         first = self._read_outputs()
         for _ in range(2):
             self._bootstrap()
-            self.assertTrue(self._generate_and_deploy())
+            self.assertTrue(self._generate_and_manually_apply_proposal())
         self.assertEqual(self._read_outputs(), first)
         self.assertEqual(first["root"].count(MANAGED_BEGIN), 1)
 

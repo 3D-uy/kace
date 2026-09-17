@@ -23,6 +23,28 @@ class FirmwareIdentityError(RuntimeError):
     """Raised when a real build cannot be given a trustworthy identity."""
 
 
+def firmware_version_matches(actual: object, expected: str) -> bool:
+    """Match the unique build marker, including Klipper's version prefix."""
+    actual = str(actual or "")
+    if not re.fullmatch(r"kace-b1-[0-9a-f]{32}", expected):
+        return actual == expected  # Historical non-KACE version contracts.
+    markers = re.findall(r"kace-b1-[0-9a-f]+", actual)
+    return (markers == [expected] and (actual == expected or
+            (len(actual) > len(expected) + 1 and actual.endswith("-" + expected)
+             and not any(char.isspace() for char in actual))))
+
+
+def fingerprint_makefile(content: str, fingerprint: str) -> str:
+    """Use the pinned buildcommands API; reject upstream invocation drift."""
+    if not re.fullmatch(r"kace-b1-[0-9a-f]{32}", fingerprint):
+        raise FirmwareIdentityError("invalid firmware fingerprint format")
+    needle = "$(PYTHON) ./scripts/buildcommands.py -d $(OUT)klipper.dict"
+    if content.count(needle) != 1:
+        raise FirmwareIdentityError("validated Klipper buildcommands invocation drifted")
+    return content.replace(needle, "$(PYTHON) ./scripts/buildcommands.py "
+                           f"--extra=-{fingerprint} -d $(OUT)klipper.dict")
+
+
 @dataclass(frozen=True)
 class ToolchainIdentity:
     make_command: str
@@ -181,6 +203,10 @@ def _first_version_line(command: list[str], *, cwd: str, env: Mapping[str, str])
 def _compiler_for_config(canonical_config: str) -> str:
     match = re.search(r'^CONFIG_MCU="?([^"\n]+)"?$', canonical_config, re.MULTILINE)
     mcu = match.group(1) if match else ""
+    if mcu.startswith(("stm32", "lpc176", "rp20", "rp23", "sam", "atsam")):
+        return "arm-none-eabi-gcc"
+    if mcu.startswith(("atmega", "at90", "lgt8")):
+        return "avr-gcc"
     return {
         "avr": "avr-gcc",
         "stm32": "arm-none-eabi-gcc",

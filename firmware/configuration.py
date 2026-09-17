@@ -171,6 +171,10 @@ def validate_firmware_configuration(
 
     comparable_actual = dict(normalized)
     comparable_expected = dict(expected)
+    reference = comparable_actual.pop("CONFIG_CLOCK_REF_FREQ", None)
+    if reference is not None and (expected_arch != "stm32" or reference not in
+                                 {"8000000", "12000000", "16000000", "20000000", "24000000", "25000000", "1"}):
+        raise FirmwareConfigurationError("Invalid STM32 reference clock.")
     comparable_actual.pop("CONFIG_CLOCK_FREQ", None)
     comparable_expected.pop("CONFIG_CLOCK_FREQ", None)
     if comparable_actual != comparable_expected:
@@ -196,6 +200,77 @@ def validate_firmware_configuration(
 
 def render_config(config: Mapping[str, object]) -> str:
     return "".join(f"{key}={config[key]}\n" for key in sorted(config))
+
+
+def klipper_config(config: Mapping[str, object], processor: str) -> dict[str, str]:
+    """Translate the wizard's editing contract into writable Klipper choices.
+
+    CONFIG_MCU, CLOCK_FREQ and FLASH_APPLICATION_ADDRESS are derived outputs,
+    not selectors. Keep the editing API separate from the actual .config.
+    Resolution is checked again after olddefconfig, including unavailable choices.
+    """
+    values = validate_firmware_configuration(config, processor=processor)
+    arch = processor_architecture(processor)
+    model = processor.lower()
+    choices = {"CONFIG_LOW_LEVEL_OPTIONS": "y"}
+    machine = {"stm32": "STM32", "lpc176x": "LPC176X", "rp2040": "RPXXXX",
+               "avr": "AVR", "linux": "LINUX"}.get(arch)
+    if machine is None:
+        raise FirmwareConfigurationError(f"No verified Klipper selectors for {arch}")
+    choices[f"CONFIG_MACH_{machine}"] = "y"
+    if arch == "linux":
+        return choices
+    if arch == "stm32":
+        reference = values.get("CONFIG_CLOCK_REF_FREQ")
+        if reference is None:
+            raise FirmwareConfigurationError("An explicit board reference clock is required for STM32.")
+        clock = "INTERNAL" if reference == "1" else f"{int(reference) // 1000000}M"
+        choices[f"CONFIG_STM32_CLOCK_REF_{clock}"] = "y"
+        match = re.fullmatch(r"(stm32[a-z][0-9a-z]{3})(?:[a-z0-9]*)", model)
+        if not match:
+            raise FirmwareConfigurationError("An exact STM32 processor model is required")
+        selector = match.group(1).upper()
+        choices[f"CONFIG_MACH_{selector}"] = "y"
+        if model == "stm32f103x6":
+            choices["CONFIG_MACH_STM32F103x6"] = "y"
+    elif arch == "avr":
+        if not re.fullmatch(r"atmega\d+p?", model):
+            raise FirmwareConfigurationError("An exact AVR processor model is required")
+        choices[f"CONFIG_MACH_{model}"] = "y"
+    else:
+        if model not in {"lpc1768", "lpc1769", "rp2040"}:
+            raise FirmwareConfigurationError("An exact processor model is required")
+        choices[f"CONFIG_MACH_{model.upper()}"] = "y"
+    if arch in {"stm32", "lpc176x"}:
+        offset = int(values["CONFIG_FLASH_START"], 16)
+        prefix = "STM32" if arch == "stm32" else "LPC"
+        choices[f"CONFIG_{prefix}_FLASH_START_{offset:04X}"] = "y"
+    elif arch == "rp2040":
+        choices["CONFIG_RPXXXX_FLASH_START_0100"] = "y"
+    comm = communication_from_config(values)
+    transports = {
+        "stm32": {"usb": "STM32_USB_PA11_PA12", "uart": "STM32_SERIAL_USART1", "can": "STM32_CANBUS_PA11_PA12"},
+        "lpc176x": {"usb": "LPC_USB", "uart": "LPC_SERIAL_UART0_P03_P02", "can": "LPC_MMENU_CANBUS_P0_0_P0_1"},
+        "rp2040": {"usb": "RPXXXX_USB", "uart": "RPXXXX_SERIAL_UART0_PINS_0_1", "can": "RPXXXX_CANBUS"},
+        "avr": {"uart": "AVR_SERIAL_UART0", "usb": "AVR_SERIAL_UART0"},
+    }
+    transport = transports[arch].get(comm)
+    if transport is None:
+        raise FirmwareConfigurationError(f"No verified {comm} interface for {model}")
+    choices[f"CONFIG_{transport}"] = "y"
+    return choices
+
+
+def board_reference_clock(board: str, processor: str) -> Optional[str]:
+    """Exact upstream board facts; never infer a crystal from the MCU family."""
+    if board == "generic-bigtreetech-octopus-v1.1.cfg":
+        model = str(processor).lower()
+        if model in {"stm32f446", "stm32f446xx"}:
+            return "12000000"
+        if model in {"stm32f429", "stm32f429xx"}:
+            return "8000000"
+        raise FirmwareConfigurationError("Octopus v1.1 requires an exact F446 or F429 processor.")
+    return None
 
 
 def render_config_diff(before: Mapping[str, object], after: Mapping[str, object]) -> str:

@@ -179,6 +179,8 @@ class PowerControllerTests(TestCase):
                 )
             )
             stack.enter_context(patch("core.deployer._preflight_check", return_value=True))
+            stack.enter_context(patch("core.config_transaction.MoonrakerConfigTransport.validate_activation_target"))
+            stack.enter_context(patch("core.config_transaction.MoonrakerConfigTransport.supports_conditional_write", return_value=True))
             stack.enter_context(
                 patch(
                     "core.config_transaction.MoonrakerConfigTransport.read_files",

@@ -20,6 +20,17 @@ step_pin: PA1
 
 
 class FakeTransport:
+    def validate_activation_target(self):
+        pass
+
+    def supports_conditional_write(self, previous):
+        return True
+
+    def upload_if_unchanged(self, name, content, previous):
+        if self.files.get(name) != previous:
+            raise RuntimeError("concurrent modification")
+        self.upload_bytes(name, content)
+
     def __init__(self, files=None):
         self.destination_key = ("simulated-printer", id(self))
         self.files = dict(files or {})
@@ -133,7 +144,7 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
                 self.assertEqual(transport.files, original)
                 self.assertFalse(any(c[0] in {"upload", "delete", "restart"} for c in transport.calls))
 
-    def test_interrupt_in_upload_restores_existing_and_removes_new_files(self):
+    def test_interrupt_in_upload_retains_files_and_durable_recovery(self):
         for interrupted_upload in (1, 2):
             with self.subTest(upload=interrupted_upload), tempfile.TemporaryDirectory() as root:
                 original = {"printer.cfg": b"# original\n", "kace/generated-hardware.cfg": b"# old hardware\n"}
@@ -153,14 +164,15 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
                     result = self.run_transaction(transport, root)
                 except KeyboardInterrupt:
                     self.fail(f"interrupted upload left remote state: {transport.files!r}")
-                self.assertEqual(result.state, ConfigTransactionState.CANCELLED)
-                self.assertTrue(result.rollback_succeeded)
-                self.assertEqual(transport.files, original)
-                self.assertIn("rollback succeeded", result.detail)
-                if interrupted_upload == 2:
-                    self.assertIn(("delete", "kace/generated-macros.cfg"), transport.calls)
+                self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
+                self.assertFalse(result.rollback_succeeded)
+                self.assertEqual(result.snapshot.config_files, original)
+                self.assertIn("manual recovery", result.detail)
+                self.assertFalse(any(c[0] == "delete" for c in transport.calls))
+                self.assertEqual(count, interrupted_upload)
+                self.assertTrue(os.path.isfile(os.path.join(result.snapshot.storage_path, "snapshot.json")))
 
-    def test_interrupt_during_restart_or_verification_rolls_back(self):
+    def test_interrupt_during_restart_or_verification_requires_manual_recovery(self):
         for phase in ("checksum", "restart", "ready"):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as root:
                 original = {"printer.cfg": b"# original\n"}
@@ -188,9 +200,11 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
                         result = transaction.run()
                     except KeyboardInterrupt:
                         self.fail(f"interruption during {phase} bypassed rollback")
-                self.assertEqual(result.state, ConfigTransactionState.CANCELLED)
-                self.assertTrue(result.rollback_succeeded)
-                self.assertEqual(transport.files, original)
+                self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
+                self.assertFalse(result.rollback_succeeded)
+                self.assertEqual(result.snapshot.config_files, original)
+                self.assertIn("manual recovery", result.detail)
+                self.assertFalse(any(c[0] == "delete" for c in transport.calls))
 
     def test_failed_or_interrupted_cancellation_rollback_is_reported(self):
         for failure in (OSError("restore unavailable"), KeyboardInterrupt()):
@@ -280,7 +294,7 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
             transport.calls.index(("restart", "service")),
         )
 
-    def test_second_identical_run_does_not_snapshot_write_or_restart(self):
+    def test_second_identical_run_reactivates_without_writing(self):
         with tempfile.TemporaryDirectory() as root:
             transport = FakeTransport({"printer.cfg": b"# user\n"})
             first = self.run_transaction(transport, root)
@@ -288,17 +302,17 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
             second = self.run_transaction(transport, root)
         self.assertEqual(first.state, ConfigTransactionState.COMMITTED)
         self.assertEqual(second.state, ConfigTransactionState.COMMITTED)
-        self.assertEqual(second.detail, "configuration is already reconciled; no files were written")
+        self.assertIsNone(second.snapshot)
         self.assertEqual(
             [call for call in transport.calls[first_call_count:] if call[0] in {"upload", "restart"}],
-            [],
+            [("restart", "firmware")],
         )
 
     def test_repeated_deployment_preserves_save_config_without_extra_writes(self):
         saved = (
             b"#*# <---------------------- SAVE_CONFIG ---------------------->\n"
             b"#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.\n"
-            b"#*#\n#*# [bltouch]\n#*# z_offset = 2.375\n"
+            b"#*#\n#*# [input_shaper]\n#*# shaper_freq_x = 42.375\n"
         )
         with tempfile.TemporaryDirectory() as root:
             transport = FakeTransport({"printer.cfg": b"[mcu]\nserial: old\n" + saved})
@@ -313,7 +327,7 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(deployed_root.count(b"SAVE_CONFIG"), 1)
         self.assertEqual(transport.files, deployed)
         self.assertFalse(any(
-            call[0] in {"upload", "restart"} for call in transport.calls[first_call_count:]
+            call[0] == "upload" for call in transport.calls[first_call_count:]
         ))
 
     def test_resumed_identical_config_requires_klipper_ready_evidence(self):
@@ -331,20 +345,22 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(resumed.state, ConfigTransactionState.COMMITTED)
         self.assertIn("Klipper Ready", resumed.detail)
         self.assertEqual(events[-1][0], "DONE")
-        self.assertFalse(any(
+        self.assertTrue(any(
             call[0] == "restart" for call in transport.calls[before:]
         ))
 
-    def test_macros_upload_failure_restores_old_bytes_and_deletes_new_files(self):
+    def test_macros_upload_failure_preserves_files_for_manual_recovery(self):
         old_root = b"# original root\n"
         with tempfile.TemporaryDirectory() as root:
             transport = FakeTransport({"printer.cfg": old_root})
             transport.fail_upload = "kace/generated-macros.cfg"
             result = self.run_transaction(transport, root)
-        self.assertEqual(result.state, ConfigTransactionState.UPLOAD_FAILED)
-        self.assertTrue(result.rollback_succeeded)
+        self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
+        self.assertFalse(result.rollback_succeeded)
+        self.assertIn("manual recovery", result.detail)
         self.assertEqual(transport.files["printer.cfg"], old_root)
-        self.assertNotIn("kace/generated-hardware.cfg", transport.files)
+        self.assertIn("kace/generated-hardware.cfg", transport.files)
+        self.assertEqual(result.snapshot.config_files["printer.cfg"], old_root)
         self.assertNotIn("kace/generated-macros.cfg", transport.files)
         self.assertNotIn(("delete", "kace/generated-macros.cfg"), transport.calls)
 
@@ -371,7 +387,8 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertFalse(result.rollback_succeeded)
         self.assertIn("upload error: synthetic upload failure", result.detail)
         self.assertIn("rollback error:", result.detail)
-        self.assertIn("delete kace/generated-hardware.cfg", result.detail)
+        self.assertIn("no atomic conditional restore", result.detail)
+        self.assertFalse(any(c[0] == "delete" for c in transport.calls))
 
     def test_restart_failure_rolls_back_and_reaches_ready(self):
         with tempfile.TemporaryDirectory() as root:
@@ -383,7 +400,7 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
         self.assertFalse(result.rollback_succeeded)
 
-    def test_local_transport_preserves_user_root_and_is_atomic(self):
+    def test_local_transport_preserves_existing_files_without_conditional_replace(self):
         with tempfile.TemporaryDirectory() as destination, tempfile.TemporaryDirectory() as snapshots:
             with open(os.path.join(destination, "printer.cfg"), "wb") as output:
                 output.write(b"[gcode_macro USER]\ngcode: M117 keep\n")
@@ -397,11 +414,11 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
             ).run()
             with open(os.path.join(destination, "printer.cfg"), "rb") as source:
                 root = source.read()
-            with open(os.path.join(destination, "kace", "generated-hardware.cfg"), "rb") as source:
-                hardware = source.read()
-        self.assertEqual(result.state, ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION)
-        self.assertIn(b"[gcode_macro USER]", root)
-        self.assertIn(b"[mcu]", hardware)
+            self.assertFalse(os.path.exists(os.path.join(destination, "kace")))
+            self.assertTrue(os.listdir(snapshots))
+        self.assertEqual(result.state, ConfigTransactionState.PRECONDITION_FAILED)
+        self.assertEqual(root, b"[gcode_macro USER]\ngcode: M117 keep\n")
+        self.assertIn("manually apply", result.detail)
 
     def test_local_transport_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as destination:

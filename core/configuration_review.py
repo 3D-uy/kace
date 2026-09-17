@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from typing import Iterable
 
-from core.managed_config import HARDWARE_REMOTE, MACROS_REMOTE, ManagedConfigPlan
+from core.managed_config import HARDWARE_REMOTE, MACROS_REMOTE, ManagedConfigPlan, effective_hardware_text
 from core.profile_values import infer_homing_positive_dir
 
 
@@ -58,7 +58,7 @@ def _sections(text: str) -> dict[str, dict[str, str]]:
             option = _OPTION_RE.match(line)
             if option:
                 options[option.group(1).strip().casefold()] = option.group(2).strip()
-        result[match.group(1).strip().casefold()] = options
+        result.setdefault(match.group(1).strip().casefold(), {}).update(options)
     return result
 
 
@@ -75,10 +75,14 @@ def _header_value(text: str, label: str) -> str:
 
 
 def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
-    hardware = _artifact_text(plan, HARDWARE_REMOTE)
+    hardware = effective_hardware_text(plan)
+    generated_guidance = _artifact_text(plan, HARDWARE_REMOTE)
     macros = _artifact_text(plan, MACROS_REMOTE)
     sections = _sections(hardware)
     errors: list[ReviewMessage] = []
+    planned_serial = _sections(_artifact_text(plan, HARDWARE_REMOTE)).get("mcu", {}).get("serial")
+    if planned_serial and sections.get("mcu", {}).get("serial") != planned_serial:
+        errors.append(ReviewMessage("included-mcu-override", "A user include overrides the selected MCU serial; resolve it before deployment."))
     warnings: list[ReviewMessage] = [
         ReviewMessage("managed-plan", warning) for warning in plan.warnings
     ]
@@ -157,8 +161,8 @@ def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
                 f"Macro {macro_name} is incompatible with [{section_name}] control: {control}.",
             ))
 
-    has_probe_calibration = "PROBE_CALIBRATE" in hardware
-    has_endstop_calibration = "Z_ENDSTOP_CALIBRATE" in hardware
+    has_probe_calibration = "PROBE_CALIBRATE" in generated_guidance
+    has_endstop_calibration = "Z_ENDSTOP_CALIBRATE" in generated_guidance
     if virtual_z and not has_probe_calibration:
         errors.append(ReviewMessage("probe-calibration-missing", "A configured probe requires a PROBE_CALIBRATE step."))
     if not virtual_z and has_probe_calibration:
@@ -178,7 +182,7 @@ def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
 
 
 def build_configuration_review(plan: ManagedConfigPlan) -> ConfigurationReview:
-    hardware = _artifact_text(plan, HARDWARE_REMOTE)
+    hardware = effective_hardware_text(plan)
     sections = _sections(hardware)
     validation = validate_configuration_plan(plan)
     board = _header_value(hardware, "Board") or "configured board"

@@ -438,8 +438,10 @@ rollback_power_reconciliation
             result = self._run_bootstrap_library(
                 command, moonraker_cfg, root / "comms" / "klippy.sock", power_json
             )
-            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-            self.assertEqual(moonraker_cfg.read_text(encoding="utf-8"), original)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("manual recovery", result.stderr)
+            self.assertIn(original, moonraker_cfg.read_text(encoding="utf-8"))
+            self.assertEqual(next(root.glob("moonraker.conf.kace-power-backup.*")).read_text(encoding="utf-8"), original)
 
     def test_power_json_persistence_occurs_only_after_api_verification(self):
         script = BOOTSTRAP.read_text(encoding="utf-8")
@@ -452,7 +454,7 @@ rollback_power_reconciliation
         self.assertLess(early_config, api_verify)
         self.assertLess(api_verify, persist)
 
-    def test_failed_power_reconciliation_restores_exact_moonraker_config(self):
+    def test_failed_power_reconciliation_retains_original_backup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             moonraker_cfg = root / "moonraker.conf"
@@ -474,10 +476,12 @@ rollback_power_reconciliation
             result = self._run_bootstrap_library(
                 command, moonraker_cfg, root / "comms" / "klippy.sock"
             )
-            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-            self.assertEqual(moonraker_cfg.read_bytes(), original)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("manual recovery", result.stderr)
+            self.assertNotEqual(moonraker_cfg.read_bytes(), original)
+            self.assertEqual(next(root.glob("moonraker.conf.kace-power-backup.*")).read_bytes(), original)
 
-    def test_failed_power_persistence_restores_exact_config_and_state(self):
+    def test_failed_power_persistence_preserves_live_files_and_backups(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             home = root / "home"
@@ -508,9 +512,12 @@ persist_power_controller_config
 rollback_power_reconciliation
 """
             result = self._run_bootstrap_library(command, moonraker_cfg, home)
-            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-            self.assertEqual(moonraker_cfg.read_bytes(), original_config)
-            self.assertEqual(power_json.read_bytes(), original_state)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("manual recovery", result.stderr)
+            self.assertNotEqual(moonraker_cfg.read_bytes(), original_config)
+            self.assertEqual(next(root.glob("moonraker.conf.kace-power-backup.*")).read_bytes(), original_config)
+            self.assertNotEqual(power_json.read_bytes(), original_state)
+            self.assertEqual(next(state_dir.glob("power.json.kace-power-backup.*")).read_bytes(), original_state)
 
     def test_invalid_requested_relay_fails_and_preserves_boot_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:

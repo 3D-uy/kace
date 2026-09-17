@@ -139,6 +139,7 @@ from core.firmware_workflow import (
     FirmwareWorkflowState,
     artifact_evidence,
     create_checkpoint,
+    checkpoint_revision,
     extract_mcu_serial,
     load_checkpoint,
     transition_checkpoint,
@@ -157,10 +158,13 @@ def _finish(result: WorkflowResult) -> None:
     raise SystemExit(result.exit_code)
 
 
-def _persist_workflow(checkpoint, user_data=None):
+def _persist_workflow(checkpoint, user_data=None, *, expected_revision=None):
+    try:
+        write_checkpoint(checkpoint, expected_revision=expected_revision)
+    except (FirmwareWorkflowError, OSError, TimeoutError) as exc:
+        _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, f"Checkpoint persistence failed: {exc}"))
     if user_data is not None:
         user_data["workflow_checkpoint"] = checkpoint
-    write_checkpoint(checkpoint)
     return checkpoint
 
 
@@ -231,6 +235,17 @@ def _show_prepared_firmware(checkpoint, *, view_only=False):
         print(f"    {t('firmware.manual.next_steps')}")
 
 
+def _confirm_workflow_mcu_identity(assessment):
+    if os.environ.get("KACE_AUTO") == "1":
+        return False
+    from core.board_contract_deployment import _ambiguity_confirmation
+
+    print(f"\nOriginally selected MCU: {assessment.baseline.configured_path}")
+    print(f"Original physical port: {assessment.baseline.physical_port or 'unavailable'}")
+    print(f"Candidate MCU: {assessment.candidate.configured_path}")
+    return _ambiguity_confirmation(assessment)
+
+
 def _wait_for_manual_flash(checkpoint, user_data, *, verify_immediately=False):
     """Pause an interactive workflow until the prepared firmware is verified.
 
@@ -281,7 +296,7 @@ def _wait_for_manual_flash(checkpoint, user_data, *, verify_immediately=False):
         print(f"\n\033[96m[*]\033[0m {t('firmware.manual.verifying')}")
         try:
             checkpoint, observed = verify_reappeared_mcu(
-                checkpoint, flash_evidence=True
+                checkpoint, flash_evidence=True, ambiguity_resolver=_confirm_workflow_mcu_identity,
             )
         except FirmwareWorkflowError as exc:
             checkpoint = transition_checkpoint(
@@ -328,6 +343,7 @@ def main():
     # Interactive Wizard & durable resume selection.  A compatible checkpoint
     # restores decisions after SSH/Studio/process loss; runtime objects are
     # always reconstructed or revalidated.
+    initial_checkpoint_revision = checkpoint_revision()
     workflow_checkpoint, resume_action = _resume_firmware_workflow()
 
     user_data = {"make_command": _make_command}
@@ -459,13 +475,18 @@ def main():
     # ==========================================
     mcu = user_data.get('mcu_type')
     hint = user_data.get('mcu_hint')
-    firmware_required = bool(mcu or hint == "manual")
+    firmware_required = bool(mcu or hint)
     if firmware_required and workflow_checkpoint is None:
         try:
+            if not mcu:
+                from core.firmware_wizard import resolve_initial_mcu
+                mcu = resolve_initial_mcu(user_data)
             workflow_checkpoint = create_checkpoint(user_data)
-        except FirmwareWorkflowError as exc:
+        except WizardExit:
+            _finish(cancelled("Firmware target selection cancelled."))
+        except (FirmwareWorkflowError, ValueError, RuntimeError) as exc:
             _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc)))
-        _persist_workflow(workflow_checkpoint, user_data)
+        _persist_workflow(workflow_checkpoint, user_data, expected_revision=initial_checkpoint_revision)
 
     workflow_state = (
         FirmwareWorkflowState(workflow_checkpoint["state"])
@@ -525,7 +546,10 @@ def main():
                 _persist_workflow(workflow_checkpoint, user_data)
                 _finish(firmware_result)
 
-            evidence = artifact_evidence(user_data)
+            try:
+                evidence = artifact_evidence(user_data)
+            except FirmwareWorkflowError as exc:
+                _finish(failed(WorkflowOutcome.FIRMWARE_FAILED, str(exc)))
             if evidence is None:
                 workflow_checkpoint = transition_checkpoint(
                     workflow_checkpoint,
@@ -591,7 +615,8 @@ def main():
                 _persist_workflow(workflow_checkpoint, user_data)
                 try:
                     workflow_checkpoint, observed = verify_reappeared_mcu(
-                        workflow_checkpoint, flash_evidence=True
+                        workflow_checkpoint, flash_evidence=True,
+                        ambiguity_resolver=_confirm_workflow_mcu_identity,
                     )
                 except FirmwareWorkflowError as exc:
                     workflow_checkpoint = transition_checkpoint(
@@ -638,7 +663,7 @@ def main():
         FirmwareWorkflowState.CONFIG_GENERATED,
         FirmwareWorkflowState.READY_TO_DEPLOY,
         FirmwareWorkflowState.DEPLOYING,
-    } and os.path.isfile(os.path.expanduser("~/kace/printer.cfg")):
+    }:
         generate_macros = bool(user_data.get("macros_generated"))
     else:
         generate_macros = yes_no(
@@ -654,7 +679,7 @@ def main():
         FirmwareWorkflowState.CONFIG_GENERATED,
         FirmwareWorkflowState.READY_TO_DEPLOY,
         FirmwareWorkflowState.DEPLOYING,
-    }
+    } or not os.path.isfile(os.path.expanduser("~/kace/printer.cfg"))
     if needs_generation:
         print(f"\033[91m[*]\033[0m {t('kace.generating_cfg')}", end="", flush=True)
         try:

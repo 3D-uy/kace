@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
 import tempfile
@@ -113,6 +114,17 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             bootloader_vid_pids=bootloader_vid_pids,
         )
         client = _MoonrakerClient(lab.host, lab.port, api_key=lab.api_key)
+        # This lab models a conditional file store for the downstream physical
+        # state machine. Production Moonraker explicitly rejects this capability;
+        # test_real_physical_client_is_blocked_before_firmware covers that gate.
+        client.supports_conditional_config_write = lambda previous: True
+        def conditional_upload(content, name, previous):
+            if lab.files.get(name) != previous:
+                raise RuntimeError("Concurrent configuration modification detected")
+            lab.files[name] = content
+            lab.uploads.append(name)
+        client.upload_config_if_unchanged = conditional_upload
+
         power = MoonrakerPowerController(
             "printer",
             host=lab.host,
@@ -185,7 +197,7 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
     def test_sd_power_cycle_runs_real_contracts_in_safe_order(self):
         artifact = self._artifact()
         with MoonrakerLab() as lab:
-            lab.version_after_reconnect = artifact.firmware_identity.reported_version
+            lab.version_after_reconnect = "v0.13.0-734-gfe4eb865-20260917-host-" + artifact.firmware_identity.reported_version
             deployer, transcript = self._manual_sd_deployer(lab, artifact)
 
             result = deployer.run()
@@ -290,22 +302,30 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             self.assertEqual(result.state, DeployState.CANCELLED)
             self.assertEqual(lab.uploads, [])
 
-    def test_upload_corruption_rolls_back_exact_original_bytes(self):
+    def test_upload_corruption_keeps_snapshot_for_manual_recovery(self):
         artifact = self._artifact()
         with MoonrakerLab() as lab:
             lab.version_after_reconnect = artifact.firmware_identity.reported_version
-            lab.corrupt_download_once.add("printer.cfg")
             deployer, transcript = self._manual_sd_deployer(lab, artifact)
+            # Corrupt readback after publication, not the pre-upload ownership check.
+            upload = deployer.client.upload_config_if_unchanged
+            def upload_then_corrupt(*args, **kwargs):
+                result = upload(*args, **kwargs)
+                if len(lab.uploads) == 1:
+                    lab.corrupt_download_once.add("printer.cfg")
+                return result
+            deployer.client.upload_config_if_unchanged = upload_then_corrupt
 
             result = deployer.run()
 
             self.assertEqual(result.state, DeployState.FAILED_UPLOAD)
-            self.assertTrue(result.rollback_succeeded)
-            self.assertEqual(lab.files["printer.cfg"], b"[printer]\nold: true\n")
-            self.assertEqual(lab.uploads, ["printer.cfg", "printer.cfg"])
+            self.assertFalse(result.rollback_succeeded)
+            self.assertIn("manual recovery", result.detail)
+            self.assertEqual(deployer.snapshot.config_files["printer.cfg"], b"[printer]\nold: true\n")
+            self.assertEqual(lab.uploads, ["printer.cfg"])
             self.assertNotEqual(self._events(transcript)[-1]["state"], "DONE")
 
-    def test_activation_error_rolls_back_and_never_emits_done(self):
+    def test_activation_error_requires_recovery_and_never_emits_done(self):
         artifact = self._artifact()
         with MoonrakerLab() as lab:
             lab.version_after_reconnect = artifact.firmware_identity.reported_version
@@ -315,8 +335,9 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             result = deployer.run()
 
             self.assertEqual(result.state, DeployState.CONFIG_ERROR)
-            self.assertTrue(result.rollback_succeeded)
-            self.assertEqual(lab.files["printer.cfg"], b"[printer]\nold: true\n")
+            self.assertFalse(result.rollback_succeeded)
+            self.assertIn("manual recovery", result.detail)
+            self.assertEqual(deployer.snapshot.config_files["printer.cfg"], b"[printer]\nold: true\n")
             self.assertEqual(self._events(transcript)[-1]["state"], "CONFIG_ERROR")
 
     def test_usb_strategy_arms_real_monitor_before_avrdude_and_verifies_build(self):
@@ -359,7 +380,8 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
                 bootloader_vid_pids=(),
             )
 
-            def command_runner(_command, *, check, timeout):
+            def command_runner(_command, *, input, check, timeout):
+                self.assertEqual(hashlib.sha256(input).hexdigest(), artifact.sha256)
                 self.assertTrue(check)
                 self.assertEqual(timeout, 120)
                 self.assertTrue(lab.physical_mcu.events.started)

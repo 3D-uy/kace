@@ -227,7 +227,8 @@ def _generated_config_bytes():
     with open(hardware_path, "rb") as source:
         hardware = source.read()
     macros = None
-    if os.path.isfile(macros_path):
+    from core.managed_config import _has_include
+    if _has_include(hardware.decode("utf-8"), "macros.cfg"):
         with open(macros_path, "rb") as source:
             macros = source.read()
     return hardware_path, hardware, macros
@@ -243,6 +244,8 @@ def _config_result_to_workflow(result):
         return pending_activation(result.detail)
     if result.state is ConfigTransactionState.CANCELLED:
         return cancelled(result.detail)
+    if result.state is ConfigTransactionState.FIRMWARE_FAILED:
+        return failed(WorkflowOutcome.FIRMWARE_FAILED, result.detail)
     if result.state in {
         ConfigTransactionState.PRECONDITION_FAILED,
         ConfigTransactionState.SNAPSHOT_FAILED,
@@ -349,6 +352,9 @@ def _run_config_transaction(
         kace_version=_KACE_VERSION,
         state_sink=state_sink,
         verify_existing_ready=checkpoint is not None,
+        verify_firmware=(
+            lambda: _require_running_firmware_checkpoint(user_data, transport)
+        ) if checkpoint is not None else None,
     )
     result = transaction.run()
     if result.rollback_succeeded is False:
@@ -356,6 +362,14 @@ def _run_config_transaction(
     elif result.rollback_succeeded:
         print("\033[92m[OK] Rollback restored byte-identical configuration and Klipper Ready.\033[0m")
     return _config_result_to_workflow(result)
+
+
+def _require_running_firmware_checkpoint(user_data, transport):
+    result = _verify_running_firmware_checkpoint(
+        user_data, transport.host, transport.port, transport.api_key,
+    )
+    if result is not None and not result.ok:
+        raise RuntimeError(result.detail)
 
 
 def _verify_running_firmware_checkpoint(user_data, host, port, api_key=None):
@@ -411,6 +425,8 @@ def deploy_config(user_data):
         )
         sftp = ssh.open_sftp()
         destination = user_data["dest_path"]
+        if destination.endswith(".cfg") and posixpath.basename(destination) != "printer.cfg":
+            raise ValueError("SFTP activation requires the active printer.cfg, not an alternate filename")
         if destination.startswith("~/"):
             destination = destination.replace("~/", f"/home/{user_data['user']}/", 1)
         config_dir = (
@@ -432,15 +448,7 @@ def deploy_config(user_data):
             generated,
             activation_selector=_select_config_activation,
         )
-        if not result.ok:
-            return result
-        verified = _verify_running_firmware_checkpoint(
-            user_data,
-            user_data["host"],
-            int(user_data.get("moonraker_port", 7125)),
-            user_data.get("moonraker_api_key") or None,
-        )
-        return verified or result
+        return result
     except paramiko.AuthenticationException as exc:
         return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"SSH authentication failed: {exc}")
     except (OSError, TimeoutError) as exc:
@@ -514,10 +522,7 @@ def deploy_moonraker(user_data):
         "none",
         activation_selector=_select_config_activation,
     )
-    if not result.ok:
-        return result
-    verified = _verify_running_firmware_checkpoint(user_data, host, port, api_key or None)
-    return verified or result
+    return result
 
 
 def _copy_artifacts(user_data, dest, artifact_type) -> bool:
@@ -709,6 +714,12 @@ class _MoonrakerClient:
         if not ok:
             raise RuntimeError(f"upload failed for {remote_name}: {detail}")
 
+    def supports_conditional_config_write(self, previous):
+        return False
+
+    def upload_config_if_unchanged(self, content, remote_name, previous):
+        raise RuntimeError("Moonraker has no atomic conditional config upload")
+
     def firmware_restart(self):
         from core.moonraker import restart_firmware
         ok, detail = restart_firmware(self._host, self._port, api_key=self._api_key)
@@ -727,12 +738,16 @@ class _MoonrakerClient:
         from core.moonraker import download_printer_cfg
         return download_printer_cfg(self._host, self._port, filename, api_key=self._api_key)
 
-    def restore_snapshot(self, snapshot) -> list:
+    def restore_snapshot(self, snapshot, *, expected_files=None) -> list:
         from core.snapshot import restore_snapshot
         return restore_snapshot(
             snapshot, self._host, self._port,
-            api_key=self._api_key, issue_restart=False,
+            api_key=self._api_key, issue_restart=False, expected_files=expected_files,
         )
+
+    def read_config_files(self, names):
+        from core.config_transaction import MoonrakerConfigTransport
+        return MoonrakerConfigTransport(self._host, self._port, self._api_key).read_files(names)
 
 def _firmware_execution_context(user_data):
     """Create the interactive runtime capabilities used by deployment methods."""
@@ -791,7 +806,7 @@ def deploy_firmware_installation(user_data):
 def _deploy_firmware_installation_locked(user_data):
     from core.mcu_monitor import McuPresenceMonitor
     from core.config_transaction import (
-        MoonrakerConfigTransport, read_config_state, revalidate_config_state,
+        MoonrakerConfigTransport, read_config_state, revalidate_config_state, require_conditional_writes,
     )
     from core.managed_config import build_managed_config_plan
     from core.menu import yes_no
@@ -858,7 +873,8 @@ def _deploy_firmware_installation_locked(user_data):
                 "generated hardware configuration failed deployment preflight",
             )
         config_transport = MoonrakerConfigTransport(host, port, api_key)
-        remote_files = read_config_state(config_transport)
+        config_transport.validate_activation_target()
+        remote_files = read_config_state(config_transport, generated_hardware, generated_macros)
         config_plan = build_managed_config_plan(
             generated_hardware, generated_macros, remote_files
         )
@@ -876,6 +892,7 @@ def _deploy_firmware_installation_locked(user_data):
             return DeployResult(DeployState.ABORTED, "configuration deployment cancelled")
         snapshot = None
         current_files = revalidate_config_state(config_transport, remote_files)
+        require_conditional_writes(config_transport, config_plan)
         if config_plan.changed_artifacts:
             snapshot = create_snapshot(
                 {
@@ -1010,6 +1027,10 @@ def _deploy_firmware_installation_locked(user_data):
             verify_firmware=True,
             snapshot=snapshot,
             before_config_upload=lambda: revalidate_config_state(config_transport, current_files),
+            verify_config_state=lambda: revalidate_config_state(config_transport, {
+                **current_files,
+                **{item.remote_name: item.content for item in config_plan.artifacts},
+            }),
             mcu_monitor=monitor,
             power_cycle_prompt=(
                 _confirm_power_off

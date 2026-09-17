@@ -1,6 +1,6 @@
 import os
 
-def generate_firmware_config(config_dict, klipper_path="~/klipper"):
+def generate_firmware_config(config_dict, klipper_path="~/klipper", *, processor=None):
     """
     Generates a .config file in the Klipper directory based on the configuration dict.
     """
@@ -8,6 +8,9 @@ def generate_firmware_config(config_dict, klipper_path="~/klipper"):
     config_file_path = os.path.join(klipper_path, ".config")
 
     try:
+        if processor is not None:
+            from .configuration import klipper_config
+            config_dict = klipper_config(config_dict, processor)
         # Check if the path exists, though on some setups it might not be cloned yet
         if not os.path.exists(klipper_path):
             return False, f"Klipper directory not found at {klipper_path}"

@@ -314,7 +314,7 @@ def artifact_contains_firmware_fingerprint(
     revalidate the staged binary itself without trusting a sidecar dictionary.
     """
     expected = firmware_fingerprint.encode("ascii")
-    payloads = (content, _decode_uf2_payload(content))
+    payloads = (content, _decode_uf2_payload(content), _decode_ihex_payload(content))
     for payload in payloads:
         if payload is None:
             continue
@@ -338,10 +338,49 @@ def artifact_contains_firmware_fingerprint(
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     start = offset + 1
                     continue
-                if firmware_fingerprint in str(dictionary.get("version", "")):
+                from firmware.identity import firmware_version_matches
+                if firmware_version_matches(dictionary.get("version", ""), firmware_fingerprint):
                     return True
             start = offset + 1
     return False
+
+
+def _decode_ihex_payload(content: bytes) -> Optional[bytes]:
+    """Validate Intel HEX records and join contiguous flash data for AVR."""
+    if not content.startswith(b":"):
+        return None
+    chunks = []
+    base = 0
+    ended = False
+    try:
+        for line in content.splitlines():
+            if ended or not line.startswith(b":"):
+                return None
+            record = bytes.fromhex(line[1:].decode("ascii"))
+            if len(record) < 5 or len(record) != record[0] + 5 or sum(record) % 256:
+                return None
+            kind, data = record[3], record[4:-1]
+            if kind == 0:
+                chunks.append((base + int.from_bytes(record[1:3], "big"), data))
+            elif kind == 1:
+                ended = not data
+            elif kind in (2, 4) and len(data) == 2:
+                base = int.from_bytes(data, "big") << (4 if kind == 2 else 16)
+            elif kind not in (3, 5):
+                return None
+        if not ended or not chunks:
+            return None
+        chunks.sort()
+        address = chunks[0][0]
+        payload = bytearray()
+        for start, data in chunks:
+            if start != address:
+                return None
+            payload.extend(data)
+            address += len(data)
+        return bytes(payload)
+    except (ValueError, UnicodeError):
+        return None
 
 
 def _decode_uf2_payload(content: bytes) -> Optional[bytes]:
@@ -1197,22 +1236,16 @@ class BoardContractKconfigBuilder:
         checkout is therefore patched at one exact reviewed line.  Any drift
         in that line fails closed instead of applying a broad text rewrite.
         """
-        if not re.fullmatch(r"kace-b1-[0-9a-f]{32}", fingerprint):
-            raise ArtifactValidationError("invalid firmware fingerprint format")
+        from firmware.identity import fingerprint_makefile, FirmwareIdentityError
         makefile = checkout / "Makefile"
         if not makefile.is_file():
             raise ArtifactValidationError("Klipper Makefile is absent")
         content = makefile.read_text(encoding="utf-8")
-        needle = "$(PYTHON) ./scripts/buildcommands.py -d $(OUT)klipper.dict"
-        replacement = (
-            "$(PYTHON) ./scripts/buildcommands.py "
-            f"--extra=-{fingerprint} -d $(OUT)klipper.dict"
-        )
-        if content.count(needle) != 1:
-            raise ArtifactValidationError(
-                "validated Klipper buildcommands invocation drifted"
-            )
-        makefile.write_text(content.replace(needle, replacement), encoding="utf-8")
+        try:
+            content = fingerprint_makefile(content, fingerprint)
+        except FirmwareIdentityError as exc:
+            raise ArtifactValidationError(str(exc)) from exc
+        makefile.write_text(content, encoding="utf-8")
 
     def _environment(self, context: BoardContractBuildContext) -> dict[str, str]:
         environment = dict(os.environ)
