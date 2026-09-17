@@ -6,6 +6,14 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.9.4-rc.2] — 2026-09-17
+
+- Supersedes rc.1 before hardware qualification. The standalone-installer regression
+  now reads the authoritative bootstrap pin instead of asserting an obsolete
+  release SHA; hash verification against the immutable Git object is unchanged.
+- Runtime safety fixes are unchanged. Repin the versioned candidate and bootstrap
+  so Studio installs this exact release.
+
 ## [0.9.4-rc.1] — 2026-09-17
 
 Candidate for controlled hardware qualification; no physical qualification is claimed.

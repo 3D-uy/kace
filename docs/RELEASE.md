@@ -1,6 +1,6 @@
 # KACE release engineering guide
 
-KACE is currently pre-1.0. The `0.9.4-rc.1` candidate is for controlled hardware qualification, not a stable compatibility promise. See [HARDWARE_TESTING.md](HARDWARE_TESTING.md) for the qualification sequence and operational limits.
+KACE is currently pre-1.0. The `0.9.4-rc.2` candidate is for controlled hardware qualification, not a stable compatibility promise. See [HARDWARE_TESTING.md](HARDWARE_TESTING.md) for the qualification sequence and operational limits.
 
 ## Version source
 

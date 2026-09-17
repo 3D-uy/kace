@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/3D-uy/KACE/actions/workflows/ci.yml"><img src="https://github.com/3D-uy/KACE/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/release-0.9.4--rc.1-orange" alt="Project status: pre-1.0">
+  <img src="https://img.shields.io/badge/release-0.9.4--rc.2-orange" alt="Project status: pre-1.0">
   <img src="https://img.shields.io/badge/Python-3.11%2B-blue" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Raspberry%20Pi-green" alt="Linux and Raspberry Pi">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0 license"></a>
@@ -43,7 +43,7 @@
 | 🌐 Moonraker · Mainsail · Fluidd | API integration and bootstrap dashboard selection | Existing configuration may require manual application. |
 
 > [!IMPORTANT]
-> **0.9.4-rc.1 is a controlled test candidate.** Read the [hardware qualification guide](docs/HARDWARE_TESTING.md) before connecting equipment. Existing-file replacement is blocked where the transport cannot atomically protect concurrent edits; KACE saves a reviewed proposal. Recovery can require manual action. Neither case is reported as a completed deployment.
+> **0.9.4-rc.2 is a controlled test candidate.** Read the [hardware qualification guide](docs/HARDWARE_TESTING.md) before connecting equipment. Existing-file replacement is blocked where the transport cannot atomically protect concurrent edits; KACE saves a reviewed proposal. Recovery can require manual action. Neither case is reported as a completed deployment.
 
 ## Contents
 

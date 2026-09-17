@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/3D-uy/KACE/actions/workflows/ci.yml"><img src="https://github.com/3D-uy/KACE/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/release-0.9.4--rc.1-orange" alt="Estado del proyecto: pre-1.0">
+  <img src="https://img.shields.io/badge/release-0.9.4--rc.2-orange" alt="Estado del proyecto: pre-1.0">
   <img src="https://img.shields.io/badge/Python-3.11%2B-blue" alt="Python 3.11 o posterior">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Raspberry%20Pi-green" alt="Linux y Raspberry Pi">
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licencia GPL-3.0"></a>
@@ -41,7 +41,7 @@
 | Moonraker · Mainsail · Fluidd | API y selección de interfaz durante bootstrap | La configuración existente puede requerir aplicación manual. |
 
 > [!IMPORTANT]
-> **0.9.4-rc.1 es una candidata para pruebas controladas.** Consulta la [guía de validación física](../HARDWARE_TESTING.md) (EN). Si el transporte no permite proteger atómicamente una edición concurrente, KACE bloquea la sustitución de archivos existentes y conserva una propuesta revisada. La recuperación puede requerir intervención manual; estos estados no se presentan como éxito.
+> **0.9.4-rc.2 es una candidata para pruebas controladas.** Consulta la [guía de validación física](../HARDWARE_TESTING.md) (EN). Si el transporte no permite proteger atómicamente una edición concurrente, KACE bloquea la sustitución de archivos existentes y conserva una propuesta revisada. La recuperación puede requerir intervención manual; estos estados no se presentan como éxito.
 
 ## Índice
 

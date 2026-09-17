@@ -1,4 +1,4 @@
-# Controlled hardware qualification — 0.9.4-rc.1
+# Controlled hardware qualification — 0.9.4-rc.2
 
 This candidate is intended to collect the first controlled physical evidence.
 Automated tests, valid checksums and Klipper `Ready` do not qualify wiring, thermal
