@@ -16,6 +16,8 @@ KACE uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI runs the Pytest stabilization regressions against real pinned Klipper
   components; STM32 compilation fixtures provide their explicit reference clocks
   instead of relying on the removed unsafe MCU-wide default.
+- Refresh the main README with direct ecosystem navigation, exact controller
+  status, a shorter quick start and clear hardware-qualification boundaries.
 
 ## [0.9.4-rc.1] — 2026-09-17
 
