@@ -43,6 +43,26 @@ Use the narrowest command that covers a change, then run the complete relevant g
 
 Unit tests cover the wizard model, validation, board data, generation helpers, firmware derivation, deployment, Moonraker, SSH, translations, CLI contracts, bootstrap/install contracts, and matrix construction. Hardware, prompts, network calls, subprocesses, and external files are mocked where applicable.
 
+Firmware orchestration fixtures that mock `MoonrakerConfigTransport` must use an
+explicit remote host (for example, `fixture-printer.invalid`). On POSIX, a
+loopback host selects `LocalMoonrakerConfigTransport` and discovers Klipper's
+active `config_file` through Moonraker before acquiring the destination lock.
+Leaving the default `localhost` in a remote fixture can therefore pass on
+Windows but attempt a real HTTP request in Linux CI. Tests of local discovery
+must provide the Moonraker responses and a temporary configuration directory;
+do not bypass production target validation to make remote fixtures pass.
+
+Export-prompt fixtures also select host versus container execution explicitly.
+Mocking `platform.system()` alone does not hide the runner's `/.dockerenv`;
+host prompts and Docker's mounted-path guidance have separate regression cases.
+
+Configuration retry regressions distinguish matching files from active Klipper
+settings: an explicit activation choice still applies to an unverified retry,
+while a verified no-op checks the loaded settings without prompting or
+restarting. New/root-v1 installations publish hardware in `printer.cfg`; existing
+user roots retain `kace/generated-hardware.cfg`. Ownership and concurrent-edit
+regressions cover both layouts and preserve external edits for manual recovery.
+
 ### Regression tests — `tests/regression/`
 
 Regression tests exercise complete generation paths, CLI integration, runtime behavior, firmware build orchestration, and byte-level snapshots in `tests/fixtures/`.

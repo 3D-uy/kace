@@ -143,6 +143,8 @@ class PowerControllerTests(TestCase):
             flashable=True,
         )
         user_data = {
+            # Match the remote transport mocked below on both Windows and POSIX.
+            "moonraker_host": "fixture-printer.invalid",
             "mcu_path": "/dev/serial/by-id/test",
             "prepared_firmware_deployment": SimpleNamespace(
                 plan=SimpleNamespace(

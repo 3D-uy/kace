@@ -466,7 +466,11 @@ class ConfigDeploymentTransaction:
                     "deployment cancelled after dry-run diff",
                     self.transaction_id,
                 )
-            if self.activation_selector is not None and self.plan.changed_artifacts:
+            # Only a verified no-op retry can skip the restart decision. Files
+            # may already match while their activation is still pending.
+            if self.activation_selector is not None and (
+                self.plan.changed_artifacts or not self.verify_existing_ready
+            ):
                 selected = self.activation_selector()
                 if selected not in {"firmware", "service", "none"}:
                     raise ValueError(f"Unsupported activation mode: {selected}")

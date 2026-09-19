@@ -11,7 +11,7 @@ from core.config_transaction import (
     LocalConfigTransport, SftpConfigTransport, MoonrakerConfigTransport,
     ConfigConflictError, read_config_state,
 )
-from core.managed_config import build_managed_config_plan, effective_hardware_text, HARDWARE_REMOTE
+from core.managed_config import build_managed_config_plan, effective_hardware_text, HARDWARE_REMOTE, ROOT_REMOTE
 from core.configuration_review import validate_configuration_plan, _sections
 from core.firmware_workflow import (
     create_checkpoint, transition_checkpoint, artifact_evidence, verify_reappeared_mcu,
@@ -83,6 +83,10 @@ def test_pending_retry_activates_matching_files_and_honors_cancel(tmp_path):
         def restart(self, mode):
             super().restart(mode)
             self.active = self.files["printer.cfg"]
+        def verify_active_configuration(self, plan):
+            expected = next(a.content for a in plan.artifacts if a.remote_name == ROOT_REMOTE)
+            if self.active != expected:
+                raise ConfigConflictError("active configuration differs; explicit restart required")
     transport = Live()
     assert transaction(transport, tmp_path, activation="none").pending
     assert transport.active == b"old active config"
@@ -91,8 +95,18 @@ def test_pending_retry_activates_matching_files_and_honors_cancel(tmp_path):
     assert transaction(transport, tmp_path, activation_selector=lambda: "none").pending
     assert transport.active == b"old active config"
     result = transaction(transport, tmp_path, verify_existing_ready=True, verify_firmware=lambda: None)
+    assert result.state is Result.ACTIVATION_FAILED
+    assert transport.active == b"old active config"
+    assert not any(call[0] == "restart" for call in transport.calls)
+    result = transaction(transport, tmp_path, activation_selector=lambda: "firmware")
     assert result.ok
     assert transport.active == transport.files["printer.cfg"]
+    assert transport.calls.count(("restart", "firmware")) == 1
+    selector = Mock(side_effect=AssertionError("verified retry must not prompt for restart"))
+    result = transaction(transport, tmp_path, verify_existing_ready=True,
+                         verify_firmware=lambda: None, activation_selector=selector)
+    assert result.ok
+    selector.assert_not_called()
     assert transport.calls.count(("restart", "firmware")) == 1
 
 
@@ -134,8 +148,9 @@ def test_atomic_creation_preserves_edit_after_final_read(tmp_path):
             return super().upload_if_unchanged(name, content, previous)
     result = transaction(RacingLocal(str(root)), tmp_path, activation="none")
     assert not result.ok
-    assert (root / HARDWARE_REMOTE).read_bytes() == b"external edit AFTER final read"
-    assert not (root / "printer.cfg").exists()
+    # New installations publish hardware directly in printer.cfg (root-v1).
+    assert (root / ROOT_REMOTE).read_bytes() == b"external edit AFTER final read"
+    assert not (root / HARDWARE_REMOTE).exists()
 
 
 def test_existing_local_update_is_rejected_before_partial_publication(tmp_path):

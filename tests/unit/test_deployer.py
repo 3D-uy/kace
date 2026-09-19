@@ -175,6 +175,29 @@ class MoonrakerBoundaryTests(unittest.TestCase):
 class LocalExportBoundaryTests(unittest.TestCase):
     def setUp(self):
         set_lang("English")
+        # Platform fixtures describe a host, even when the runner is in Docker.
+        # Container behavior is selected explicitly in its own test below.
+        exists = os.path.exists
+        self.enterContext(patch(
+            "core.deployer.os.path.exists",
+            side_effect=lambda path: False if path == "/.dockerenv" else exists(path),
+        ))
+        self.enterContext(patch.dict(os.environ, {"KACE_DOCKER": "0"}))
+
+    def test_container_export_requires_a_mounted_path(self):
+        for export, expected_prompt in (
+            (deploy_usb, "/workspace/outputs"),
+            (deploy_local, "device running KACE"),
+        ):
+            with self.subTest(export=export.__name__), \
+                    patch("core.deployer.platform.system", return_value="Linux"), \
+                    patch.dict(os.environ, {"KACE_DOCKER": "1"}), \
+                    patch("core.menu.simple_input", side_effect=["E:\\", None]) as prompt, \
+                    patch("sys.stdout", new_callable=io.StringIO) as output:
+                result = export({}, artifact_type="config")
+                self.assertEqual(WorkflowOutcome.CANCELLED, result.outcome)
+                self.assertIn(expected_prompt, prompt.call_args_list[0].args[0])
+                self.assertIn("not visible inside the container", output.getvalue())
 
     @patch("core.menu.yes_no", return_value=True)
     def test_config_export_preserves_existing_root_through_real_transaction(self, _yes):
@@ -271,6 +294,9 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
             sha256=digest,
         )
         return {
+            # These orchestration fixtures mock the remote transport. Loopback
+            # selects local config-file discovery on POSIX and requires Moonraker.
+            "moonraker_host": "fixture-printer.invalid",
             "prepared_firmware_deployment": prepared,
             "firmware_deployment_service": MagicMock(),
             "mcu_path": "/dev/serial/by-id/test",
@@ -375,8 +401,7 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
         from core.config_transaction import MoonrakerConfigTransport, config_destination_lock
 
         user = self._user()
-        user["moonraker_host"] = "fixture-printer.local"
-        lock = config_destination_lock(MoonrakerConfigTransport("fixture-printer.local", 7125))
+        lock = config_destination_lock(MoonrakerConfigTransport(user["moonraker_host"], 7125))
 
         def fail(_user):
             self.assertTrue(lock.locked())

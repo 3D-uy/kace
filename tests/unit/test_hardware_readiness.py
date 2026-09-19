@@ -130,31 +130,35 @@ def test_resume_rejects_checkpoint_whose_outer_digest_was_rebased(tmp_path):
 
 
 @pytest.mark.parametrize("original_exists", [True, False])
-def test_rollback_preserves_post_read_external_edit_on_real_files(tmp_path, original_exists):
+@pytest.mark.parametrize("remote_name", ["printer.cfg", HARDWARE_REMOTE])
+def test_rollback_preserves_post_read_external_edit_on_real_files(tmp_path, original_exists, remote_name):
     from core.snapshot import create_snapshot
     root = tmp_path / "config"
     (root / "kace").mkdir(parents=True)
-    original = b"original hardware" if original_exists else None
-    plan = build_managed_config_plan(GENERATED, None, {HARDWARE_REMOTE: original})
-    published = next(a.content for a in plan.artifacts if a.remote_name == HARDWARE_REMOTE)
-    (root / HARDWARE_REMOTE).write_bytes(published)
+    original = b"# KACE layout: root-v1\n# original hardware\n" if original_exists else None
+    # Existing user roots retain managed includes; fresh/root-v1 installations
+    # publish hardware in printer.cfg. Exercise rollback ownership in both.
+    remote = {"printer.cfg": b"# existing user root\n", remote_name: original}
+    plan = build_managed_config_plan(GENERATED, None, remote)
+    published = next(a.content for a in plan.artifacts if a.remote_name == remote_name)
+    (root / remote_name).write_bytes(published)
     class Transport(LocalConfigTransport):
         reads = 0
         def read_files(self, names):
             result = super().read_files(names)
             self.reads += 1
             if self.reads == 1:
-                (root / HARDWARE_REMOTE).write_bytes(b"external edit AFTER ownership read")
+                (root / remote_name).write_bytes(b"external edit AFTER ownership read")
             return result
     transaction = ConfigDeploymentTransaction(Transport(str(root)), GENERATED, None,
         activation="none", snapshot_root=str(tmp_path / "snap"))
     transaction.plan = plan
-    transaction.snapshot = create_snapshot({HARDWARE_REMOTE: original}, persist_root=str(tmp_path / "snap"))
-    transaction._written_names = {HARDWARE_REMOTE}
+    transaction.snapshot = create_snapshot({remote_name: original}, persist_root=str(tmp_path / "snap"))
+    transaction._written_names = {remote_name}
     restored, detail = transaction._rollback()
     assert restored is False
     assert "manual recovery" in detail
-    assert (root / HARDWARE_REMOTE).read_bytes() == b"external edit AFTER ownership read"
+    assert (root / remote_name).read_bytes() == b"external edit AFTER ownership read"
     assert Path(transaction.snapshot.storage_path).is_dir()
 
 

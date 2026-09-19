@@ -4,9 +4,12 @@ import unittest
 from unittest.mock import patch
 
 from core.config_transaction import (
+    ConfigConflictError,
     ConfigDeploymentTransaction,
     ConfigTransactionState,
     LocalConfigTransport,
+    MoonrakerConfigTransport,
+    configuration_transport,
 )
 
 
@@ -425,6 +428,29 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
             transport = LocalConfigTransport(destination)
             with self.assertRaisesRegex(ValueError, "escapes"):
                 transport.upload_bytes("../outside.cfg", b"bad")
+
+
+class ConfigurationTransportSelectionTests(unittest.TestCase):
+    def test_remote_fixture_never_discovers_a_local_destination(self):
+        for platform in ("nt", "posix"):
+            with self.subTest(platform=platform), \
+                    patch("core.config_transaction.os.name", platform), \
+                    patch("core.moonraker._get") as get:
+                transport = configuration_transport("fixture-printer.invalid", 7125)
+                self.assertIs(type(transport), MoonrakerConfigTransport)
+                self.assertEqual(transport.host, "fixture-printer.invalid")
+                get.assert_not_called()
+
+    def test_posix_loopback_requires_active_config_before_selecting_destination(self):
+        for host in ("localhost", "127.0.0.1", "[::1]"):
+            with self.subTest(host=host), \
+                    patch("core.config_transaction.os.name", "posix"), \
+                    patch("core.moonraker._get", return_value=(False, "offline", {})) as get:
+                with self.assertRaisesRegex(ConfigConflictError, "active Klipper config_file"):
+                    configuration_transport(host, 7125, "fixture-api-key")
+                get.assert_called_once_with(
+                    f"http://{host}:7125/printer/info", api_key="fixture-api-key"
+                )
 
 
 if __name__ == "__main__":
