@@ -197,7 +197,7 @@ class RollbackOwnershipTests(unittest.TestCase):
             ).run()
             self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
             self.assertIn("concurrent modification", result.detail)
-            self.assertEqual(transport.files["kace/generated-hardware.cfg"], b"unknown bytes")
+            self.assertEqual(transport.files["printer.cfg"], b"unknown bytes")
 
     def test_physical_snapshot_rollback_checks_ownership_and_rechecks_before_write(self):
         for change_during_restore in (False, True):

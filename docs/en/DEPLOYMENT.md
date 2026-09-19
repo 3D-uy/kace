@@ -186,15 +186,33 @@ verified checkpoint without repeating firmware compilation or flashing.
 
 ## Conditional publication and final readiness gates
 
-Forward publication has the same concurrency requirement as recovery. Local and
-SFTP transports can atomically create a previously absent target without replacing
-a file that appeared meanwhile. They cannot condition replacement on its previous
-contents; Moonraker uploads cannot condition either operation. A plan containing
-an unsupported write is rejected as a whole before any live write or firmware
-action. The reviewed proposed bytes are retained in a `*-proposed` snapshot using
-the filename/metadata layout described above. Coordinate with other editors,
-compare current files, apply the intended changes manually, then rerun KACE and
-select activation. Offline export to a new directory still supports publication.
+The accepted local publication contract (19 September 2026) uses cooperative
+locking, a final content comparison and atomic replacement. On the printer host,
+`LocalMoonrakerConfigTransport` binds the loopback Moonraker endpoint to the active
+config root and holds `.kace-deploy.lock` from review through activation. KACE
+transactions using that destination lock are serialized across processes.
+Originals are snapshotted before publication; each replacement is staged and
+fsynced on the same filesystem, compared against the reviewed live bytes, then
+published atomically and read back before restart. Creating an absent file uses
+exclusive creation, so a file created meanwhile is not replaced.
+
+This is not an atomic compare-and-swap (CAS) against arbitrary external writers.
+An editor that ignores the lock can write between the final comparison and
+replacement, and its edit may be overwritten without detection. Mainsail edits,
+SSH editors and other tools must not save configuration during KACE deployment.
+The lock does not disable them. Conflicts detected during review or staging abort
+publication and retain live content and a recoverable proposal. Atomicity is per
+file, not an all-or-nothing update of the entire config directory; interrupted
+multi-file publication may need recovery from the snapshot.
+
+Offline local export and SFTP support exclusive creation of absent files but
+still reject replacement of existing files. Remote Moonraker upload supports
+neither guarded operation and remains blocked for changed plans. Unsupported
+plans are rejected before live writes and retain a `*-proposed` snapshot using
+the layout described above. Manual application requires comparing current files
+with the proposal before rerunning KACE. Automatic rollback is not enabled by
+the cooperative publication contract: failed activation preserves live files and
+snapshots rather than blindly restoring earlier content.
 
 Preflight reads explicit relative user includes recursively and reviews their
 actual linear precedence, matching Klipper. Included files remain user-owned and

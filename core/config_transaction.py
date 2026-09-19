@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Callable, Mapping, Optional
@@ -34,6 +35,7 @@ from core.snapshot import (
 
 _destination_locks = WeakValueDictionary()
 _destination_locks_guard = threading.Lock()
+_UNCONDITIONAL = object()
 
 
 def config_destination_lock(transport):
@@ -385,7 +387,8 @@ class ConfigDeploymentTransaction:
         # transaction must not read an intermediate state or race a rollback.
         with lock:
             try:
-                return self._run_locked()
+                with (self.transport.destination_lock() if hasattr(self.transport, "destination_lock") else nullcontext()):
+                    return self._run_locked()
             except KeyboardInterrupt:
                 rollback_ok, rollback_detail = None, "no configuration files were written"
                 if self._written_names:
@@ -406,6 +409,18 @@ class ConfigDeploymentTransaction:
                 return ConfigTransactionResult(
                     state, detail, self.transaction_id, self.snapshot, rollback_ok,
                 )
+            except (OSError, TimeoutError, ConfigConflictError) as exc:
+                return ConfigTransactionResult(
+                    ConfigTransactionState.PRECONDITION_FAILED,
+                    f"local publication could not be secured: {exc}", self.transaction_id, self.snapshot,
+                )
+
+    def _preserve_proposal(self):
+        if self.plan is not None:
+            create_snapshot(
+                {item.remote_name: item.content for item in self.plan.artifacts},
+                deployment_id=self.transaction_id + "-proposed", persist_root=self.snapshot_root,
+            )
 
     def _run_locked(self) -> ConfigTransactionResult:
         self._emit("BACKUP", "validating configuration and preparing snapshot")
@@ -420,6 +435,7 @@ class ConfigDeploymentTransaction:
             }
             diff = self.plan.dry_run_diff()
             configuration_review = build_configuration_review(self.plan)
+            require_conditional_writes(self.transport, self.plan, persist_root=self.snapshot_root)
             if self.review is None:
                 self.output(diff or "No configuration changes are required.")
                 for warning in configuration_review.validation.warnings:
@@ -450,7 +466,7 @@ class ConfigDeploymentTransaction:
                     "deployment cancelled after dry-run diff",
                     self.transaction_id,
                 )
-            if self.activation_selector is not None:
+            if self.activation_selector is not None and self.plan.changed_artifacts:
                 selected = self.activation_selector()
                 if selected not in {"firmware", "service", "none"}:
                     raise ValueError(f"Unsupported activation mode: {selected}")
@@ -468,6 +484,7 @@ class ConfigDeploymentTransaction:
                 persist_root=self.snapshot_root,
             ) if originals else None
         except ConfigConflictError as exc:
+            self._preserve_proposal()
             return ConfigTransactionResult(
                 ConfigTransactionState.PRECONDITION_FAILED,
                 f"{exc}; no configuration files were written",
@@ -492,6 +509,7 @@ class ConfigDeploymentTransaction:
             # the first write; external editors do not participate in our lock.
             revalidate_config_state(self.transport, current)
         except ConfigConflictError as exc:
+            self._preserve_proposal()
             return ConfigTransactionResult(
                 ConfigTransactionState.PRECONDITION_FAILED,
                 f"{exc}; no configuration files were written",
@@ -510,6 +528,20 @@ class ConfigDeploymentTransaction:
                     raise
             self._emit("VERIFYING_UPLOAD", "verifying uploaded configuration checksums")
             self._verify_plan()
+            if not self.plan.changed_artifacts and self.verify_existing_ready:
+                ready, state = self._wait_ready()
+                if not ready:
+                    raise RuntimeError(f"Klipper did not become Ready (state={state})")
+                self._verify_firmware()
+                if hasattr(self.transport, "verify_active_configuration"):
+                    self.transport.verify_active_configuration(self.plan)
+                self._verify_plan()
+                self._emit("DONE", "configuration already installed; Klipper Ready")
+                return ConfigTransactionResult(
+                    ConfigTransactionState.COMMITTED,
+                    "configuration already installed; Klipper Ready and firmware verified",
+                    self.transaction_id,
+                )
             if self.activation == "none":
                 return ConfigTransactionResult(
                     ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION,
@@ -519,7 +551,7 @@ class ConfigDeploymentTransaction:
                 )
 
             self.transport.validate_activation_target()
-            if self._expected_config_state.get(MOONRAKER_REMOTE) is not None:
+            if any(item.remote_name == MOONRAKER_REMOTE for item in self.plan.changed_artifacts):
                 self._emit("WAITING_MOONRAKER", "restarting Moonraker before Klipper activation")
                 self.transport.restart_moonraker()
                 if not self._wait_moonraker():
@@ -540,6 +572,7 @@ class ConfigDeploymentTransaction:
                 self.snapshot,
             )
         except Exception as exc:
+            self._preserve_proposal()
             self._emit("CONFIG_ERROR", str(exc))
             rollback_ok, rollback_detail = self._rollback()
             state = (
@@ -596,6 +629,26 @@ class MoonrakerConfigTransport:
         roots = [entry.get("path") for entry in body.get("result", []) if entry.get("name") == "config"] if ok else []
         if len(roots) != 1 or not isinstance(roots[0], str) or active != posixpath.join(roots[0], ROOT_REMOTE):
             raise ConfigConflictError("Moonraker config root does not match active Klipper printer.cfg")
+
+    def verify_active_configuration(self, plan):
+        from core.moonraker import _get, _base_url
+        from core.managed_config import effective_hardware_text, _section_options
+        ok, detail, body = _get(_base_url(self.host, self.port) + "/printer/objects/query?configfile", api_key=self.api_key)
+        active = body.get("result", {}).get("status", {}).get("configfile", {}).get("config") if ok else None
+        if not isinstance(active, dict):
+            raise ConfigConflictError("active configuration could not be verified; explicit activation is required")
+        active = {
+            str(section).casefold(): {str(key).casefold(): value for key, value in options.items()}
+            for section, options in active.items() if isinstance(options, dict)
+        }
+        expected = _section_options(effective_hardware_text(plan))
+        for section, options in expected.items():
+            if section.startswith("include "):
+                continue
+            for name, value in options.items():
+                actual = active.get(section, {}).get(name)
+                if actual is None or " ".join(str(actual).split()) != " ".join(value.split()):
+                    raise ConfigConflictError(f"active configuration differs at [{section}] {name}; explicit activation is required")
 
     def supports_conditional_write(self, previous):
         return False  # Moonraker's upload API offers no content precondition.
@@ -817,6 +870,8 @@ class LocalConfigTransport:
         candidate = os.path.abspath(os.path.join(self.config_dir, *name.split("/")))
         if os.path.commonpath((self.config_dir, candidate)) != self.config_dir:
             raise ValueError(f"config path escapes destination: {name!r}")
+        if os.path.commonpath((self.config_dir, os.path.realpath(candidate))) != self.config_dir:
+            raise ConfigConflictError("config path resolves outside destination")
         return candidate
 
     def read_files(self, names) -> Mapping[str, Optional[bytes]]:
@@ -832,7 +887,7 @@ class LocalConfigTransport:
                 result[name] = source.read()
         return result
 
-    def upload_bytes(self, name: str, content: bytes, *, exclusive=False) -> None:
+    def upload_bytes(self, name: str, content: bytes, *, exclusive=False, expected=_UNCONDITIONAL) -> None:
         path = self._path(name)
         parent = os.path.dirname(path)
         existing_ancestor = parent
@@ -860,6 +915,10 @@ class LocalConfigTransport:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.chmod(temporary, mode)
+            if expected is not _UNCONDITIONAL:
+                current = self.read_files((name,))[name]
+                if current != expected:
+                    raise ConfigConflictError(f"concurrent configuration modification detected: {name}")
             if exclusive:
                 os.link(temporary, path)  # Atomic create-if-absent, never replace.
                 os.unlink(temporary)
@@ -901,3 +960,56 @@ class LocalConfigTransport:
 
     def klipper_state(self) -> str:
         return "disconnected"
+
+
+class LocalMoonrakerConfigTransport(LocalConfigTransport, MoonrakerConfigTransport):
+    """Local publication serialized with other KACE writers.
+
+    External editors are rechecked after staging/fsync, just before replacement.
+    Strict exclusion across the final replacement requires cooperating writers.
+    """
+
+    def __init__(self, config_dir, host="127.0.0.1", port=7125, api_key=None):
+        LocalConfigTransport.__init__(self, config_dir)
+        MoonrakerConfigTransport.__init__(self, host, port, api_key)
+
+    def destination_lock(self):
+        from core.workspace import exclusive_file_lock
+        path = os.path.join(self.config_dir, ".kace-deploy.lock")
+        if os.path.islink(path):
+            raise ConfigConflictError("refusing a symlinked destination lock")
+        return exclusive_file_lock(path, timeout_seconds=30)
+
+    def validate_activation_target(self):
+        MoonrakerConfigTransport.validate_activation_target(self)
+        if self._active_config() != os.path.join(self.config_dir, ROOT_REMOTE):
+            raise ConfigConflictError("local destination does not match active Klipper printer.cfg")
+
+    def supports_conditional_write(self, previous):
+        return True
+
+    def upload_if_unchanged(self, name, content, previous):
+        self.upload_bytes(name, content, exclusive=previous is None, expected=previous)
+
+    restart = MoonrakerConfigTransport.restart
+    restart_moonraker = MoonrakerConfigTransport.restart_moonraker
+    moonraker_online = MoonrakerConfigTransport.moonraker_online
+    klipper_state = MoonrakerConfigTransport.klipper_state
+
+
+def local_moonraker_available():
+    return os.name == "posix" and os.path.isfile(os.path.expanduser("~/printer_data/config/printer.cfg"))
+
+
+def configuration_transport(host, port=7125, api_key=None):
+    """Never infer filesystem authority from a remote host's reported path."""
+    from core.moonraker import _base_url
+    remote = MoonrakerConfigTransport(host, port, api_key)
+    endpoint = urlsplit(_base_url(host, port))
+    if os.name == "posix" and endpoint.hostname in {"localhost", "127.0.0.1", "::1"}:
+        remote.validate_activation_target()
+        active = remote._active_config()
+        transport = LocalMoonrakerConfigTransport(os.path.dirname(active), host, port, api_key)
+        transport.validate_activation_target()
+        return transport
+    return remote

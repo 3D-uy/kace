@@ -2295,3 +2295,23 @@ UI_STRINGS: dict = {
     "probe.confirmed": {"English": "Probe offset confirmed: X={x:+.1f} mm, Y={y:+.1f} mm", "Español": "Desplazamientos del sensor confirmados: X={x:+.1f} mm, Y={y:+.1f} mm", "Português": "Deslocamentos do sensor confirmados: X={x:+.1f} mm, Y={y:+.1f} mm"},
     "probe.z_calibration_hint": {"English": "Z offset will be calibrated later with PROBE_CALIBRATE.", "Español": "El desplazamiento Z se calibrará más adelante con PROBE_CALIBRATE.", "Português": "O deslocamento Z será calibrado mais tarde com PROBE_CALIBRATE."},
 }
+
+
+UI_STRINGS.update({
+    "deploy.remote_unsupported": {
+        "English": "Remote Moonraker cannot safely replace reviewed configuration. Run KACE on the printer host to install locally.",
+        "Español": "Moonraker remoto no puede reemplazar con seguridad la configuración revisada. Ejecutá KACE en la Raspberry para instalarla localmente.",
+        "Português": "O Moonraker remoto não pode substituir com segurança a configuração revisada. Execute o KACE no Raspberry para instalar localmente.",
+    },
+    "deploy.local_active": {"English": "Install on this Raspberry (verified local publication)", "Español": "Instalar en esta Raspberry (publicación local verificada)", "Português": "Instalar neste Raspberry (publicação local verificada)"},
+    "firmware.resume.pending": {"English": "An installation is pending. Continue it or start over?", "Español": "Hay una instalación pendiente. ¿Continuar o empezar de cero?", "Português": "Há uma instalação pendente. Continuar ou começar do zero?"},
+    "firmware.resume.discard": {"English": "Discard the pending workflow and start over?", "Español": "¿Descartar el flujo pendiente y empezar de cero?", "Português": "Descartar o fluxo pendente e começar do zero?"},
+    "installation.complete": {
+        "English": "KACE installation completed\n• MCU firmware verified.\n• Printer configuration installed.\n• Klipper connected and ready.\nNext: hardware commissioning — verify endstops, motors, heaters and sensors before printing.\nThe printer is ready to begin commissioning.",
+        "Español": "Instalación de KACE completada\n• Firmware de la MCU verificado.\n• Configuración de la impresora instalada.\n• Klipper conectado y listo.\nSiguiente paso: commissioning del hardware; verificar endstops, motores, heaters y sensores antes de imprimir.\nLa impresora está lista para comenzar el commissioning.",
+        "Português": "Instalação do KACE concluída\n• Firmware da MCU verificado.\n• Configuração da impressora instalada.\n• Klipper conectado e pronto.\nPróximo passo: comissionamento do hardware; verificar fins de curso, motores, aquecedores e sensores antes de imprimir.\nA impressora está pronta para iniciar o comissionamento.",
+    },
+    "menu.default": {"English": "Enter accepts {value}", "Español": "Enter acepta {value}", "Português": "Enter aceita {value}"},
+})
+
+UI_STRINGS["deploy.already_installed"] = {"English": "The configuration was already installed. Active configuration and Klipper verified without restarting.", "Español": "La configuración ya estaba instalada. Se verificaron la configuración activa y Klipper sin reiniciar.", "Português": "A configuração já estava instalada. A configuração ativa e o Klipper foram verificados sem reiniciar."}

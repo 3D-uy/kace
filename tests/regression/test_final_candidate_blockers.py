@@ -219,7 +219,7 @@ set -euo pipefail
 export KACE_BOOTSTRAP_LIB_ONLY=1
 source "$1"
 type provision_crowsnest >/dev/null
-PRINTER_HOME="$2"
+PRINTER_HOME="$(cd "$2" && pwd)"
 PRINTER_USER="pi"
 PRINTER_GROUP="pi"
 PREBAKED="false"

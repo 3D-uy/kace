@@ -264,7 +264,8 @@ def simple_input(prompt, default=None, validate=None):
         
     prompt = prompt.rstrip(" :")
     if default is not None and str(default).strip() != "":
-        full_prompt = f"  {prompt} (default: {default}): "
+        from core.translations import t
+        full_prompt = f"  {prompt} ({t('menu.default', value=default)}): "
     else:
         full_prompt = f"  {prompt}: "
         

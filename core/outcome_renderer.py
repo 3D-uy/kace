@@ -11,7 +11,7 @@ import os
 import sys
 from typing import TextIO
 
-from core.translations import get_lang
+from core.translations import get_lang, get_mode
 from core.workflow_outcome import WorkflowOutcome, WorkflowResult
 
 
@@ -99,6 +99,12 @@ def render_workflow_result(
     if is_failure:
         title = _FAILURE_TITLES.get(language, _FAILURE_TITLES["English"])
         explanation = result.detail or title
+        if get_mode() != "Advanced":
+            explanation = {
+                "English": "Installation stopped safely. Run KACE again to continue the saved workflow. Technical details are available in advanced mode.",
+                "Español": "La instalación se detuvo de forma segura. Ejecutá KACE para continuar el flujo guardado. Los detalles técnicos están disponibles en modo avanzado.",
+                "Português": "A instalação parou com segurança. Execute o KACE para continuar o fluxo salvo. Os detalhes técnicos estão disponíveis no modo avançado.",
+            }.get(language, explanation)
         closing = _FAILURE_HINTS.get(language, _FAILURE_HINTS["English"])
         icon = "✖"
         ansi = "\033[91m"

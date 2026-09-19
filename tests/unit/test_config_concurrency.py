@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from core.config_transaction import (
     ConfigDeploymentTransaction, ConfigTransactionState, LocalConfigTransport,
-    MoonrakerConfigTransport, SftpConfigTransport, config_destination_lock,
+    MoonrakerConfigTransport, SftpConfigTransport, config_destination_lock, LocalMoonrakerConfigTransport,
 )
 from core.snapshot import create_snapshot
 from tests.unit.test_config_transaction import FakeTransport, GENERATED
@@ -95,8 +95,9 @@ class TestConfigConcurrency(unittest.TestCase):
                     self.assertEqual(result.state, ConfigTransactionState.PRECONDITION_FAILED)
                     self.assertIn(name, result.detail)
                     self.assertIn("concurrent", result.detail)
-                    snapshot.assert_not_called()
-                    self.assertEqual(os.listdir(root), [])
+                    snapshot.assert_called_once()
+                    self.assertTrue(snapshot.call_args.kwargs["deployment_id"].endswith("-proposed"))
+                    self.assertEqual(len(os.listdir(root)), 1)
                     self.assert_no_remote_mutation(transport)
 
     def test_edit_first_observed_by_reread_is_preserved(self):
@@ -144,15 +145,16 @@ class TestConfigConcurrency(unittest.TestCase):
                 os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
                 return True
 
-            transport = LocalConfigTransport(destination)
+            transport = LocalMoonrakerConfigTransport(destination)
+            transport.validate_activation_target = lambda: None
             result = self.make(transport, snapshots, confirm=approve).run()
             self.assertEqual(result.state, ConfigTransactionState.PRECONDITION_FAILED)
             self.assertEqual(os.stat(path).st_size, metadata.st_size)
             self.assertEqual(os.stat(path).st_mtime_ns, metadata.st_mtime_ns)
             with open(path, "rb") as file:
                 self.assertEqual(file.read(), b"# edited\n")
-            self.assertEqual(os.listdir(destination), ["printer.cfg"])
-            self.assertEqual(os.listdir(snapshots), [])
+            self.assertEqual(set(os.listdir(destination)), {"printer.cfg", ".kace-deploy.lock"})
+            self.assertTrue(os.listdir(snapshots)[0].endswith("-proposed"))
 
     def test_read_failure_missing_entry_or_non_bytes_cannot_be_treated_as_absence(self):
         for failure in ("exception", "missing-entry", "non-bytes"):

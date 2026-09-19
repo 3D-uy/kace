@@ -345,7 +345,7 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
         self.assertEqual(resumed.state, ConfigTransactionState.COMMITTED)
         self.assertIn("Klipper Ready", resumed.detail)
         self.assertEqual(events[-1][0], "DONE")
-        self.assertTrue(any(
+        self.assertFalse(any(
             call[0] == "restart" for call in transport.calls[before:]
         ))
 

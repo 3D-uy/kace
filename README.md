@@ -82,7 +82,7 @@ Use [KACE Studio](https://github.com/3D-uy/KACE-studio) on Windows to prepare th
 The public installer is pinned to one reviewed commit and verified before execution:
 
 ```bash
-KACE_COMMIT='a0cc0f542d6c61e38de5bb5a414e48dadba07df3'; KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
+KACE_COMMIT='47a00c15739ac9c4d477f78dd9d71446d1c8d932'; KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 Then run:
@@ -153,10 +153,11 @@ Every status still requires physical validation of the exact board revision, wir
 ## Safety and recovery model
 
 - Generated configuration is reviewed before activation and kept separate from the source tree in `~/kace/`.
-- Existing-file replacement requires a transport that can protect against concurrent edits. Otherwise KACE preserves the current file and saves a proposal for manual application.
+- Local activation uses cooperative locking, a final content comparison and atomic replacement per file. Do not save configuration through Mainsail, SSH or another tool during deployment: external editors that ignore the lock can still race with replacement. See the [publication contract](docs/en/DEPLOYMENT.md#conditional-publication-and-final-readiness-gates).
+- Remote Moonraker uploads and existing-file SFTP/offline-export replacement remain blocked; unsupported plans preserve current files and save a proposal for manual application.
 - Firmware success requires the expected build identity and physical MCU evidence. A different controller of the same model does not satisfy that check.
 - Removable-media and powered flashing flows separate preparation, operator action, re-enumeration and verification; pending work is never reported as success.
-- Rollback verifies the content it restores and preserves a later external edit as an explicit conflict.
+- Automatic recovery preserves live files and snapshots when restoration cannot be proven safe; explicit snapshot restoration remains operator-owned.
 - Recovery may require manual action. Follow the recorded state instead of repeating a flash or deployment blindly.
 
 > [!CAUTION]

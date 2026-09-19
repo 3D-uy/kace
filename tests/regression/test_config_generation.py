@@ -150,6 +150,8 @@ class TestConfigGeneration(KaceTestCase):
         finally:
             if os.path.exists(output_file):
                 os.remove(output_file)
+            if os.path.exists(output_file + ".provenance.json"):
+                os.remove(output_file + ".provenance.json")
 
     def test_anet_a8_plus_profile_overrides_board_pins(self):
         """Verify that printer profile configuration overrides motherboard default pins."""
@@ -270,6 +272,8 @@ sensor_pin: PA6
         finally:
             if os.path.exists(output_file):
                 os.remove(output_file)
+            if os.path.exists(output_file + ".provenance.json"):
+                os.remove(output_file + ".provenance.json")
 
 if __name__ == '__main__':
     unittest.main()

@@ -239,7 +239,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     require_resolved_safety_values(value_provenance)
     user_ctx.update(resolved_values)
     user_ctx["value_provenance"] = value_provenance
-    user_ctx["emit_value_provenance"] = bool(user_data.get("_value_provenance"))
+    user_ctx["emit_value_provenance"] = False
     user_ctx["kinematics"] = validate_kinematics(user_ctx.get("kinematics"))
     user_ctx["include_macros"] = include_macros
     probe_configuration = resolve_probe_configuration(user_ctx)
@@ -360,6 +360,11 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         cfg_file = output_path
 
     write_text_atomically(cfg_file, final_output)
+    import json
+    write_text_atomically(cfg_file + ".provenance.json", json.dumps(
+        {"schema": "kace-config-provenance/v1", "values": value_provenance},
+        indent=2, sort_keys=True,
+    ) + "\n")
 
     if include_macros or user_data.get("macros_generated"):
         output_dir = os.path.dirname(cfg_file)

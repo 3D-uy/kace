@@ -187,6 +187,10 @@ def _resume_firmware_workflow():
     if os.environ.get("KACE_AUTO") == "1":
         return checkpoint, "continue"
 
+    from core.translations import set_lang, set_mode, get_mode
+    saved = checkpoint.get("wizard_data") or {}
+    set_lang(saved.get("language", saved.get("lang", "English")))
+    set_mode(saved.get("mode", "Beginner"))
     state = FirmwareWorkflowState(checkpoint["state"])
     choices = []
     if state in {
@@ -201,18 +205,28 @@ def _resume_firmware_workflow():
         FirmwareWorkflowState.DEPLOYING,
     }:
         choices.append({"name": t("firmware.resume.continue"), "value": "continue"})
-    if checkpoint.get("artifact"):
+    if checkpoint.get("artifact") and state in {
+        FirmwareWorkflowState.ARTIFACT_READY, FirmwareWorkflowState.AWAITING_FLASH,
+        FirmwareWorkflowState.VERIFYING_MCU,
+    }:
         choices.append({"name": t("firmware.resume.obtain"), "value": "obtain"})
         choices.append({"name": t("firmware.resume.verify"), "value": "verify"})
-    choices.append({"name": t("firmware.resume.compile"), "value": "compile"})
+    if get_mode() == "Advanced":
+        choices.append({"name": t("firmware.resume.compile"), "value": "compile"})
     choices.append({"name": t("firmware.resume.new"), "value": "new"})
     viewed_artifact = False
     while True:
         action = numbered_select(
-            f"\n{t('firmware.resume.prompt', state=state.value)}",
+            f"\n{t('firmware.resume.prompt', state=state.value) if get_mode() == 'Advanced' else t('firmware.resume.pending')}",
             choices=choices,
             require_explicit=viewed_artifact,
         )
+        if action == "new" and not yes_no(t("firmware.resume.discard"), default=False):
+            continue
+        if action == "new":
+            from core.firmware_workflow import discard_checkpoint
+            discard_checkpoint(checkpoint)
+            checkpoint["_discarded"] = True
         if action != "obtain":
             return checkpoint, action or "continue"
         _show_prepared_firmware(checkpoint, view_only=True)
@@ -221,13 +235,42 @@ def _resume_firmware_workflow():
 
 def _show_prepared_firmware(checkpoint, *, view_only=False):
     artifact = checkpoint.get("artifact") or {}
+    # Publish a discoverable, verified convenience copy. The immutable artifact
+    # in the checkpoint remains the authority used by deployment and Studio.
+    path = artifact.get("path")
+    name = artifact.get("final_filename")
+    if path and name and os.path.basename(name) == name:
+        import hashlib
+        import tempfile
+        with open(path, "rb") as source:
+            payload = source.read()
+        if hashlib.sha256(payload).hexdigest() != artifact.get("sha256"):
+            raise FirmwareWorkflowError("firmware artifact checksum mismatch")
+        from core.firmware_workflow import checkpoint_path
+        directory = os.path.join(os.path.dirname(checkpoint_path()), "firmware-downloads")
+        os.makedirs(directory, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".firmware-", dir=directory)
+        try:
+            with os.fdopen(fd, "wb") as target:
+                target.write(payload)
+                target.flush()
+                os.fsync(target.fileno())
+            path = os.path.join(directory, name)
+            os.replace(temporary, path)
+            with open(path, "rb") as target:
+                if target.read() != payload:
+                    raise FirmwareWorkflowError("firmware convenience copy verification failed")
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
     if not view_only:
         print(f"\n\033[93m[!] {t('firmware.manual.required')}\033[0m")
-    print(f"    {t('firmware.manual.artifact', path=artifact.get('path') or t('firmware.manual.unavailable'))}")
+    print(f"    {t('firmware.manual.artifact', path=path or t('firmware.manual.unavailable'))}")
     print(
         f"    {t('firmware.manual.final_filename', filename=artifact.get('final_filename') or t('firmware.manual.board_specific'))}"
     )
-    for index, instruction in enumerate(artifact.get("instructions") or (), 1):
+    from core.translations import get_mode
+    for index, instruction in enumerate((artifact.get("instructions") or ()) if get_mode() == "Advanced" else (), 1):
         text = instruction.get("text") if isinstance(instruction, dict) else str(instruction)
         if text:
             print(f"    {index}. {text}")
@@ -322,9 +365,13 @@ def _wait_for_manual_flash(checkpoint, user_data, *, verify_immediately=False):
 
 
 def main():
+    initial_checkpoint_revision = checkpoint_revision()
+    workflow_checkpoint, resume_action = _resume_firmware_workflow()
+    if workflow_checkpoint and workflow_checkpoint.get("_discarded"):
+        initial_checkpoint_revision = (initial_checkpoint_revision[0], None)
     # ── Dashboard (bypassed in CI / auto / dev modes) ─────────
     _bypassed = os.environ.get("KACE_AUTO") == "1"
-    if not _bypassed:
+    if not _bypassed and (workflow_checkpoint is None or resume_action == "new"):
         # The interactive dashboard owns the complete landing-screen render,
         # including the sole banner for this execution.
         # Deferred import to optimize startup performance on slow Raspberry Pi hardware
@@ -343,9 +390,6 @@ def main():
     # Interactive Wizard & durable resume selection.  A compatible checkpoint
     # restores decisions after SSH/Studio/process loss; runtime objects are
     # always reconstructed or revalidated.
-    initial_checkpoint_revision = checkpoint_revision()
-    workflow_checkpoint, resume_action = _resume_firmware_workflow()
-
     user_data = {"make_command": _make_command}
     if workflow_checkpoint is not None and resume_action != "new":
         user_data.update(workflow_checkpoint.get("wizard_data") or {})
@@ -734,6 +778,9 @@ def main():
     # ==========================================
     # PHASE 4: CONFIGURATION DEPLOYMENT
     # ==========================================
+    from core.config_transaction import local_moonraker_available
+    if not local_moonraker_available():
+        print(t("deploy.remote_unsupported"))
     deploy_cfg = numbered_select(
         f"\n{t('kace.deploy_cfg_prompt')}",
         choices=[
@@ -741,7 +788,7 @@ def main():
             {"name": f"📁  {t('kace.deploy_local')}",       "value": "local"},
             {"name": f"💾  {t('kace.deploy_usb')}",         "value": "usb"},
             {"name": f"🔗  {t('kace.deploy_ssh')}",         "value": "ssh"},
-            {"name": f"🌐  {t('kace.deploy_moonraker')}",   "value": "moonraker"},
+            *([{"name": t("deploy.local_active"), "value": "moonraker"}] if local_moonraker_available() else []),
         ]
     )
 
@@ -795,6 +842,7 @@ def main():
             user_data.pop('password', None)
             password = None
     elif deploy_cfg == "moonraker":
+        user_data["moonraker_host"] = "127.0.0.1"
         if workflow_checkpoint is not None:
             workflow_checkpoint = transition_checkpoint(
                 workflow_checkpoint, FirmwareWorkflowState.DEPLOYING
@@ -821,6 +869,8 @@ def main():
                 last_error=deployment_result.detail,
             )
         _persist_workflow(workflow_checkpoint, user_data)
+        if deployment_result.ok:
+            print("\n" + t("installation.complete"))
     _finish(deployment_result)
 
 if __name__ == "__main__":

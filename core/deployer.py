@@ -256,11 +256,11 @@ def _config_result_to_workflow(result):
 
 def _interactive_configuration_review(review, yes_no_fn, *, destination=False) -> bool:
     from core.configuration_review import render_configuration_review
-    from core.translations import get_lang
+    from core.translations import get_lang, get_mode
 
     language = get_lang()
     print("\n" + render_configuration_review(review, language=language))
-    if review.diff:
+    if review.diff and get_mode() == "Advanced":
         advanced_prompt = {
             "English": "Show full technical diff?",
             "Español": "¿Mostrar el diff técnico completo?",
@@ -351,15 +351,19 @@ def _run_config_transaction(
         board=user_data.get("board", ""),
         kace_version=_KACE_VERSION,
         state_sink=state_sink,
-        verify_existing_ready=checkpoint is not None,
+        verify_existing_ready=True,
         verify_firmware=(
             lambda: _require_running_firmware_checkpoint(user_data, transport)
         ) if checkpoint is not None else None,
     )
     result = transaction.run()
-    if result.rollback_succeeded is False:
+    if result.ok and "already installed" in result.detail:
+        from core.translations import t
+        print(t("deploy.already_installed"))
+    from core.translations import get_mode
+    if result.rollback_succeeded is False and get_mode() == "Advanced":
         print(f"\033[91m[!] Rollback incomplete: {result.detail}\033[0m")
-    elif result.rollback_succeeded:
+    elif result.rollback_succeeded and get_mode() == "Advanced":
         print("\033[92m[OK] Rollback restored byte-identical configuration and Klipper Ready.\033[0m")
     return _config_result_to_workflow(result)
 
@@ -393,7 +397,9 @@ def _verify_running_firmware_checkpoint(user_data, host, port, api_key=None):
             WorkflowOutcome.FIRMWARE_FAILED,
             f"Klipper firmware verification failed after deployment: {exc}",
         )
-    print(f"\033[92m[OK] Klipper reports compiled firmware {reported}.\033[0m")
+    from core.translations import get_mode
+    if get_mode() == "Advanced":
+        print(f"\033[92m[OK] Klipper reports compiled firmware {reported}.\033[0m")
     return workflow_success(f"Configuration deployed and firmware {reported} verified.")
 
 
@@ -473,12 +479,12 @@ def deploy_moonraker(user_data):
     """Deploy configuration through the same transaction over Moonraker."""
     from urllib.parse import urlsplit
 
-    from core.config_transaction import MoonrakerConfigTransport
+    from core.config_transaction import configuration_transport, local_moonraker_available
     from core.menu import password_input, simple_input, yes_no
     from core.moonraker import DEFAULT_PORT, _base_url, check_moonraker
     from core.translations import t
 
-    host = simple_input(t("moonraker.host_prompt"), default=user_data.get("moonraker_host", ""))
+    host = simple_input(t("moonraker.host_prompt"), default=user_data.get("moonraker_host") or ("127.0.0.1" if local_moonraker_available() else user_data.get("host", "")))
     if not host:
         return cancelled("Moonraker deployment cancelled before connecting.")
     port_value = simple_input(
@@ -489,7 +495,10 @@ def deploy_moonraker(user_data):
         port = int(port_value) if port_value else DEFAULT_PORT
     except ValueError:
         return failed(WorkflowOutcome.PRECONDITION_FAILED, "Invalid Moonraker port.")
-    api_key = simple_input(t("moonraker.api_key_prompt"), default="") or ""
+    api_key = user_data.get("moonraker_api_key") or ""
+    local_authorized = host in {"localhost", "127.0.0.1", "::1"} and local_moonraker_available()
+    if not local_authorized or not check_moonraker(host, port, api_key=api_key)[0]:
+        api_key = simple_input(t("moonraker.api_key_prompt"), default="") or ""
     if api_key and urlsplit(_base_url(host, port)).scheme != "https":
         return failed(
             WorkflowOutcome.PRECONDITION_FAILED,
@@ -516,8 +525,14 @@ def deploy_moonraker(user_data):
 
     user_data["moonraker_host"] = host
     user_data["moonraker_port"] = port
+    try:
+        transport = configuration_transport(host, port, api_key or None)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc))
+    if not transport.supports_conditional_write(b""):
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, t("deploy.remote_unsupported"))
     result = _run_config_transaction(
-        MoonrakerConfigTransport(host, port, api_key or None),
+        transport,
         user_data,
         "none",
         activation_selector=_select_config_activation,
@@ -691,6 +706,7 @@ class _MoonrakerClient:
         self._host    = host
         self._port    = port
         self._api_key = api_key
+        self._config_transport = None
 
     def get_klippy_state(self) -> str:
         from core.moonraker import get_klipper_state
@@ -715,9 +731,11 @@ class _MoonrakerClient:
             raise RuntimeError(f"upload failed for {remote_name}: {detail}")
 
     def supports_conditional_config_write(self, previous):
-        return False
+        return self._config_transport is not None and self._config_transport.supports_conditional_write(previous)
 
     def upload_config_if_unchanged(self, content, remote_name, previous):
+        if self._config_transport is not None:
+            return self._config_transport.upload_if_unchanged(remote_name, content, previous)
         raise RuntimeError("Moonraker has no atomic conditional config upload")
 
     def firmware_restart(self):
@@ -735,6 +753,9 @@ class _MoonrakerClient:
             raise RuntimeError(f"Moonraker restart failed: {detail}")
 
     def download_config(self, filename: str) -> tuple:
+        if self._config_transport is not None:
+            value = self._config_transport.read_files((filename,))[filename]
+            return value is not None, value
         from core.moonraker import download_printer_cfg
         return download_printer_cfg(self._host, self._port, filename, api_key=self._api_key)
 
@@ -746,6 +767,8 @@ class _MoonrakerClient:
         )
 
     def read_config_files(self, names):
+        if self._config_transport is not None:
+            return self._config_transport.read_files(names)
         from core.config_transaction import MoonrakerConfigTransport
         return MoonrakerConfigTransport(self._host, self._port, self._api_key).read_files(names)
 
@@ -784,12 +807,13 @@ def deploy_firmware_installation(user_data):
     flashing. The installation workflow owns physical identity, fingerprint
     verification, configuration upload, restart and rollback.
     """
-    from core.config_transaction import MoonrakerConfigTransport, config_destination_lock
+    from core.config_transaction import configuration_transport, config_destination_lock
+    from contextlib import nullcontext
     from core.moonraker import DEFAULT_PORT
     from core.moonraker_deployer import DeployResult, DeployState
 
     try:
-        destination = MoonrakerConfigTransport(
+        destination = configuration_transport(
             user_data.get("moonraker_host", "localhost"),
             int(user_data.get("moonraker_port", DEFAULT_PORT)),
         )
@@ -800,13 +824,14 @@ def deploy_firmware_installation(user_data):
             f"configuration destination could not be identified: {exc}",
         )
     with lock:
-        return _deploy_firmware_installation_locked(user_data)
+        with destination.destination_lock() if hasattr(destination, "destination_lock") else nullcontext():
+            return _deploy_firmware_installation_locked(user_data)
 
 
 def _deploy_firmware_installation_locked(user_data):
     from core.mcu_monitor import McuPresenceMonitor
     from core.config_transaction import (
-        MoonrakerConfigTransport, read_config_state, revalidate_config_state, require_conditional_writes,
+        configuration_transport, read_config_state, revalidate_config_state, require_conditional_writes,
     )
     from core.managed_config import build_managed_config_plan
     from core.menu import yes_no
@@ -872,13 +897,15 @@ def _deploy_firmware_installation_locked(user_data):
                 DeployState.FAILED_PRECONDITION,
                 "generated hardware configuration failed deployment preflight",
             )
-        config_transport = MoonrakerConfigTransport(host, port, api_key)
+        config_transport = configuration_transport(host, port, api_key)
+        client._config_transport = config_transport
         config_transport.validate_activation_target()
         remote_files = read_config_state(config_transport, generated_hardware, generated_macros)
         config_plan = build_managed_config_plan(
             generated_hardware, generated_macros, remote_files
         )
         from core.configuration_review import build_configuration_review
+        require_conditional_writes(config_transport, config_plan)
         configuration_review = build_configuration_review(config_plan)
         if not configuration_review.validation.valid:
             _interactive_configuration_review(configuration_review, yes_no)

@@ -19,6 +19,17 @@ This guide describes the manual Raspberry Pi Imager path for installing **Mainsa
 
 For the integrated Windows workflow—imaging, first-boot configuration, discovery, SSH, and the pinned KACE bootstrap—use [KACE Studio](https://github.com/3D-uy/KACE-studio).
 
+Studio also offers **Fluidd** on the same verified MainsailOS base (32/64-bit).
+The bootstrap contract `PREBAKED=true` covers the installed Klipper/Moonraker
+stack. With `DASHBOARD=fluidd`, bootstrap installs the SHA-256 pinned Fluidd
+release and client configuration, then serves Fluidd on port 80 through Nginx.
+It disables only the known vendor Mainsail site link, preserves the vendor file,
+and restores the link if Nginx validation fails. `DASHBOARD=both` retains
+Mainsail on port 80 and adds Fluidd on port 81; `DASHBOARD=mainsail` keeps the
+vendor site. Raspberry Pi OS Lite continues to install either dashboard or both.
+No archived FluiddPI image is used. This prepares the host stack; the normal
+printer/MCU setup in KACE still determines printer readiness.
+
 ---
 
 ## ⚠️ Before you start

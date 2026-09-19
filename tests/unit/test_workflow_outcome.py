@@ -88,7 +88,8 @@ class TestWorkflowOutcomeContract(unittest.TestCase):
             color=False,
         )
         self.assertIn("✖ Installation failed", rendered)
-        self.assertIn("upload verification failed", rendered)
+        self.assertIn("Technical details", rendered)
+        self.assertNotIn("upload verification failed", rendered)
         self.assertNotIn("KACE_RESULT", rendered)
 
     def test_machine_marker_is_opt_in_and_contract_is_unchanged(self):

@@ -750,8 +750,9 @@ class Deployer:
                         rollback_ok,
                     )
 
-            self._transition(DeployState.FIRMWARE_RESTART, "restarting Klipper")
-            self.client.firmware_restart()
+            if self.manifest.artifacts():
+                self._transition(DeployState.FIRMWARE_RESTART, "restarting Klipper")
+                self.client.firmware_restart()
             self._transition(DeployState.VERIFYING_CONFIG, "waiting for second Klipper Ready")
             if not self._wait_moonraker():
                 rollback_ok, rollback_detail = self._rollback()

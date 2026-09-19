@@ -18,10 +18,16 @@ class TestProfileValueResolution(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".cfg", delete=False) as output:
             path = output.name
         try:
-            return generate_config(parsed, user, output_path=path)
+            result = generate_config(parsed, user, output_path=path)
+            import json
+            with open(path + ".provenance.json", encoding="utf-8") as source:
+                self.assertEqual(json.load(source)["values"], result["value_provenance"])
+            return result
         finally:
             if os.path.exists(path):
                 os.remove(path)
+            if os.path.exists(path + ".provenance.json"):
+                os.remove(path + ".provenance.json")
 
     def test_profile_motion_heater_and_driver_values_survive_generation(self):
         parsed = _parsed(
@@ -97,7 +103,7 @@ class TestProfileValueResolution(unittest.TestCase):
         self.assertEqual(
             result["value_provenance"]["max_velocity"], ValueProvenance.PROFILE.value
         )
-        self.assertIn("#   max_velocity=PROFILE", content)
+        self.assertNotIn("#   max_velocity=PROFILE", content)
 
     def test_user_override_wins_and_is_recorded(self):
         parsed = _parsed(printer={"kinematics": "cartesian", "max_velocity": "420"})

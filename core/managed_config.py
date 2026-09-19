@@ -43,6 +43,7 @@ _PRESERVED_OPTIONS = {
     "extruder": {
         "pid_kp", "pid_ki", "pid_kd", "pressure_advance",
         "pressure_advance_smooth_time", "nozzle_diameter", "filament_diameter",
+        "rotation_distance", "gear_ratio", "microsteps",
     },
     "heater_bed": {"pid_kp", "pid_ki", "pid_kd"},
     "force_move": {"enable_force_move"},
@@ -198,7 +199,8 @@ def _carry_user_tuning(generated: str, existing_root: str) -> str:
     for section, options in existing.items():
         if section not in generated_sections:
             continue
-        for option in _preserved_names(section):
+        preserved = _preserved_names(section) | (set(options) - set(generated_options[section]))
+        for option in sorted(preserved):
             if (
                 section in {"extruder", "heater_bed"}
                 and option.startswith("pid_")
@@ -355,7 +357,7 @@ def effective_hardware_text(plan: ManagedConfigPlan, *, strict: bool = True) -> 
     return text
 
 
-def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: str = "", active: str = "") -> tuple[str, str, bool]:
+def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: str = "", active: str = "", inline: bool = False) -> tuple[str, str, bool]:
     nl = _newline(existing or generated)
     generated, generated_includes = _extract_generated_includes(generated)
     owned = {name.casefold() for name, _, _ in _section_spans(generated)}
@@ -367,7 +369,19 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
         raise ValueError("printer.cfg contains malformed or duplicate KACE managed markers")
 
     if _MANAGED_RE.search(existing):
-        base = _MANAGED_RE.sub("", existing, count=1)
+        retained = ""
+        if inline:
+            managed = _MANAGED_RE.search(existing).group(0)
+            managed = managed.replace(MANAGED_BEGIN, "").replace(MANAGED_END, "")
+            own_includes = {f"include {HARDWARE_REMOTE}", f"include {MACROS_REMOTE}"}
+            # Users edit printer.cfg directly in root layout. Preserve added
+            # sections/includes even when they sit inside the generated block.
+            retained = "".join(
+                managed[start:end] for name, start, end in _section_spans(managed)
+                if name.casefold() not in owned | own_includes
+                and f"[{name}]" not in generated_includes
+            )
+        base = _MANAGED_RE.sub(lambda _: retained, existing, count=1)
     else:
         base = existing
     # Bootstrap and external tools may have reintroduced generated-owned
@@ -383,7 +397,20 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
     }
     extra = [line for line in generated_includes if line[1:-1].casefold() not in existing_include_names]
     block = _managed_block(extra, include_macros, nl)
-    generated, calibration = _root_calibration(generated, saved, active)
+    if inline:
+        # SAVE_CONFIG remains authoritative when its value is not explicitly
+        # active in the root. Keep other calibration defaults beside their pins.
+        saved_options = _section_options(_autosave_text(saved))
+        active_options = _section_options(active)
+        for section, start, end in reversed(list(_section_spans(generated))):
+            removed = set(saved_options.get(section.casefold(), {})) - set(active_options.get(section.casefold(), {}))
+            lines = generated[start:end].splitlines(True)
+            lines = [line for line in lines if not any(re.match(r"^" + re.escape(key) + r"\s*[:=]", line) for key in removed)]
+            generated = generated[:start] + "".join(lines) + generated[end:]
+        block = block.replace("[include " + HARDWARE_REMOTE + "]", generated.rstrip())
+        calibration = ""
+    else:
+        generated, calibration = _root_calibration(generated, saved, active)
     if calibration:
         block = block.replace(MANAGED_END, calibration.replace("\n", nl) + MANAGED_END)
     base = base.lstrip("\r\n")
@@ -429,10 +456,16 @@ def build_managed_config_plan(
         and _has_include(existing_root, LEGACY_MACROS_REMOTE)
     )
     effective_macros = None if preserve_existing_macros else generated_macros
+    root_layout = (existing_root_bytes is None or "# KACE layout: root-v1" in existing_root
+                   or (_section_options(existing_root).get("printer", {}).get("kinematics") == "none"
+                       and not any(name.startswith("stepper_") for name in _section_options(existing_root))))
+    existing_root = existing_root.replace("# KACE layout: root-v1\n", "")
     root, generated, migrated = _reconcile_root(
         existing_root, generated, effective_macros is not None, save_config,
-        existing_hardware + "\n" + existing_root,
+        existing_hardware + "\n" + existing_root, inline=root_layout,
     )
+    if root_layout:
+        root = "# KACE layout: root-v1\n" + root
     root += save_config
 
     artifacts = [
@@ -443,6 +476,8 @@ def build_managed_config_plan(
             remote_files.get(HARDWARE_REMOTE),
         ),
     ]
+    if root_layout:
+        artifacts = [item for item in artifacts if item.remote_name != HARDWARE_REMOTE]
     if effective_macros is not None:
         artifacts.append(PlannedConfigArtifact(
             MACROS_REMOTE, effective_macros, remote_files.get(MACROS_REMOTE)
