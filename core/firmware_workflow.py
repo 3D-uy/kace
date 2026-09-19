@@ -171,6 +171,18 @@ def checkpoint_revision(path: Optional[str] = None) -> tuple[str, Optional[str]]
     return destination, digest
 
 
+def discard_checkpoint(checkpoint):
+    """Archive only the revision explicitly discarded by the operator."""
+    expected = checkpoint.get(_STORAGE_REVISION)
+    if not expected:
+        raise CheckpointConflict("checkpoint revision is unavailable")
+    destination = expected[0]
+    with exclusive_file_lock(destination + ".lock", timeout_seconds=30):
+        if checkpoint_revision(destination) != tuple(expected):
+            raise CheckpointConflict("checkpoint changed before discard; reload it")
+        os.replace(destination, destination + ".discarded-" + uuid.uuid4().hex)
+
+
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -428,6 +440,29 @@ def write_checkpoint(
                 os.remove(temporary)
         if isinstance(checkpoint, dict):
             checkpoint[_STORAGE_REVISION] = (destination, hashlib.sha256(encoded).hexdigest())
+    # Normal CLI output stays human-readable; Studio also observes the file.
+    if os.environ.get("KACE_MACHINE_OUTPUT") != "1":
+        return destination
+    # Emit only after durable publication. Studio observes; it owns no state.
+    try:
+        from core.moonraker_deployer import JsonEventSink
+        artifact = validated.get("artifact") or {}
+        state = validated["state"]
+        JsonEventSink()({
+            "schema": 2, "workflow_kind": "firmware_deployment",
+            "workflow_id": validated["workflow_id"], "sequence": validated["sequence"],
+            "state": state, "detail": validated.get("last_error", ""),
+            "data": {
+                "firmware_authority": "durable_checkpoint",
+                "last_error": validated.get("last_error", ""),
+                "language": validated.get("wizard_data", {}).get("language", "English"),
+                "staged_path": artifact.get("path", ""),
+                "final_filename": artifact.get("final_filename", ""),
+                "download_available": state in {"ARTIFACT_READY", "AWAITING_FLASH", "VERIFYING_MCU"},
+            },
+        })
+    except (OSError, ValueError):
+        pass  # A closed terminal cannot invalidate a committed checkpoint.
     return destination
 
 

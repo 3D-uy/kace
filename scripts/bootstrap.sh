@@ -2124,6 +2124,19 @@ else
 fi
 
 if [ "$INSTALL_OK" -ne 1 ]; then
+    # The installer also returns the wizard outcome. A durable, valid checkpoint
+    # distinguishes an installed agent awaiting recovery from installation loss.
+    if [ -x "$PRINTER_HOME/kace/venv/bin/python" ] && (
+        cd "$PRINTER_HOME/kace" && ./venv/bin/python -c '
+from core.firmware_workflow import load_checkpoint
+c = load_checkpoint("firmware-workflow.json", verify_artifact=True)
+raise SystemExit(0 if c and c["state"] != "COMPLETE" else 1)
+' >/dev/null 2>&1
+    ); then
+        log_warn "KACE is installed. Continue the pending installation by running kace."
+        emit_bootstrap_terminal "workflow_cancelled" "RECOVERY_AVAILABLE" "$INSTALL_EXIT"
+        exit "$INSTALL_EXIT"
+    fi
     case "$INSTALL_EXIT" in
         2)
             emit_bootstrap_terminal "workflow_cancelled" "CANCELLED" "$INSTALL_EXIT"

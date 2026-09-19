@@ -138,16 +138,12 @@ class MoonrakerBoundaryTests(unittest.TestCase):
     @patch("core.menu.numbered_select", return_value="firmware")
     @patch("core.moonraker.check_moonraker", return_value=(True, "OK"))
     @patch("core.menu.simple_input", side_effect=["pi.local", "7125", ""])
-    def test_reachable_host_uses_common_transaction(self, _input, _check, _select, run):
+    def test_remote_only_host_is_rejected_before_review(self, _input, _check, _select, run):
         result = deploy_moonraker({})
-        self.assertTrue(result.ok)
-        transport, _user, activation = run.call_args.args
-        self.assertEqual(transport.host, "pi.local")
-        self.assertEqual(transport.port, 7125)
-        self.assertEqual(activation, "none")
+        self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
+        self.assertIn("Moonraker", result.detail)
+        run.assert_not_called()
         _select.assert_not_called()
-        self.assertEqual(run.call_args.kwargs["activation_selector"](), "firmware")
-        _select.assert_called_once()
 
     @patch("core.menu.yes_no", return_value=False)
     @patch("core.moonraker.check_moonraker", return_value=(False, "offline"))

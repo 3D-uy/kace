@@ -120,7 +120,7 @@ class DryRunPresentationTests(unittest.TestCase):
     def test_summary_hides_full_diff_by_default(self):
         rendered = render_configuration_review(self.review, language="Español", color=False)
         self.assertIn("Resumen de configuración", rendered)
-        self.assertIn("kace/generated-hardware.cfg", rendered)
+        self.assertIn("printer.cfg", rendered)
         self.assertNotIn("--- remote/printer.cfg", rendered)
         self.assertIn("advertencia", rendered)
 
@@ -137,7 +137,8 @@ class DryRunPresentationTests(unittest.TestCase):
     def test_advanced_mode_prints_full_diff(self):
         answers = iter((True, False))
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
+        from unittest.mock import patch
+        with patch("core.translations.get_mode", return_value="Advanced"), contextlib.redirect_stdout(output):
             accepted = _interactive_configuration_review(
                 self.review, lambda _prompt, default=False: next(answers)
             )

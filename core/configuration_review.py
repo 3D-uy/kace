@@ -76,11 +76,11 @@ def _header_value(text: str, label: str) -> str:
 
 def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
     hardware = effective_hardware_text(plan)
-    generated_guidance = _artifact_text(plan, HARDWARE_REMOTE)
+    generated_guidance = _artifact_text(plan, HARDWARE_REMOTE) or _artifact_text(plan, "printer.cfg")
     macros = _artifact_text(plan, MACROS_REMOTE)
     sections = _sections(hardware)
     errors: list[ReviewMessage] = []
-    planned_serial = _sections(_artifact_text(plan, HARDWARE_REMOTE)).get("mcu", {}).get("serial")
+    planned_serial = _sections(generated_guidance).get("mcu", {}).get("serial")
     if planned_serial and sections.get("mcu", {}).get("serial") != planned_serial:
         errors.append(ReviewMessage("included-mcu-override", "A user include overrides the selected MCU serial; resolve it before deployment."))
     warnings: list[ReviewMessage] = [
@@ -307,29 +307,64 @@ def render_configuration_review(
         }.get(language, {})
         for source, target in prefixes.items():
             if text.startswith(source):
-                return target + text[len(source):]
+                return target + text[len(source):].replace("hotend PID", "PID del hotend" if language == "Español" else "PID do hotend").replace("heated-bed PID", "PID de la cama" if language == "Español" else "PID da mesa").replace("physical Z endstop", "final de carrera Z" if language == "Español" else "fim de curso Z").replace("probe Z offset", "desplazamiento Z del sensor" if language == "Español" else "deslocamento Z da sonda")
         return text
+
+    from core.translations import get_mode
+    advanced = get_mode() == "Advanced"
+    def message(item):
+        if language == "English" or advanced:
+            return item.message
+        code = re.sub(r"homing-[xyz]-", "homing-", item.code)
+        code = re.sub(r"^(extruder|heater_bed)-", "heater-", code)
+        return _REVIEW_MESSAGES.get(code, _REVIEW_MESSAGES["managed-plan"])[0 if language == "Español" else 1]
 
     lines = [paint("info", labels["title"]), ""]
     lines.extend(f"  {paint(item.status, localize(item.text))}" for item in review.summary)
     lines.extend(["", paint("info", labels["files"])])
     if review.changed_files:
-        lines.extend(f"  - {name}" for name in review.changed_files)
+        friendly = {"kace/generated-hardware.cfg": ("Configuración de hardware", "Configuração de hardware"), "kace/generated-macros.cfg": ("Macros iniciales", "Macros iniciais")}
+        lines.extend(f"  - {friendly[name][0 if language == 'Español' else 1] if not advanced and language != 'English' and name in friendly else name}" for name in review.changed_files)
     else:
-        lines.append("  - (none)")
+        lines.append("  - " + {"Español": "Sin cambios", "Português": "Sem alterações"}.get(language, "No changes"))
     lines.extend(["", paint("info", labels["changes"])])
     if review.important_changes:
         lines.extend(f"  - {localize(change)}" for change in review.important_changes)
     else:
-        lines.append("  - (none)")
-    if review.validation.warnings:
+        lines.append("  - " + {"Español": "Sin cambios", "Português": "Sem alterações"}.get(language, "No changes"))
+    commissioning = [item for item in review.validation.warnings if "inferred" in item.code]
+    warnings = [item for item in review.validation.warnings if item not in commissioning]
+    if warnings:
         lines.extend(["", paint("warning", labels["warnings"])])
-        lines.extend(f"  - {item.message}" for item in review.validation.warnings)
+        lines.extend(f"  - {message(item)}" for item in warnings)
+    if commissioning:
+        heading = {"English": "Next: hardware commissioning", "Español": "Próximos pasos: commissioning del hardware", "Português": "Próximos passos: comissionamento do hardware"}[language]
+        lines.extend(["", paint("info", heading)])
+        lines.extend(f"  - {message(item)}" for item in commissioning)
     if review.validation.errors:
         lines.extend(["", paint("error", labels["errors"])])
-        lines.extend(f"  - {item.message}" for item in review.validation.errors)
+        lines.extend(f"  - {message(item)}" for item in review.validation.errors)
     validation = labels["validation_ok"] if review.validation.valid else labels["validation_bad"]
     lines.extend(["", labels["footer"].format(
         files=len(review.changed_files), warnings=len(review.validation.warnings), validation=validation
     )])
     return "\n".join(lines)
+
+
+_REVIEW_MESSAGES = {
+    "managed-plan": ("Se modificarán opciones existentes. Revisá los detalles en modo avanzado antes de confirmar.", "Opções existentes serão alteradas. Revise os detalhes no modo avançado antes de confirmar."),
+    "included-mcu-override": ("Un archivo incluido cambia la conexión MCU seleccionada. Corregilo antes de instalar.", "Um arquivo incluído altera a conexão MCU selecionada. Corrija antes de instalar."),
+    "probe-z-endstop": ("El sensor y el final de carrera Z no coinciden. Revisá la selección del sensor.", "A sonda e o fim de curso Z não correspondem. Revise a seleção da sonda."),
+    "physical-z-position": ("Falta la posición del final de carrera Z.", "Falta a posição do fim de curso Z."),
+    "homing-geometry": ("La geometría de homing está incompleta. Revisá límites y finales de carrera.", "A geometria de homing está incompleta. Revise limites e fins de curso."),
+    "homing-ambiguous": ("La dirección de homing es ambigua; confirmala en el asistente.", "A direção de homing é ambígua; confirme no assistente."),
+    "homing-contradiction": ("La dirección de homing contradice la posición del final de carrera.", "A direção de homing contradiz a posição do fim de curso."),
+    "homing-inferred": ("Verificá la dirección del movimiento y los finales de carrera durante el commissioning.", "Verifique a direção do movimento e os fins de curso durante o comissionamento."),
+    "inferred-homing": ("Verificá la dirección del movimiento y los finales de carrera durante el commissioning.", "Verifique a direção do movimento e os fins de curso durante o comissionamento."),
+    "heater-watermark-pid": ("El calentador usa control por histéresis pero conserva parámetros PID incompatibles.", "O aquecedor usa controle por histerese mas contém parâmetros PID incompatíveis."),
+    "heater-pid-macro": ("La macro PID no es compatible con el control del calentador seleccionado.", "A macro PID não é compatível com o controle do aquecedor selecionado."),
+    "probe-calibration-missing": ("Falta la guía de calibración del sensor Z.", "Falta a orientação de calibração da sonda Z."),
+    "probe-calibration-extra": ("La guía de calibración del sensor no corresponde a un final de carrera físico.", "A orientação de calibração da sonda não corresponde a um fim de curso físico."),
+    "endstop-calibration-missing": ("Falta la guía de calibración del final de carrera Z.", "Falta a orientação de calibração do fim de curso Z."),
+    "active-unresolved": ("La configuración contiene un valor sin resolver; completá los datos antes de instalar.", "A configuração contém um valor não resolvido; complete os dados antes de instalar."),
+}

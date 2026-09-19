@@ -41,7 +41,7 @@
 | Moonraker · Mainsail · Fluidd | API e escolha da interface durante bootstrap | A configuração existente pode exigir aplicação manual. |
 
 > [!IMPORTANT]
-> **0.9.4-rc.2 é uma candidata para testes controlados.** Consulte o [guia de validação física](../HARDWARE_TESTING.md) (EN). Se o transporte não protege atomicamente uma edição concorrente, o KACE bloqueia a substituição de arquivos existentes e preserva uma proposta revisada. A recuperação pode exigir intervenção manual; esses estados não são apresentados como sucesso.
+> **0.9.4-rc.2 é uma candidata para testes controlados.** Consulte o [guia de validação física](../HARDWARE_TESTING.md) (EN). A ativação local usa bloqueio cooperativo entre processos KACE, comparação final do conteúdo e substituição atômica por arquivo. Não salve alterações pelo Mainsail, SSH ou outro editor durante a implantação: um escritor externo que ignore o bloqueio pode alterar o arquivo entre a comparação e a substituição e perder sua edição. A API remota do Moonraker e substituições por SFTP/exportação offline continuam bloqueadas; preservam uma proposta para aplicação manual. Recuperação pendente não é apresentada como sucesso.
 
 ## Índice
 

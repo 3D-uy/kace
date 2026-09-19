@@ -205,9 +205,9 @@ gcode:
             with self.subTest(previous=previous):
                 first = build_managed_config_plan(GENERATED, None, previous)
                 files = {item.remote_name: item.content for item in first.artifacts}
-                self.assertIn(b"max_velocity: 300", files[HARDWARE_REMOTE])
+                self.assertIn(b"max_velocity: 300", files[ROOT_REMOTE])
                 self.assertIn(b"pid_Kp: 22.2", files[ROOT_REMOTE])
-                self.assertIn(b"enable_force_move: True", files[HARDWARE_REMOTE])
+                self.assertIn(b"enable_force_move: True", files[ROOT_REMOTE])
                 self.assertEqual(build_managed_config_plan(GENERATED, None, files).changed_artifacts, ())
 
     def test_invalid_previous_hardware_encoding_prevents_replacement(self):

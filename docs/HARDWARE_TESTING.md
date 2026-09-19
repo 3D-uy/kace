@@ -14,11 +14,16 @@ behavior, motion or an entire printer. Record observations per exact board revis
   completion requires the requested restart, Klipper Ready and firmware verification.
 - Existing configuration is reconciled, including SAVE_CONFIG and explicit nested
   user includes. Missing, cyclic, wildcard or outside-root includes fail closed.
-- Local/SFTP can create an absent file without replacing a concurrent creation.
-  Existing-file replacement has no atomic content precondition in these transports;
-  Moonraker upload has no equivalent conditional operation. A transaction needing
-  those operations stops before writes/firmware and saves a `*-proposed` snapshot
-  for operator review and application. This is an expected limitation, not success.
+- Local activation on the printer host uses a cooperative destination lock,
+  comparison of reviewed bytes after staging, atomic replacement per file and
+  readback verification. KACE writers using the lock are serialized. An external
+  writer ignoring it can still race between comparison and replacement; its edit
+  may be lost. Do not save configuration from Mainsail, SSH or another tool during
+  deployment. See the [publication contract](en/DEPLOYMENT.md#conditional-publication-and-final-readiness-gates).
+- Offline local/SFTP export can create an absent file exclusively but cannot
+  replace existing files under this contract. Remote Moonraker upload remains
+  blocked for changed plans. Unsupported operations retain a `*-proposed`
+  snapshot for operator review; they are not reported as success.
 - Recovery preserves live edits and durable snapshots when safe restoration cannot
   be proven. Bootstrap power-reconciliation failures likewise preserve live files
   and backups and report manual recovery paths. Never blindly copy a backup over
@@ -35,8 +40,9 @@ behavior, motion or an entire printer. Record observations per exact board revis
    `data/firmware_deployments.yaml` and the BoardContract authority settings. A
    matching MCU family or a generated artifact does not authorize another method.
 4. Preserve original host configuration and firmware recovery instructions outside
-   the target. Plan manual configuration application if conditional replacement is
-   unsupported. Resolve all proposal/recovery states before claiming completion.
+   the target. Coordinate with other editors so none save during local deployment.
+   Plan manual application for unsupported transports. Resolve all proposal/recovery
+   states before claiming completion.
 5. Prepare one expendable, clearly identified SD/USB target. Confirm the host system
    disk is excluded. Do not use valuable storage for the first writer trial.
 

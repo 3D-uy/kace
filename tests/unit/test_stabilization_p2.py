@@ -23,18 +23,21 @@ from core.configuration_review import build_configuration_review, render_configu
 
 
 class ManagedSettingWarningsTests(unittest.TestCase):
-    def test_replaced_and_removed_settings_are_visible_without_opening_diff(self):
-        generated = b"[extruder]\nrotation_distance: 22\n[probe]\nz_offset: 0\n"
-        root = b"[extruder]\nrotation_distance: 23.7\nmax_extrude_only_distance: 120\n[probe]\nz_offset: 1.8\n"
+    def test_replaced_settings_are_visible_and_calibrated_values_are_preserved(self):
+        generated = b"[extruder]\nrotation_distance: 22\nmax_temp: 250\n[probe]\nz_offset: 0\n"
+        root = b"[extruder]\nrotation_distance: 23.7\nmax_temp: 260\nmax_extrude_only_distance: 120\n[probe]\nz_offset: 1.8\n"
         plan = build_managed_config_plan(generated, None, {ROOT_REMOTE: root})
         rendered = render_configuration_review(build_configuration_review(plan), color=False)
-        for setting in ("rotation_distance", "max_extrude_only_distance"):
-            self.assertTrue(any(setting in warning for warning in plan.warnings))
-            self.assertIn(setting, rendered)
-        self.assertIn("23.7", rendered)
-        self.assertIn("22", rendered)
-        self.assertFalse(any("z_offset" in warning for warning in plan.warnings))
-        self.assertIn(b"z_offset: 1.8", next(a.content for a in plan.artifacts if a.remote_name == ROOT_REMOTE))
+        self.assertTrue(any("max_temp" in warning for warning in plan.warnings))
+        self.assertIn("max_temp", rendered)
+        self.assertIn("260", rendered)
+        self.assertIn("250", rendered)
+        for setting in ("rotation_distance", "max_extrude_only_distance", "z_offset"):
+            self.assertFalse(any(setting in warning for warning in plan.warnings))
+        combined = b"\n".join(a.content for a in plan.artifacts)
+        self.assertIn(b"rotation_distance: 23.7", combined)
+        self.assertIn(b"max_extrude_only_distance: 120", combined)
+        self.assertIn(b"z_offset: 1.8", combined)
 
     def test_removed_managed_section_and_changed_macro_body_are_reported(self):
         plan = build_managed_config_plan(b"[mcu]\nserial: same\n", b"[gcode_macro START]\ngcode:\n  G28\n", {

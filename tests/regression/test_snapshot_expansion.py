@@ -460,6 +460,8 @@ class TestSnapshotExpansion(KaceTestCase):
         finally:
             if os.path.exists(output_file):
                 os.remove(output_file)
+            if os.path.exists(output_file + ".provenance.json"):
+                os.remove(output_file + ".provenance.json")
 
     # ── Individual board tests ─────────────────────────────────────────────────
 

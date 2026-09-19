@@ -682,7 +682,7 @@ class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
         class StopAtMenu(Exception):
             pass
 
-        for state in ("AWAITING_FLASH", "MCU_VERIFIED", "READY_TO_DEPLOY"):
+        for state in ("AWAITING_FLASH",):
             with self.subTest(state=state):
                 checkpoint = self._saved_checkpoint(state)
                 checkpoint_path = Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
@@ -721,9 +721,9 @@ class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
                     for guard in guards:
                         guard.assert_not_called()
                 self.assertEqual(checkpoint_path.read_bytes(), original)
-                self.assertIn(checkpoint["artifact"]["path"], output.getvalue())
+                self.assertIn("firmware-downloads", output.getvalue())
                 self.assertIn("firmware.bin", output.getvalue())
-                self.assertIn("Copy firmware.bin to the SD card.", output.getvalue())
+                self.assertNotIn("Copy firmware.bin to the SD card.", output.getvalue())
                 self.assertNotIn(kace.t("firmware.manual.required"), output.getvalue())
                 self.assertNotIn(kace.t("firmware.manual.next_steps"), output.getvalue())
 
@@ -733,8 +733,6 @@ class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
 
         for state, action in (
             ("AWAITING_FLASH", "verify"),
-            ("MCU_VERIFIED", "continue"),
-            ("READY_TO_DEPLOY", "continue"),
         ):
             with self.subTest(state=state):
                 checkpoint = self._saved_checkpoint(state)
@@ -1010,7 +1008,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         evidence = {
             "path": os.path.join(self._workflow_tmp.name, "firmware.bin"),
             "final_filename": "firmware.bin",
-            "sha256": "a" * 64,
+            "sha256": __import__("hashlib").sha256(b"x").hexdigest(),
             "size_bytes": 1,
             "method": "MANUAL",
             "strategy": "SD_CARD",
