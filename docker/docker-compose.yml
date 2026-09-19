@@ -1,0 +1,15 @@
+services:
+  kace:
+    image: kace-dev
+    build:
+      context: ..
+      dockerfile: docker/ci/Dockerfile
+    volumes:
+      - ..:/workspace
+    ports:
+      - "127.0.0.1:7125:7125"
+    stdin_open: true
+    tty: true
+    environment:
+      PYTHONUNBUFFERED: "1"
+      KACE_DOCKER: "1"

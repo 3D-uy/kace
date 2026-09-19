@@ -116,6 +116,20 @@ Build the development image with:
 docker build -f docker/ci/Dockerfile -t kace-dev .
 ```
 
+For the interactive simulation menu, Compose provides the same image and mounts
+the repository at `/workspace`. Run these commands from the repository root:
+
+```bash
+docker compose -f docker/docker-compose.yml config --quiet
+docker compose -f docker/docker-compose.yml build
+docker compose -f docker/docker-compose.yml run --rm --service-ports kace
+```
+
+The simulated Moonraker API is available only on `127.0.0.1:7125`. Stop any other
+local service using that port before starting the menu. Select `12` to exit;
+`--rm` removes the container. Generated files under `/workspace` remain in your
+checkout. No host devices are passed through to the container.
+
 Run the representative MCU build suite with the same layout as CI:
 
 ```bash
