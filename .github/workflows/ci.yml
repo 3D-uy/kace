@@ -213,17 +213,13 @@ jobs:
           name: kace-klipper-matrix-quick
           path: tests/matrix/artifacts/
 
-  # ── Stage 5: Full Klipper sweep (main only) ──────────────────────────────────
-  # Skipped on PRs — runs only on push/merge to main.
-  # This keeps contributor PRs fast while guaranteeing full upstream
-  # compatibility validation on every commit that lands on main.
-  #
-  # A maintainer may also opt in from workflow_dispatch for a branch under review.
+  # Full sweep is required before merging as well as on main.
   full-klipper-sweep:
     name: Full Klipper Config Sweep (192+ configs)
     runs-on: ubuntu-24.04
     needs: regression-tests
     if: >-
+      github.event_name == 'pull_request' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.full_klipper_sweep)
     steps:

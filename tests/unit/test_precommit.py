@@ -7,7 +7,7 @@ Validates that the pre-commit hook correctly:
   - blocks raw.githubusercontent.com/kace-dev URLs (exit 1)
   - allows 'kace-dev' as a bare word / docker service name with no URL prefix (exit 0)
   - blocks Windows C:\\Users path leaks (exit 1)
-  - blocks D:\\Open World path leaks (exit 1)
+  - blocks secondary-drive workspace path leaks (exit 1)
 
 The hook is exercised in-process by patching subprocess.check_output so that
 the fake git-diff result points at temporary files we control. This avoids
@@ -20,6 +20,8 @@ content is worse than no hook at all.
 """
 import os
 import sys
+import shutil
+import subprocess
 import tempfile
 import textwrap
 import unittest
@@ -68,6 +70,24 @@ def _run_hook(staged_file_contents: dict) -> int:
 
 
 class TestPreCommitHook(unittest.TestCase):
+
+    def test_copied_hook_uses_repository_portability_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run(["git", "init", directory], check=True, capture_output=True)
+            scripts = os.path.join(directory, "scripts")
+            os.makedirs(scripts)
+            shutil.copyfile(os.path.join(_ROOT_DIR, "scripts", "check_portability.py"),
+                            os.path.join(scripts, "check_portability.py"))
+            hook = os.path.join(directory, ".git", "hooks", "pre-commit")
+            shutil.copyfile(_HOOK_PATH, hook)
+            with open(os.path.join(directory, "example.txt"), "w", encoding="utf-8") as stream:
+                stream.write("D:" + "/fixture-workspace/cache")
+            subprocess.run(["git", "add", "example.txt"], cwd=directory,
+                           check=True, capture_output=True)
+            result = subprocess.run([sys.executable, hook], cwd=directory,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("Local path leak detected", result.stdout)
 
     # ── Should pass (exit 0) ──────────────────────────────────────────────────
 
@@ -126,21 +146,18 @@ class TestPreCommitHook(unittest.TestCase):
     def test_windows_c_users_path_leak_blocked(self):
         """C:\\Users path leak in a .py file — hook exits 1.
 
-        NOTE: the content string must use a single backslash (C:\\Users) so the
-        actual bytes written to disk are 'C:\\Users', matching the hook's regex
-        r'(?i)c:[/\\]users'. Using double backslash (C:\\\\Users) writes a literal
-        double-backslash to disk and silently bypasses the check — that exact
-        bug was caught during initial test harness validation.
+        The fixture writes one backslash per separator. Escaped and alternate
+        separators are also covered by the shared portability guard tests.
         """
         code = _run_hook({
-            "core/deployer.py": 'path = "C:\\Users\\devname\\project"\n'
+            "core/deployer.py": 'path = "' + 'C:' + chr(92) + 'Users' + chr(92) + 'fixture-user' + chr(92) + 'project"\n'
         })
         self.assertEqual(code, 1)
 
-    def test_windows_d_open_world_path_leak_blocked(self):
-        """D:\\Open World path leak in a .py file — hook exits 1."""
+    def test_windows_secondary_drive_path_leak_blocked(self):
+        """secondary-drive workspace path leak in a .py file — hook exits 1."""
         code = _run_hook({
-            "core/scraper.py": 'cache = "D:\\Open World\\GitHub\\KACE\\cache"\n'
+            "core/scraper.py": 'cache = "' + 'D:' + chr(92) + 'fixture-workspace' + chr(92) + 'cache"\n'
         })
         self.assertEqual(code, 1)
 

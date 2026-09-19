@@ -210,6 +210,8 @@ python tests/matrix/run_matrix.py --profile quick
 
 Full matrices, upstream sweeps and containerized firmware builds are maintainer checks. KACE itself runs directly on the printer host. See the [testing guide](docs/en/TESTING.md) for the complete validation workflow.
 
+CI repair evidence: [main validation report, 2026-09-19](docs/reports/CI-MAIN-2026-09-19.md).
+
 ## Contributing
 
 Read the [contributor guide](docs/en/CONTRIBUTING.md), [security policy](SECURITY.md) and [code of conduct](CODE_OF_CONDUCT.md) before opening a change. Keep changes scoped and add the narrowest regression coverage that demonstrates the behavior.

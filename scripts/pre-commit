@@ -2,6 +2,11 @@
 import sys
 import subprocess
 import re
+from pathlib import Path
+
+# Git runs non-bare commit hooks from the worktree root, including copied hooks.
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+from check_portability import scan_text
 
 # Reconfigure stdout/stderr to utf-8 to avoid UnicodeEncodeErrors on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -26,14 +31,9 @@ for f in files:
         continue
 
     # 1. Check for local path leaks
-    path_patterns = [
-        r"(?i)c:[/\\]users",
-        r"(?i)d:[/\\]open\s+world"
-    ]
-    for pattern in path_patterns:
-        if re.search(pattern, content):
-            print(f"[PRE-COMMIT ERROR] Local path leak detected in '{f}' matching pattern '{pattern}'")
-            errors += 1
+    for label, match in scan_text(content):
+        print(f"[PRE-COMMIT ERROR] Local path leak detected in '{f}': {label}: {match}")
+        errors += 1
 
     # 2. Check for hardcoded untranslated strings in Python files under core/ or main script
     if f.endswith(".py") and ("core" in f or f == "kace.py") and "translations.py" not in f:

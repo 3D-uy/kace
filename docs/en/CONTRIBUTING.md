@@ -108,3 +108,14 @@ Review every changed line. Never use snapshot update mode to hide an unexplained
 Include the KACE revision, Python version, board/MCU, upstream Klipper config name, selected workflow, generated output or error, and the smallest reproducible steps. Do not include credentials, API keys, private hostnames, or SSH material.
 
 Security issues should follow [SECURITY.md](../../SECURITY.md).
+
+### Protected main workflow
+
+Create a branch and open a pull request against `main`. All required CI checks
+must succeed on an up-to-date branch before merging. No manual review approval
+is required. The protection applies to administrators too: direct pushes,
+force pushes and deletion of `main` are prohibited.
+
+Keep examples relative or use runtime/environment-derived paths. Personal
+computer paths must not be committed; the portability gate scans all tracked
+files, including test fixtures. Path-detection tests use synthetic inputs.
