@@ -76,9 +76,11 @@ class TestImmutableCandidateDistribution(unittest.TestCase):
             self.assertIn(f"KACE_COMMIT='{candidate}'", content, relative)
             self.assertIn(f"KACE_INSTALL_SHA256='{installer_hash}'", content, relative)
 
+        # Include staged and unstaged runtime edits so local pre-commit checks
+        # cannot pass against an old HEAD and then fail only after publication.
         changed_runtime = subprocess.run(
             [
-                "git", "diff", "--name-only", f"{candidate}..HEAD", "--",
+                "git", "diff", "--name-only", candidate, "--",
                 "core", "firmware", "data", "templates", "kace.py", "install.sh",
             ],
             cwd=ROOT,
