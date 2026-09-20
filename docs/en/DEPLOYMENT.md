@@ -186,6 +186,16 @@ verified checkpoint without repeating firmware compilation or flashing.
 
 ## Conditional publication and final readiness gates
 
+When the deployment menu offers Moonraker on this Raspberry, KACE fixes the
+Moonraker host to `127.0.0.1` and asks only for the port (default `7125`). Saved LAN
+hosts and remote API keys are not reused for this local action. The existing
+active-config and config-root checks still determine filesystem authority.
+
+In root-v1 layouts, `[include mainsail.cfg]` appears below the layout header and
+before the generated hardware block, so printer settings follow Mainsail defaults.
+Reconciliation also moves an existing trailing Mainsail directive to that position;
+other user includes retain their order and SAVE_CONFIG remains at the end.
+
 The accepted local publication contract (19 September 2026) uses cooperative
 locking, a final content comparison and atomic replacement. On the printer host,
 `LocalMoonrakerConfigTransport` binds the loopback Moonraker endpoint to the active

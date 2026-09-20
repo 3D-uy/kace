@@ -28,6 +28,23 @@ pid_Kd: 100
 
 
 class TestManagedConfigPlan(unittest.TestCase):
+    def test_root_layout_keeps_mainsail_before_hardware_on_install_and_retry(self):
+        placeholder = b"[include mainsail.cfg]\n[mcu]\n[printer]\nkinematics: none\n"
+        previous_root = (
+            b"# KACE layout: root-v1\n# BEGIN KACE MANAGED: generated-includes\n"
+            + GENERATED.replace(b"[include mainsail.cfg]\n", b"")
+            + b"# END KACE MANAGED: generated-includes\n\n[include mainsail.cfg]\n"
+        )
+        for existing in (None, placeholder, previous_root):
+            with self.subTest(existing=existing):
+                plan = build_managed_config_plan(GENERATED, None, {ROOT_REMOTE: existing})
+                files = {item.remote_name: item.content for item in plan.artifacts}
+                root = files[ROOT_REMOTE]
+                self.assertTrue(root.startswith(b"# KACE layout: root-v1\n[include mainsail.cfg]\n\n"))
+                self.assertEqual(root.count(b"[include mainsail.cfg]"), 1)
+                self.assertLess(root.index(b"[include mainsail.cfg]"), root.index(b"[mcu]"))
+                self.assertEqual(build_managed_config_plan(GENERATED, None, files).changed_artifacts, ())
+
     def test_save_config_after_managed_section_is_preserved_exactly(self):
         saved = (
             b"#*# <---------------------- SAVE_CONFIG ---------------------->\n"

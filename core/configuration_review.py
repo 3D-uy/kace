@@ -264,6 +264,9 @@ def render_configuration_review(
 
     def paint(status: str, text: str) -> str:
         prefix = colors.get(status, "") if color else ""
+        if status == "ok":
+            text_color = "\033[97m" if color else ""
+            return f"{prefix}{icons['ok']}{reset}  {text_color}{text}{reset}"
         return f"{prefix}{icons.get(status, '•')} {text}{reset}"
 
     def localize(text: str) -> str:

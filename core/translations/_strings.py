@@ -2303,7 +2303,7 @@ UI_STRINGS.update({
         "Español": "Moonraker remoto no puede reemplazar con seguridad la configuración revisada. Ejecutá KACE en la Raspberry para instalarla localmente.",
         "Português": "O Moonraker remoto não pode substituir com segurança a configuração revisada. Execute o KACE no Raspberry para instalar localmente.",
     },
-    "deploy.local_active": {"English": "Install on this Raspberry (verified local publication)", "Español": "Instalar en esta Raspberry (publicación local verificada)", "Português": "Instalar neste Raspberry (publicação local verificada)"},
+    "deploy.local_active": {"English": "Moonraker", "Español": "Moonraker", "Português": "Moonraker"},
     "firmware.resume.pending": {"English": "An installation is pending. Continue it or start over?", "Español": "Hay una instalación pendiente. ¿Continuar o empezar de cero?", "Português": "Há uma instalação pendente. Continuar ou começar do zero?"},
     "firmware.resume.discard": {"English": "Discard the pending workflow and start over?", "Español": "¿Descartar el flujo pendiente y empezar de cero?", "Português": "Descartar o fluxo pendente e começar do zero?"},
     "installation.complete": {

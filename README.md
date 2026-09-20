@@ -82,7 +82,7 @@ Use [KACE Studio](https://github.com/3D-uy/KACE-studio) on Windows to prepare th
 The public installer is pinned to one reviewed commit and verified before execution:
 
 ```bash
-KACE_COMMIT='8d46568ae87268af23dfd27e1b0e4de44dce4df7'; KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
+KACE_COMMIT='dfeae2e1a703c1b7094ab960659d4aa7093c5bf9'; KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'; installer=$(mktemp); trap 'rm -f "$installer"' EXIT; curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" && printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - && KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
 Then run:
