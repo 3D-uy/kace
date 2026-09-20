@@ -115,6 +115,36 @@ class SshBoundaryTests(unittest.TestCase):
 
 
 class MoonrakerBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        local_patch = patch(
+            "core.config_transaction.local_moonraker_available", return_value=False
+        )
+        self.local_available = local_patch.start()
+        self.addCleanup(local_patch.stop)
+
+    @patch("core.deployer._run_config_transaction", return_value=success("done"))
+    @patch("core.config_transaction.configuration_transport")
+    @patch("core.moonraker.check_moonraker", return_value=(True, "OK"))
+    @patch("core.menu.simple_input", return_value="7125")
+    def test_local_install_uses_loopback_even_with_saved_remote_endpoint(
+        self, prompt, check, transport, run
+    ):
+        self.local_available.return_value = True
+        user = {
+            "moonraker_host": "192.168.1.84",
+            "moonraker_api_key": "remote-secret",
+        }
+        result = deploy_moonraker(user)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(prompt.call_count, 1)  # Only the port; no host or API key.
+        transport.assert_called_once_with("127.0.0.1", 7125, None)
+        for call in check.call_args_list:
+            self.assertEqual(call.args, ("127.0.0.1", 7125))
+            self.assertEqual(call.kwargs, {"api_key": ""})
+        self.assertEqual(user["moonraker_host"], "127.0.0.1")
+        run.assert_called_once()
+
     @patch("core.menu.simple_input", return_value="")
     def test_empty_host_cancels_without_probe(self, _input):
         with patch("core.moonraker.check_moonraker") as check:

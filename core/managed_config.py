@@ -396,6 +396,20 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
         if name.casefold().startswith("include ")
     }
     extra = [line for line in generated_includes if line[1:-1].casefold() not in existing_include_names]
+    header_includes = []
+    if inline:
+        # Load Mainsail defaults before the generated printer settings in root-v1.
+        # Move only the directive, leaving user comments and other includes intact.
+        mainsail = re.compile(r"^\s*\[include\s+mainsail\.cfg\]\s*(?:#.*)?$", re.IGNORECASE)
+        retained_lines = []
+        for line in base.splitlines(True):
+            if mainsail.fullmatch(line.rstrip("\r\n")):
+                header_includes.append(line.rstrip("\r\n"))
+            else:
+                retained_lines.append(line)
+        base = "".join(retained_lines)
+        header_includes.extend(line for line in extra if mainsail.fullmatch(line))
+        extra = [line for line in extra if not mainsail.fullmatch(line)]
     block = _managed_block(extra, include_macros, nl)
     if inline:
         # SAVE_CONFIG remains authoritative when its value is not explicitly
@@ -415,6 +429,8 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
         block = block.replace(MANAGED_END, calibration.replace("\n", nl) + MANAGED_END)
     base = base.lstrip("\r\n")
     reconciled = block + (nl if base else "") + base
+    if header_includes:
+        reconciled = nl.join(header_includes) + nl * 2 + reconciled
     if not reconciled.endswith(nl):
         reconciled += nl
     return reconciled, generated, migrated

@@ -484,7 +484,13 @@ def deploy_moonraker(user_data):
     from core.moonraker import DEFAULT_PORT, _base_url, check_moonraker
     from core.translations import t
 
-    host = simple_input(t("moonraker.host_prompt"), default=user_data.get("moonraker_host") or ("127.0.0.1" if local_moonraker_available() else user_data.get("host", "")))
+    # The menu offers installation on this Raspberry when a local config exists.
+    # Keep that action on loopback even if a previous attempt saved a LAN host.
+    local_install = local_moonraker_available()
+    host = "127.0.0.1" if local_install else simple_input(
+        t("moonraker.host_prompt"),
+        default=user_data.get("moonraker_host") or user_data.get("host", ""),
+    )
     if not host:
         return cancelled("Moonraker deployment cancelled before connecting.")
     port_value = simple_input(
@@ -495,8 +501,8 @@ def deploy_moonraker(user_data):
         port = int(port_value) if port_value else DEFAULT_PORT
     except ValueError:
         return failed(WorkflowOutcome.PRECONDITION_FAILED, "Invalid Moonraker port.")
-    api_key = user_data.get("moonraker_api_key") or ""
-    local_authorized = host in {"localhost", "127.0.0.1", "::1"} and local_moonraker_available()
+    api_key = "" if local_install else user_data.get("moonraker_api_key") or ""
+    local_authorized = local_install
     if not local_authorized or not check_moonraker(host, port, api_key=api_key)[0]:
         api_key = simple_input(t("moonraker.api_key_prompt"), default="") or ""
     if api_key and urlsplit(_base_url(host, port)).scheme != "https":
