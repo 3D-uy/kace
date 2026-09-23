@@ -244,7 +244,7 @@ def terminal_supports_color(stream=None) -> bool:
     stream = stream or sys.stdout
     if os.environ.get("NO_COLOR") is not None or os.environ.get("TERM", "").casefold() == "dumb":
         return False
-    return bool(getattr(stream, "isatty", lambda: False)())
+    return os.environ.get("KACE_COLOR") == "1" or bool(getattr(stream, "isatty", lambda: False)())
 
 
 def render_configuration_review(
@@ -256,11 +256,16 @@ def render_configuration_review(
     colors = {"ok": "\033[92m", "warning": "\033[93m", "error": "\033[91m", "info": "\033[96m"}
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
     try:
-        "✅⚠✖ℹ".encode(encoding)
-        icons = {"ok": "✅", "warning": "⚠", "error": "✖", "info": "ℹ"}
+        "✅⚠✖ℹ📋📄📝🔧".encode(encoding)
+        icons = {"ok": "✅", "warning": "⚠", "error": "✖", "info": "ℹ",
+                 "title": "📋", "files": "📄", "changes": "📝", "next": "🔧"}
     except (LookupError, UnicodeEncodeError):
         icons = {"ok": "[OK]", "warning": "[!]", "error": "[X]", "info": "[i]"}
     reset = "\033[0m" if color else ""
+
+    def section_heading(kind: str, text: str, status: str = "info") -> str:
+        prefix = "\033[1m" + colors[status] if color else ""
+        return f"{prefix}{icons.get(kind, icons[status])}  {text}{reset}"
 
     def paint(status: str, text: str) -> str:
         prefix = colors.get(status, "") if color else ""
@@ -322,15 +327,15 @@ def render_configuration_review(
         code = re.sub(r"^(extruder|heater_bed)-", "heater-", code)
         return _REVIEW_MESSAGES.get(code, _REVIEW_MESSAGES["managed-plan"])[0 if language == "Español" else 1]
 
-    lines = [paint("info", labels["title"]), ""]
+    lines = [section_heading("title", labels["title"]), ""]
     lines.extend(f"  {paint(item.status, localize(item.text))}" for item in review.summary)
-    lines.extend(["", paint("info", labels["files"])])
+    lines.extend(["", section_heading("files", labels["files"])])
     if review.changed_files:
         friendly = {"kace/generated-hardware.cfg": ("Configuración de hardware", "Configuração de hardware"), "kace/generated-macros.cfg": ("Macros iniciales", "Macros iniciais")}
         lines.extend(f"  - {friendly[name][0 if language == 'Español' else 1] if not advanced and language != 'English' and name in friendly else name}" for name in review.changed_files)
     else:
         lines.append("  - " + {"Español": "Sin cambios", "Português": "Sem alterações"}.get(language, "No changes"))
-    lines.extend(["", paint("info", labels["changes"])])
+    lines.extend(["", section_heading("changes", labels["changes"])])
     if review.important_changes:
         lines.extend(f"  - {localize(change)}" for change in review.important_changes)
     else:
@@ -338,14 +343,14 @@ def render_configuration_review(
     commissioning = [item for item in review.validation.warnings if "inferred" in item.code]
     warnings = [item for item in review.validation.warnings if item not in commissioning]
     if warnings:
-        lines.extend(["", paint("warning", labels["warnings"])])
+        lines.extend(["", section_heading("warning", labels["warnings"], "warning")])
         lines.extend(f"  - {message(item)}" for item in warnings)
     if commissioning:
         heading = {"English": "Next: hardware commissioning", "Español": "Próximos pasos: commissioning del hardware", "Português": "Próximos passos: comissionamento do hardware"}[language]
-        lines.extend(["", paint("info", heading)])
-        lines.extend(f"  - {message(item)}" for item in commissioning)
+        lines.extend(["", section_heading("next", heading)])
+        lines.extend(f"  - {text}" for text in dict.fromkeys(message(item) for item in commissioning))
     if review.validation.errors:
-        lines.extend(["", paint("error", labels["errors"])])
+        lines.extend(["", section_heading("error", labels["errors"], "error")])
         lines.extend(f"  - {message(item)}" for item in review.validation.errors)
     validation = labels["validation_ok"] if review.validation.valid else labels["validation_bad"]
     lines.extend(["", labels["footer"].format(

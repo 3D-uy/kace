@@ -635,8 +635,9 @@ class MoonrakerConfigTransport:
             raise ConfigConflictError("Moonraker config root does not match active Klipper printer.cfg")
 
     def verify_active_configuration(self, plan):
+        import configparser
         from core.moonraker import _get, _base_url
-        from core.managed_config import effective_hardware_text, _section_options
+        from core.managed_config import effective_hardware_text
         ok, detail, body = _get(_base_url(self.host, self.port) + "/printer/objects/query?configfile", api_key=self.api_key)
         active = body.get("result", {}).get("status", {}).get("configfile", {}).get("config") if ok else None
         if not isinstance(active, dict):
@@ -645,7 +646,16 @@ class MoonrakerConfigTransport:
             str(section).casefold(): {str(key).casefold(): value for key, value in options.items()}
             for section, options in active.items() if isinstance(options, dict)
         }
-        expected = _section_options(effective_hardware_text(plan))
+        # Match Klipper's configfile.ConfigFileReader: strip # comments before
+        # parsing, then apply RawConfigParser's inline ;/# comment rules to
+        # all option lines, including multiline G-code and Jinja templates.
+        parser = configparser.RawConfigParser(strict=False, inline_comment_prefixes=(';', '#'))
+        parser.read_string('\n'.join(
+            line.split('#', 1)[0] for line in effective_hardware_text(plan).splitlines()
+        ))
+        expected = {}
+        for section in parser.sections():
+            expected.setdefault(section.casefold(), {}).update(parser.items(section, raw=True))
         for section, options in expected.items():
             if section.startswith("include "):
                 continue

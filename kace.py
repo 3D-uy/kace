@@ -788,7 +788,7 @@ def main():
             {"name": f"📁  {t('kace.deploy_local')}",       "value": "local"},
             {"name": f"💾  {t('kace.deploy_usb')}",         "value": "usb"},
             {"name": f"🔗  {t('kace.deploy_ssh')}",         "value": "ssh"},
-            *([{"name": t("deploy.local_active"), "value": "moonraker"}] if local_moonraker_available() else []),
+            *([{"name": f"🌙  {t('deploy.local_active')}", "value": "moonraker"}] if local_moonraker_available() else []),
         ]
     )
 
