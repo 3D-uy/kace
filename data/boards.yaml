@@ -6,36 +6,123 @@
 #  hardcoded across wizard.py and scraper.py.
 #
 #  boards[].mcu          : MCU chip prefix (matches firmware/detector.py output)
-#  boards[].search_terms : substrings matched against Klipper config filenames
-#  boards[].bltouch      : map of board-filename-fragment → BLTouch pin overrides
+#  boards[].search_terms : historical discovery aliases, not MCU identity authority
+#  board_mcu_models / board_mcu_aliases: exact reviewed identity for wizard/pin checks
+#  boards[].display_config_filenames : exact filenames for display advice only
+#  boards[].display_requires_mcu : source contains multiple processor variants
+#  Display filename/MCU bindings reviewed against Klipper fe4eb865; see K13-B.
+#  These bindings do not certify connector wiring or electrical compatibility.
+#  display_exp_mappings below is the reviewed per-file authority for EXP.
+#  display_interfaces retains legacy MCU bus flags for historical metadata only.
+#  The display checker does not use them as proof of exposed pins, free buses,
+#  wiring or adapter availability. There are no reviewed display bus routes here.
+#  boards[].bltouch      : map of exact official config filename → reviewed BLTouch examples
 #  boards[].features     : (Future) hardware capabilities (e.g. uart, sensorless)
 #
-#  Adding a new board: add an entry to the appropriate mcu block's
-#  search_terms list, and optionally add its bltouch/features.
-#  No Python changes required.
+#  New identity requires an exact board_mcu_models entry and reviewed headers.
+#  search_terms remain historical aliases only; they cannot authorize inference.
+#  New BLTouch entries require upstream evidence and catalog regression fixtures.
 # ============================================================
+
+# Reviewed EXP mappings from Klipper fe4eb8650bd7de4c2100a14eaf09b0965c430e29.
+# Exact source paths: config/<key>. Evidence: E6-K13-D.md / K13-D-evidence.json.
+# These are source connector mappings, not electrical or cable certification.
+# Empty means no EXP mapping in the reviewed source, not physical absence.
+display_exp_mappings:
+  generic-bigtreetech-manta-e3ez.cfg: [EXP1]
+  generic-bigtreetech-manta-m4p.cfg: [EXP1, EXP2]
+  generic-bigtreetech-manta-m5p.cfg: [EXP1, EXP2]
+  generic-bigtreetech-manta-m8p-v1.0.cfg: [EXP1, EXP2]
+  generic-bigtreetech-manta-m8p-v1.1.cfg: [EXP1, EXP2]
+  generic-bigtreetech-octopus-max-ez.cfg: [EXP1, EXP2]
+  generic-bigtreetech-octopus-pro-v1.0.cfg: [EXP1, EXP2]
+  generic-bigtreetech-octopus-pro-v1.1.cfg: [EXP1, EXP2]
+  generic-bigtreetech-octopus-v1.1.cfg: [EXP1, EXP2]
+  generic-bigtreetech-skr-2.cfg: [EXP1, EXP2]
+  generic-bigtreetech-skr-mini-e3-v1.0.cfg: [EXP1]
+  generic-bigtreetech-skr-mini-e3-v1.2.cfg: [EXP1]
+  generic-bigtreetech-skr-mini-e3-v2.0.cfg: [EXP1]
+  generic-bigtreetech-skr-mini-e3-v3.0.cfg: [EXP1]
+  generic-bigtreetech-skr-pico-v1.0.cfg: []
+  generic-bigtreetech-skr-pro.cfg: [EXP1, EXP2]
+  generic-bigtreetech-skr-v1.3.cfg: [EXP1, EXP2]
+  generic-bigtreetech-skr-v1.4.cfg: [EXP1, EXP2]
+  generic-creality-v4.2.7.cfg: [EXP1]
+  generic-duet2-duex.cfg: []
+  generic-duet2.cfg: []
+  generic-fysetc-spider.cfg: [EXP1, EXP2]
+  generic-melzi.cfg: []
+  generic-mks-robin-nano-v3.cfg: [EXP1, EXP2]
+  generic-mks-sgenl.cfg: [EXP1, EXP2]
+  generic-printrboard.cfg: []
+  generic-ramps.cfg: [EXP1, EXP2]
+
+# Exact MCU candidates reviewed against official Klipper fe4eb865 headers.
+# Identity only: no connector, platform, build or flashing qualification.
+# Multiple candidates require a selected/detected model; order is not evidence.
+board_mcu_models:
+  generic-bigtreetech-skr-v1.4.cfg: [lpc1768, lpc1769]
+  generic-bigtreetech-skr-v1.3.cfg: [lpc1768]
+  generic-mks-sgenl.cfg: [lpc1768]
+  generic-creality-v4.2.7.cfg: [stm32f103]
+  generic-bigtreetech-skr-mini-e3-v1.0.cfg: [stm32f103]
+  generic-bigtreetech-skr-mini-e3-v1.2.cfg: [stm32f103]
+  generic-bigtreetech-skr-mini-e3-v2.0.cfg: [stm32f103]
+  generic-bigtreetech-skr-mini-e3-v3.0.cfg: [stm32g0b1]
+  generic-mks-robin-nano-v3.cfg: [stm32f407]
+  generic-bigtreetech-skr-pro.cfg: [stm32f407]
+  generic-bigtreetech-skr-2.cfg: [stm32f407, stm32f429]
+  generic-bigtreetech-octopus-pro-v1.0.cfg: [stm32f446, stm32f429, stm32h723]
+  generic-bigtreetech-octopus-pro-v1.1.cfg: [stm32h723]
+  generic-bigtreetech-octopus-v1.1.cfg: [stm32f446, stm32f429]
+  generic-bigtreetech-octopus-max-ez.cfg: [stm32h723]
+  generic-fysetc-spider.cfg: [stm32f446]
+  generic-bigtreetech-manta-e3ez.cfg: [stm32g0b1]
+  generic-bigtreetech-manta-m4p.cfg: [stm32g0b1]
+  generic-bigtreetech-manta-m5p.cfg: [stm32g0b1]
+  generic-bigtreetech-manta-m8p-v1.0.cfg: [stm32g0b1]
+  generic-bigtreetech-manta-m8p-v1.1.cfg: [stm32g0b1]
+  generic-fysetc-cheetah-v2.0.cfg: [stm32f401]
+  generic-bigtreetech-skr-pico-v1.0.cfg: [rp2040]
+  generic-ramps.cfg: [atmega1280, atmega2560]
+  generic-melzi.cfg: [atmega1284p]
+  generic-printrboard.cfg: [at90usb1286]
+  generic-duet2.cfg: [sam4e8e]
+  generic-duet2-duex.cfg: [sam4e8e]
+  generic-duet3-mini.cfg: [same54p20]
+
+# Resolved MCU strings from src/stm32/Kconfig and src/atsamd/Kconfig at fe4eb865.
+board_mcu_aliases:
+  stm32f103xe: stm32f103
+  stm32f401xc: stm32f401
+  stm32f407xx: stm32f407
+  stm32f429xx: stm32f429
+  stm32f446xx: stm32f446
+  stm32g0b1xx: stm32g0b1
+  stm32h723xx: stm32h723
+  same54p20a: same54p20
 
 boards:
 
   - mcu: lpc1769
+    display_config_filenames: [generic-bigtreetech-skr-v1.4.cfg]
+    display_requires_mcu: [generic-bigtreetech-skr-v1.4.cfg]
     search_terms:
       - skr-v1.4
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
-    bltouch:
-      skr-v1.4:
-        sensor_pin: "^P0.10"
-        control_pin: "P2.0"
+    bltouch: {}  # Unverified legacy overrides require manual wiring selection.
     features:
       uart: true
       sensorless: true
       input_shaper: false
 
   - mcu: lpc1768
+    display_config_filenames: [generic-bigtreetech-skr-v1.3.cfg, generic-bigtreetech-skr-v1.4.cfg, generic-mks-sgenl.cfg]
+    display_requires_mcu: [generic-bigtreetech-skr-v1.4.cfg]
     search_terms:
       - skr-v1.4
       - skr-v1.3
@@ -45,15 +132,12 @@ boards:
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
-    bltouch:
-      skr-v1.3:
-        sensor_pin: "^P1.27"
-        control_pin: "P2.0"
+    bltouch: {}  # Unverified legacy overrides require manual wiring selection.
 
   - mcu: stm32f103
+    display_config_filenames: [generic-creality-v4.2.7.cfg, generic-bigtreetech-skr-mini-e3-v1.0.cfg, generic-bigtreetech-skr-mini-e3-v1.2.cfg, generic-bigtreetech-skr-mini-e3-v2.0.cfg]
     search_terms:
       - creality-v4.2.2
       - creality-v4.2.7
@@ -61,137 +145,116 @@ boards:
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
-    bltouch:
-      skr-mini-e3-v2.0:
-        sensor_pin: "^PC14"
-        control_pin: "PA1"
-      skr-mini-e3-v3.0:
-        sensor_pin: "^PC14"
-        control_pin: "PA1"
-      creality-v4.2.2:
-        sensor_pin: "^PB1"
-        control_pin: "PB0"
-      creality-v4.2.7:
-        sensor_pin: "^PB1"
-        control_pin: "PB0"
+    bltouch: {}  # Unverified legacy overrides require manual wiring selection.
 
   - mcu: stm32f407
+    display_config_filenames: [generic-mks-robin-nano-v3.cfg, generic-bigtreetech-skr-pro.cfg, generic-bigtreetech-skr-2.cfg]
+    display_requires_mcu: [generic-bigtreetech-skr-2.cfg]
     search_terms:
       - mks-robin-nano-v3
       - skr-pro
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
-    bltouch:
-      mks-robin-nano:
-        sensor_pin: "^PA11"
-        control_pin: "PA8"
+    bltouch: {}  # Unverified legacy overrides require manual wiring selection.
 
   - mcu: stm32f429
+    display_config_filenames: [generic-bigtreetech-skr-2.cfg, generic-bigtreetech-octopus-pro-v1.0.cfg, generic-bigtreetech-octopus-v1.1.cfg]
+    display_requires_mcu: [generic-bigtreetech-skr-2.cfg, generic-bigtreetech-octopus-pro-v1.0.cfg, generic-bigtreetech-octopus-v1.1.cfg]
     search_terms:
       - skr-2
       - octopus-pro-v1.0
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
     extra_driver_sockets: 6   # E0–E5 spare sockets reusable for multi-Z
     bltouch:
-      # octopus-pro-v1.0 uses the dedicated BLTouch 5-pin header
-      octopus-pro-v1.0:
-        sensor_pin: "^PB7"
+      # Official Klipper fe4eb865 config/generic-bigtreetech-octopus-pro-v1.0.cfg
+      generic-bigtreetech-octopus-pro-v1.0.cfg:
+        sensor_pin: "PB7"
         control_pin: "PB6"
-      # SKR-2 probe header (PROBE connector = PC0, SERVO = PA2)
-      skr-2:
-        sensor_pin: "^PC0"
-        control_pin: "PA2"
 
   - mcu: stm32f446
+    display_config_filenames: [generic-bigtreetech-octopus-pro-v1.0.cfg, generic-bigtreetech-octopus-v1.1.cfg, generic-fysetc-spider.cfg]
+    display_requires_mcu: [generic-bigtreetech-octopus-pro-v1.0.cfg, generic-bigtreetech-octopus-v1.1.cfg]
     search_terms:
       - octopus
       - spider
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
     extra_driver_sockets: 6   # E0–E5 spare sockets reusable for multi-Z
     bltouch:
-      # octopus-pro must come before octopus — more-specific key wins substring match
-      # Octopus Pro v1.1 dedicated BLTouch 5-pin header (PB7 sensor, PB6 control)
-      octopus-pro:
-        sensor_pin: "^PB7"
+      # Official Klipper fe4eb865 examples; never extrapolate to another revision.
+      generic-bigtreetech-octopus-pro-v1.1.cfg:
+        sensor_pin: "PB7"
         control_pin: "PB6"
-      # Plain Octopus v1.1 uses PROBE connector (PC5) + SERVO0 (PE5)
-      octopus:
-        sensor_pin: "^PC5"
-        control_pin: "PE5"
-      # Fysetc Spider v2.x probe port
-      spider:
-        sensor_pin: "^PA2"
-        control_pin: "PA3"
+      generic-bigtreetech-octopus-v1.1.cfg:
+        sensor_pin: "PB7"
+        control_pin: "PB6"
 
   - mcu: stm32g0b1
+    display_config_filenames: [generic-bigtreetech-skr-mini-e3-v3.0.cfg, generic-bigtreetech-manta-e3ez.cfg, generic-bigtreetech-manta-m4p.cfg, generic-bigtreetech-manta-m5p.cfg, generic-bigtreetech-manta-m8p-v1.0.cfg, generic-bigtreetech-manta-m8p-v1.1.cfg]
     search_terms:
       - manta
       - skr-mini-e3-v3.0
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
     bltouch: {}
 
   - mcu: stm32h723
+    display_config_filenames: [generic-bigtreetech-octopus-max-ez.cfg, generic-bigtreetech-octopus-pro-v1.0.cfg, generic-bigtreetech-octopus-pro-v1.1.cfg]
+    display_requires_mcu: [generic-bigtreetech-octopus-pro-v1.0.cfg]
     search_terms:
       - octopus-max-ez
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
     extra_driver_sockets: 9   # E0–E8 spare sockets (EZ variant has more slots)
     bltouch:
-      # Octopus MAX EZ dedicated BLTouch header
-      octopus-max-ez:
-        sensor_pin: "^PB7"
-        control_pin: "PB6"
+      # Official Klipper fe4eb865 config/generic-bigtreetech-octopus-max-ez.cfg
+      generic-bigtreetech-octopus-max-ez.cfg:
+        sensor_pin: "^PB15"
+        control_pin: "PB14"
 
-  - mcu: stm32f042
+  # Klipper fe4eb865: generic-fysetc-cheetah-v2.0.cfg specifies STM32F401
+  # and a 32KiB bootloader (the existing stm32f4 preparation default below).
+  - mcu: stm32f401
     search_terms:
       - cheetah-v2.0
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
     bltouch: {}
 
   - mcu: rp2040
+    display_config_filenames: [generic-bigtreetech-skr-pico-v1.0.cfg]
     search_terms:
       - skr-pico
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_only"  # RP2040 GPIO is NOT 5V tolerant
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
     bltouch: {}
@@ -202,48 +265,49 @@ boards:
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_only"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
     bltouch: {}
 
   - mcu: atmega2560
+    display_config_filenames: [generic-ramps.cfg]
+    display_requires_mcu: [generic-ramps.cfg]
     search_terms:
       - ramps
       - mega2560
     voltage: "5V"
     gpio_voltage_tolerance: "5V_native"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
     bltouch: {}
 
   - mcu: atmega1284p
+    display_config_filenames: [generic-melzi.cfg]
     search_terms:
       - melzi
     voltage: "5V"
     gpio_voltage_tolerance: "5V_native"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
       - UART
     bltouch: {}
 
   - mcu: at90usb1286
+    display_config_filenames: [generic-printrboard.cfg]
     search_terms:
       - printrboard
     voltage: "5V"
     gpio_voltage_tolerance: "5V_native"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
     bltouch: {}
 
   - mcu: sam4e8e
+    display_config_filenames: [generic-duet2.cfg, generic-duet2-duex.cfg]
     search_terms:
       - duet2
     voltage: "3.3V"
@@ -256,7 +320,7 @@ boards:
       # Display connection requires custom adapter wiring
     bltouch: {}
 
-  - mcu: samd51
+  - mcu: same54p20
     search_terms:
       - duet3-mini
     voltage: "3.3V"
@@ -273,13 +337,9 @@ boards:
     voltage: "3.3V"
     gpio_voltage_tolerance: "3.3V_tolerant"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
-    bltouch:
-      mks-sgen-l:
-        sensor_pin: "^P1.27"
-        control_pin: "P2.0"
+    bltouch: {}  # Unverified legacy overrides require manual wiring selection.
 
   - mcu: mks-gen-l
     search_terms:
@@ -287,13 +347,9 @@ boards:
     voltage: "5V"
     gpio_voltage_tolerance: "5V_native"
     display_interfaces:
-      - EXP1_EXP2
       - SPI
       - I2C
-    bltouch:
-      mks-gen-l:
-        sensor_pin: "^D18"
-        control_pin: "D11"
+    bltouch: {}  # Unverified legacy overrides require manual wiring selection.
 
 # ============================================================
 #  MCU Firmware Configuration Database

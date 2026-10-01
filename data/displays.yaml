@@ -10,6 +10,10 @@
 #
 #  Philosophy: hardware safety over convenience.
 #    Detect → classify → explain risks → warn explicitly → block unsafe.
+#  Current K13 boundary: positive catalog classes below are legacy metadata,
+#  not reviewed module qualification. Public advice must use display_checker;
+#  no physical pair currently passes its module/wiring evidence gate. Known
+#  unsafe entries retain their classification. Connector maps remain separate.
 #
 #  compatibility_class values:
 #    fully_compatible        — Plug-and-play. No modifications needed.
@@ -28,8 +32,10 @@
 #  voltage_logic values:
 #    5V              — Requires 5V logic levels
 #    3.3V            — Requires 3.3V logic levels
-#    3.3V_tolerant   — Accepts both 3.3V and 5V (most RepRap LCDs)
-#    any             — No specific voltage requirement
+#    3.3V_tolerant   — Legacy declaration of 3.3V logic compatibility; NOT proof of 5V input tolerance
+#    any             — Software-only; not valid electrical evidence for physical hardware
+#  These labels do not qualify an exact display module, its supply or wiring.
+#  Klipper driver support cannot establish signal thresholds or input limits.
 #
 #  damage_risks:
 #    List of components that can be permanently damaged if misused.
@@ -65,7 +71,7 @@ display_configs:
       - "Officially registered in Klipper's LCD_chips driver registry (display.py)"
       - "Covers: RepRapDiscount Smart LCD (st7920), mini12864 (uc1701), HD44780 (2004)"
       - "Connects via standard EXP1/EXP2 10-pin ribbon headers"
-      - "Most RepRap LCDs are 3.3V-tolerant — safe with STM32 and LPC176x boards"
+      - "The generic controller selection does not establish the module's supply or signal voltage limits"
       - "Verify ribbon connector orientation — reversed EXP cables destroy GPIO"
 
   lcd_menu:
@@ -130,7 +136,7 @@ display_configs:
       - "HD44780 character displays natively supported (registered in LCD_chips)"
       - "RepRapDiscount 2004 Smart Controller uses this driver"
       - "Operates via 4-bit parallel interface over EXP1"
-      - "5V-tolerant inputs — safe with 3.3V boards (STM32, LPC176x)"
+      - "Verify the module's supply, signal directions and input thresholds; 5V tolerance alone does not prove 3.3V operation"
 
   hd44780_spi:
     friendly_name: "HD44780 via SPI Bridge"
@@ -159,7 +165,7 @@ display_configs:
       - "ST7920 natively supported (registered in LCD_chips as 'st7920')"
       - "RepRapDiscount Full Graphic Smart Controller uses this chip"
       - "Ender 3 stock display uses ST7920 with Creality EXP pinout"
-      - "ST7920 inputs are 5V tolerant — works with 3.3V GPIO"
+      - "The ST7920 driver does not establish a specific panel's input tolerance or logic thresholds"
       - "EXP1/EXP2 ribbon connectors — check orientation before plugging in"
 
   emulated_st7920:
@@ -188,7 +194,7 @@ display_configs:
       - "UC1701 natively supported in Klipper (LCD_chips registry)"
       - "Used in mini12864 displays (Fysetc, BigTreeTech, etc.)"
       - "SPI interface — does NOT use EXP1/EXP2 directly (uses EXP1 as SPI source)"
-      - "Operates at 3.3V logic — fully compatible with STM32/LPC176x/RP2040"
+      - "Catalog logic declaration is 3.3V; verify the exact module and board's electrical specifications"
       - "Requires RGB LED section separately if display has RGB backlight"
 
   ssd1306:
@@ -203,8 +209,8 @@ display_configs:
     notes:
       - "SSD1306 OLED natively supported in Klipper (LCD_chips as 'ssd1306')"
       - "I2C interface (address: 0x3C or 0x3D)"
-      - "Accepts both 3.3V and 5V VCC — verify display module specs"
-      - "Logic levels follow VCC — use 3.3V VCC on 3.3V boards"
+      - "Module supply range and signal limits require separate verification for the exact module"
+      - "A regulator or 5V supply input does not establish 5V logic tolerance; verify pull-ups and signal levels"
 
   sh1106:
     friendly_name: "SH1106 OLED (I2C or SPI, 128x64)"
@@ -409,27 +415,33 @@ display_configs:
       - "Used on some BigTreeTech boards to expand available GPIO pins"
 
   pca9685:
-    friendly_name: "PCA9685 I2C PWM Controller"
-    compatibility_class: fully_compatible
-    status: supported
+    friendly_name: "PCA9685 (no standalone Klipper section)"
+    compatibility_class: experimental
+    status: unsupported
     recommendation: none
     interface_required: I2C
     voltage_logic: 3.3V_tolerant
     damage_risks: []
     required_modifications: []
     notes:
-      - "PCA9685 PWM controller is natively supported by Klipper"
-      - "KACE handles pca9685 as passthrough — generates commented config block"
+      - "[pca9685] is not a native standalone Klipper section; do not activate it"
+      - "PCA9685 is implemented internally by Replicape, not an alias for [replicape]"
+      - "KACE preserves an inactive reference and classifies it as unsupported"
 
 
 # ── Printer model-based detection ─────────────────────────────────────────────
-# Keyed by lowercase substring of the printer config filename.
+# Exact config_filenames and explicit legacy filename_aliases, never substrings.
+# Bindings identify advice only; they do not certify a connected display.
+# Existing official bindings are retained; only reviewed Ender 3 identities are
+# added by K17. Empty lists mean no filename-only advice for that family.
 # Checked FIRST — printer profile takes precedence over generic display_configs.
 
 printer_display_profiles:
 
   # ── Creality CR-6 SE ────────────────────────────────────────
   cr6-se:
+    config_filenames: []
+    filename_aliases: [printer-cr6-se.cfg, printer-creality-cr6-se.cfg]
     display_type: t5uid1
     compatibility_class: unsafe
     status: unsupported
@@ -449,8 +461,10 @@ printer_display_profiles:
       - "Step 2: Boot Klipper — all control via web interface"
       - "Step 3 (optional): Flash 'klipper-dgus' compatible firmware to display for partial support"
 
-  # ── Ender 3 Pro / Ender 3 V2 ────────────────────────────────
+  # ── Ender 3 / Ender 3 Pro ───────────────────────────────────
   ender-3:
+    config_filenames: [printer-creality-ender3-2018.cfg, printer-creality-ender3pro-2020.cfg]
+    filename_aliases: [printer-creality-ender-3.cfg]
     display_type: st7920
     compatibility_class: fully_compatible
     status: supported
@@ -466,6 +480,8 @@ printer_display_profiles:
 
   # ── Ender 3 V2 (differs from Ender 3 Pro) ──────────────────
   ender-3-v2:
+    config_filenames: [printer-creality-ender3-v2-2020.cfg]
+    filename_aliases: [printer-creality-ender-3-v2.cfg]
     display_type: dwin_set
     compatibility_class: experimental
     status: partial
@@ -485,6 +501,8 @@ printer_display_profiles:
 
   # ── Creality CR-10 Smart ─────────────────────────────────────
   cr10-smart:
+    config_filenames: [printer-creality-cr10-smart-pro-2022.cfg]
+    filename_aliases: []
     display_type: tft_serial
     compatibility_class: compatible_with_adapter
     status: partial
@@ -501,6 +519,8 @@ printer_display_profiles:
 
   # ── Creality Ender 6 ────────────────────────────────────────
   ender-6:
+    config_filenames: []
+    filename_aliases: []
     display_type: tft_serial
     compatibility_class: compatible_with_adapter
     status: partial
@@ -514,6 +534,8 @@ printer_display_profiles:
 
   # ── Artillery Sidewinder ─────────────────────────────────────
   artillery-sidewinder:
+    config_filenames: [printer-artillery-sidewinder-x2-2022.cfg, printer-artillery-sidewinder-x3-plus-2024.cfg]
+    filename_aliases: [printer-artillery-sidewinder-x1.cfg]
     display_type: tft_serial
     compatibility_class: compatible_with_adapter
     status: partial
@@ -530,6 +552,8 @@ printer_display_profiles:
 
   # ── Artillery Genius ─────────────────────────────────────────
   artillery-genius:
+    config_filenames: [printer-artillery-genius-pro-2022.cfg]
+    filename_aliases: []
     display_type: tft_serial
     compatibility_class: compatible_with_adapter
     status: partial
@@ -544,6 +568,8 @@ printer_display_profiles:
 
   # ── Artillery Hornet ─────────────────────────────────────────
   artillery-hornet:
+    config_filenames: []
+    filename_aliases: []
     display_type: tft_serial
     compatibility_class: compatible_with_adapter
     status: partial
@@ -557,6 +583,12 @@ printer_display_profiles:
 
   # ── MKS Robin-based printers ─────────────────────────────────
   mks-robin:
+    config_filenames:
+      - generic-mks-robin-e3.cfg
+      - generic-mks-robin-nano-v1.cfg
+      - generic-mks-robin-nano-v2.cfg
+      - generic-mks-robin-nano-v3.cfg
+    filename_aliases: []
     display_type: tft_serial
     compatibility_class: compatible_with_adapter
     status: partial
@@ -571,6 +603,8 @@ printer_display_profiles:
 
   # ── Voron 2.4 / Voron Trident ────────────────────────────────
   voron:
+    config_filenames: [kit-voron2-250mm.cfg]
+    filename_aliases: []
     display_type: uc1701
     compatibility_class: fully_compatible
     status: supported
@@ -586,6 +620,12 @@ printer_display_profiles:
 
   # ── BigTreeTech Octopus / SKR boards ─────────────────────────
   octopus:
+    config_filenames:
+      - generic-bigtreetech-octopus-max-ez.cfg
+      - generic-bigtreetech-octopus-pro-v1.0.cfg
+      - generic-bigtreetech-octopus-pro-v1.1.cfg
+      - generic-bigtreetech-octopus-v1.1.cfg
+    filename_aliases: []
     display_type: uc1701
     compatibility_class: fully_compatible
     status: supported
@@ -656,7 +696,7 @@ board_display_matrix:
         - "5V GPIO signals may exceed UC1701 absolute maximum VIH (typically 3.6V)"
         - "Repeated overvoltage degrades and eventually destroys the UC1701 display driver"
       required_modifications:
-        - "Step 1: Install a 74AHCT125 or SN74LVC125 level shifter (5V→3.3V) on DATA, CLK, CS lines"
+        - "Step 1: Review voltage translation for each signal using the exact board and display specifications; no universal adapter is specified"
         - "Step 2: Power mini12864 from 3.3V rail"
         - "Step 3: Configure [display] with software SPI to allow remapped level-shifted pins"
 

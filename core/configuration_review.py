@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
+import math
 import re
 import sys
+from configparser import ConfigParser
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 from core.managed_config import HARDWARE_REMOTE, MACROS_REMOTE, ManagedConfigPlan, effective_hardware_text
 from core.profile_values import infer_homing_positive_dir
+from core.probe_configuration import is_probe_virtual_endstop
+from core.config_sections import section_identity
 
 
 @dataclass(frozen=True)
@@ -58,7 +62,7 @@ def _sections(text: str) -> dict[str, dict[str, str]]:
             option = _OPTION_RE.match(line)
             if option:
                 options[option.group(1).strip().casefold()] = option.group(2).strip()
-        result.setdefault(match.group(1).strip().casefold(), {}).update(options)
+        result.setdefault(section_identity(match.group(1)), {}).update(options)
     return result
 
 
@@ -74,29 +78,246 @@ def _header_value(text: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
+def validate_configuration_plan(
+    plan: ManagedConfigPlan, *, firmware_reservation_reader: Callable[[str], dict] | None = None,
+    selected_board: dict | None = None,
+) -> SemanticValidation:
     hardware = effective_hardware_text(plan)
     generated_guidance = _artifact_text(plan, HARDWARE_REMOTE) or _artifact_text(plan, "printer.cfg")
     macros = _artifact_text(plan, MACROS_REMOTE)
     sections = _sections(hardware)
     errors: list[ReviewMessage] = []
+    from core.tmc_sensorless import validate_tmc_virtual_endstops
+    from core.exceptions import GenerationError
+    from core.heater_verification import validate_verify_heater
+    try:
+        validate_verify_heater(hardware)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("verify-heater", str(exc)))
+    from core.hotend_fan import validate_heater_fan_options
+    try:
+        validate_heater_fan_options(hardware)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("heater-fan-options", str(exc)))
+    from core.part_fan import validate_part_fan_options
+    try:
+        validate_part_fan_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("part-fan-options", str(exc)))
+    from core.board_auxiliary import validate_replicape_platform
+    try:
+        validate_replicape_platform(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("platform-dependency", str(exc)))
+    from core.board_auxiliary import validate_board_electrical_artifact
+    try:
+        validate_board_electrical_artifact(selected_board, hardware)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("board-electrical-dependency", str(exc)))
+    from core.bed_mesh import validate_mesh_clearance, validate_mesh_interpolation
+    try:
+        validate_mesh_clearance(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("mesh-clearance", str(exc)))
+    try:
+        validate_mesh_interpolation(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("mesh-interpolation", str(exc)))
+    from core.thermistor import validate_bed_circuit
+    try:
+        validate_bed_circuit(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("bed-circuit", str(exc)))
+    from core.thermistor import validate_custom_thermistors
+    from core.pin_validator import _read_pin_config, PinAliasError
+    from core.display_configuration import validate_display_config
+    try:
+        validate_display_config(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("display-config", str(exc)))
+    try:
+        validate_custom_thermistors(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("custom-thermistor", str(exc)))
+    from core.profile_values import validate_sensor_resistors
+    from core.profile_values import validate_homing_options
+    from core.profile_values import validate_primary_extruder_options
+    from core.profile_values import validate_motion_timing
+    from core.probe_configuration import validate_bltouch_flags
+    try:
+        validate_bltouch_flags(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("bltouch-flags", str(exc)))
+    try:
+        validate_motion_timing(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("motion-timing", str(exc)))
+    try:
+        validate_homing_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("homing-options", str(exc)))
+    try:
+        validate_primary_extruder_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("extruder-options", str(exc)))
+    from core.homing_source import validate_homing_composition
+    try:
+        validate_homing_composition(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("homing-composition", str(exc)))
+    try:
+        validate_sensor_resistors(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("sensor-resistor", str(exc)))
+    from core.thermistor import validate_adc_sensor_options, validate_sensor_references, validate_adc_pin_dependencies
+    try:
+        validate_sensor_references(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("sensor-reference", str(exc)))
+    try:
+        validate_adc_sensor_options(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("adc-sensor-options", str(exc)))
+    try:
+        validate_adc_pin_dependencies(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("adc-pin-dependency", str(exc)))
+    from core.primary_mcu import validate_primary_restart
+    try:
+        generated_mcu = _read_pin_config(generated_guidance)[0].get('mcu', {})
+        validate_primary_restart(_read_pin_config(hardware)[0], expected=generated_mcu.get('restart_method'))
+    except GenerationError as exc:
+        errors.append(ReviewMessage('mcu-restart', str(exc)))
+    from core.host_mcu import validate_host_adc_mcus
+    try:
+        generated_sections = _read_pin_config(generated_guidance)[0]
+        expected_hosts = {name: options for name, options in generated_sections.items()
+                          if name.startswith("mcu ") and str(options.get("serial", "")).startswith("/tmp/klipper_host_")}
+        validate_host_adc_mcus(_read_pin_config(hardware)[0], expected=expected_hosts)
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("host-adc-mcu", str(exc)))
+    try:
+        validate_tmc_virtual_endstops(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-sensorless", str(exc)))
+    from core.tmc_uart import validate_uart_config
+    try:
+        validate_uart_config(hardware)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-uart-conflict", str(exc)))
+    from core.profile_values import (
+        validate_tmc_sense_resistors, validate_tmc_current_settings,
+        validate_tmc_spi_options, validate_tmc_register_values, validate_tmc_auxiliary_options,
+    )
+    try:
+        validate_tmc_auxiliary_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-auxiliary-options", str(exc)))
+    try:
+        validate_tmc_register_values(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-register-value", str(exc)))
+    try:
+        validate_tmc_sense_resistors(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-sense-resistor", str(exc)))
+    try:
+        validate_tmc_current_settings(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-current-settings", str(exc)))
+    try:
+        validate_tmc_spi_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-spi-options", str(exc)))
+    from core.tmc_spi import validate_spi_config
+    try:
+        validate_spi_config(hardware)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("tmc-spi-chain", str(exc)))
+    from core.pin_validator import validate_probe_pin_usage, PinAliasError
+    from core.firmware_workflow import FirmwareWorkflowError
+    from firmware.identity import FirmwareIdentityError
+    reservations = {}
+    from core.board_cooling import required_board_fans, validate_required_cooling
+    required_cooling = {}
+    try:
+        required_cooling = required_board_fans(selected_board)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("board-cooling-source", str(exc)))
+    has_scaled_adc = any(name.split() and name.split()[0] == "adc_scaled" for name in sections)
+    from core.board_auxiliary import BOARD_DIGITAL_OUTPUTS, SELECTED_ONLY_OUTPUTS, selected_board_digital_outputs
+    from core.board_pwm import selected_fixed_pwm_beepers, validate_fixed_pwm_outputs
+    pwm_outputs = {}
+    board_outputs = {}
+    try:
+        pwm_outputs = selected_fixed_pwm_beepers(selected_board or {})
+    except GenerationError as exc:
+        errors.append(ReviewMessage("fixed-pwm-source", str(exc)))
+    try:
+        board_outputs = selected_board_digital_outputs(selected_board or {})
+    except GenerationError as exc:
+        errors.append(ReviewMessage("board-digital-source", str(exc)))
+    has_static = any(name in sections and (name not in SELECTED_ONLY_OUTPUTS or name in board_outputs)
+                     for name in BOARD_DIGITAL_OUTPUTS) or any(name.startswith("static_digital_output ") for name in sections)
+    if (required_cooling or "bltouch" in sections or "probe" in sections or has_scaled_adc or has_static or pwm_outputs) and firmware_reservation_reader is not None:
+        try:
+            reservations = firmware_reservation_reader(hardware)
+        except (FirmwareIdentityError, FirmwareWorkflowError) as exc:
+            errors.append(ReviewMessage("firmware-pin-evidence", str(exc)))
+    from core.adc_scaled import validate_adc_scaled
+    from core.board_bx_panel import validate_bx_panel
+    try:
+        validate_required_cooling(selected_board, _read_pin_config(hardware)[0], firmware_reservations=reservations)
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("board-cooling", str(exc)))
+    try:
+        validate_bx_panel(selected_board, _read_pin_config(hardware)[0], firmware_reservations=reservations)
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("bx-panel", str(exc)))
+    from core.board_auxiliary import validate_static_pin_usage
+    from core.board_auxiliary import validate_board_digital_outputs
+    try:
+        validate_board_digital_outputs(_read_pin_config(hardware)[0], firmware_reservations=reservations,
+                                       selected_outputs=board_outputs)
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("board-digital-output", str(exc)))
+    try:
+        validate_fixed_pwm_outputs(_read_pin_config(hardware)[0], pwm_outputs, firmware_reservations=reservations)
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("fixed-pwm-output", str(exc)))
+    try:
+        validate_static_pin_usage(_read_pin_config(hardware)[0], firmware_reservations=reservations)
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("static-digital-output", str(exc)))
+    try:
+        validate_adc_scaled(_read_pin_config(hardware)[0], firmware_reservations=reservations)
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage("adc-scaled", str(exc)))
+    try:
+        validate_probe_pin_usage(hardware, firmware_reservations=reservations)
+    except PinAliasError as exc:
+        code = "bltouch-pin-conflict" if str(exc).startswith("BLTouch") else "probe-pin-conflict"
+        errors.append(ReviewMessage(code, str(exc)))
     planned_serial = _sections(generated_guidance).get("mcu", {}).get("serial")
     if planned_serial and sections.get("mcu", {}).get("serial") != planned_serial:
         errors.append(ReviewMessage("included-mcu-override", "A user include overrides the selected MCU serial; resolve it before deployment."))
     warnings: list[ReviewMessage] = [
         ReviewMessage("managed-plan", warning) for warning in plan.warnings
     ]
+    if any(name == "display" or name.startswith("display ") for name in sections):
+        warnings.append(ReviewMessage(
+            "display-hardware-unverified",
+            "Active display configuration is included in this review; its wiring and electrical compatibility "
+            "are not verified by preserving or publishing these files. Verify the specific board and display before connecting.",
+        ))
 
-    probe_sections = any(
-        name == "bltouch" or name == "probe" or name.startswith("probe ")
-        for name in sections
-    )
+    probe_sections = "probe" in sections or "bltouch" in sections
     z_options = sections.get("stepper_z", {})
-    virtual_z = z_options.get("endstop_pin", "").casefold() == "probe:z_virtual_endstop"
-    if probe_sections != virtual_z:
+    virtual_z = is_probe_virtual_endstop(z_options.get("endstop_pin", ""))
+    if virtual_z and not probe_sections:
         errors.append(ReviewMessage(
             "probe-z-endstop",
-            "Probe selection and the Z endstop disagree: a probe must use probe:z_virtual_endstop, while a physical Z endstop must not.",
+            "probe:z_virtual_endstop requires a supported [probe] or [bltouch] section.",
         ))
     if not virtual_z and "stepper_z" in sections and "position_endstop" not in z_options:
         errors.append(ReviewMessage(
@@ -116,18 +337,37 @@ def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
             # contain only pins.  Validate homing only when this plan owns any
             # of the geometry needed to reason about it.
             continue
-        if not geometry_keys <= set(options):
+        if not {"position_max", "position_endstop"} <= set(options):
             errors.append(ReviewMessage(
                 f"homing-{axis}-geometry",
-                f"Homing geometry for {axis.upper()} is incomplete; position_min, position_max and position_endstop are required together.",
+                f"Homing geometry for {axis.upper()} is incomplete; position_max and position_endstop are required (position_min defaults to zero).",
+            ))
+            continue
+        # Apply the Klipper rail default only while reading; preserve omission
+        # in the actual artifact and never replace an explicit negative limit.
+        try:
+            minimum = float(options.get("position_min", "0"))
+            maximum = float(options["position_max"])
+            endstop = float(options["position_endstop"])
+            if (not all(math.isfinite(value) for value in (minimum, maximum, endstop))
+                    or not minimum < maximum or not minimum <= endstop <= maximum):
+                raise ValueError()
+        except (ValueError, TypeError):
+            errors.append(ReviewMessage(
+                f"homing-{axis}-geometry",
+                f"Homing geometry for {axis.upper()} requires finite limits with position_min < position_max and an endstop within that range.",
             ))
             continue
         inferred = infer_homing_positive_dir(
-            options.get("position_endstop"),
-            options.get("position_min"),
-            options.get("position_max"),
+            endstop, minimum, maximum,
         )
         explicit = options.get("homing_positive_dir")
+        direction = ConfigParser.BOOLEAN_STATES.get(explicit.casefold()) if explicit is not None else None
+        if explicit is not None and direction is None:
+            errors.append(ReviewMessage(
+                f"homing-{axis}-direction", f"Homing direction for {axis.upper()} must be a Klipper boolean.",
+            ))
+            continue
         if explicit is None and inferred is None:
             errors.append(ReviewMessage(
                 f"homing-{axis}-ambiguous",
@@ -138,7 +378,8 @@ def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
                 f"homing-{axis}-inferred",
                 f"Homing direction for {axis.upper()} will be inferred safely from its endstop position and travel limits; verify it during the first endstop test.",
             ))
-        elif explicit is not None and inferred is not None and explicit.casefold() != inferred.casefold():
+        elif explicit is not None and ((direction and endstop == minimum)
+                                      or (not direction and endstop == maximum)):
             errors.append(ReviewMessage(
                 f"homing-{axis}-contradiction",
                 f"Homing direction for {axis.upper()} contradicts its endstop location and travel limits.",
@@ -165,8 +406,12 @@ def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
     has_endstop_calibration = "Z_ENDSTOP_CALIBRATE" in generated_guidance
     if virtual_z and not has_probe_calibration:
         errors.append(ReviewMessage("probe-calibration-missing", "A configured probe requires a PROBE_CALIBRATE step."))
-    if not virtual_z and has_probe_calibration:
-        errors.append(ReviewMessage("probe-calibration-extra", "PROBE_CALIBRATE must not be shown when Z uses a physical endstop."))
+    if not probe_sections and has_probe_calibration:
+        errors.append(ReviewMessage("probe-calibration-extra", "PROBE_CALIBRATE requires a configured [probe] or [bltouch]."))
+    if probe_sections and not virtual_z and not has_probe_calibration:
+        # A preserved mesh probe may not have KACE-owned calibration comments.
+        # Report its independent calibration without rejecting physical homing.
+        warnings.append(ReviewMessage("probe-calibration-guidance", "Calibrate the probe Z offset with PROBE_CALIBRATE separately from the physical Z endstop."))
     if not virtual_z and "stepper_z" in sections and not has_endstop_calibration:
         errors.append(ReviewMessage("endstop-calibration-missing", "Physical Z homing requires Z_ENDSTOP_CALIBRATE guidance."))
 
@@ -181,10 +426,14 @@ def validate_configuration_plan(plan: ManagedConfigPlan) -> SemanticValidation:
     return SemanticValidation(tuple(errors), tuple(warnings))
 
 
-def build_configuration_review(plan: ManagedConfigPlan) -> ConfigurationReview:
+def build_configuration_review(
+    plan: ManagedConfigPlan, *, firmware_reservation_reader: Callable[[str], dict] | None = None,
+    selected_board: dict | None = None,
+) -> ConfigurationReview:
     hardware = effective_hardware_text(plan)
     sections = _sections(hardware)
-    validation = validate_configuration_plan(plan)
+    validation = validate_configuration_plan(plan, firmware_reservation_reader=firmware_reservation_reader,
+                                             selected_board=selected_board)
     board = _header_value(hardware, "Board") or "configured board"
     kinematics = sections.get("printer", {}).get("kinematics", "unknown")
     drivers = _header_value(hardware, "Stepper Drivers") or "configured"
@@ -205,7 +454,11 @@ def build_configuration_review(plan: ManagedConfigPlan) -> ConfigurationReview:
         calibration.append("hotend PID")
     if sections.get("heater_bed", {}).get("control", "pid").casefold() == "pid":
         calibration.append("heated-bed PID")
-    calibration.append("probe Z offset" if "probe:z_virtual_endstop" in hardware else "physical Z endstop")
+    if "probe" in sections or "bltouch" in sections:
+        calibration.append("probe Z offset")
+    if ("stepper_z" in sections
+            and not is_probe_virtual_endstop(sections["stepper_z"].get("endstop_pin", ""))):
+        calibration.append("physical Z endstop")
     summary.append(SummaryItem("info", "Calibration after installation: " + ", ".join(calibration)))
     changed = tuple(item.remote_name for item in plan.changed_artifacts)
     changes: list[str] = []
@@ -360,11 +613,14 @@ def render_configuration_review(
 
 
 _REVIEW_MESSAGES = {
+    "display-config": ("La configuración de pantalla contiene un controlador o campos obligatorios inválidos. Revisá los detalles en modo avanzado.", "A configuração do display contém um controlador ou campos obrigatórios inválidos. Consulte os detalhes no modo avançado."),
+    "display-hardware-unverified": ("Conservar o publicar la configuración de pantalla no verifica su cableado ni su compatibilidad eléctrica. Verificá la placa y pantalla concretas antes de conectarlas.", "Preservar ou publicar a configuração do display não verifica sua fiação nem sua compatibilidade elétrica. Verifique a placa e o display específicos antes de conectá-los."),
     "managed-plan": ("Se modificarán opciones existentes. Revisá los detalles en modo avanzado antes de confirmar.", "Opções existentes serão alteradas. Revise os detalhes no modo avançado antes de confirmar."),
     "included-mcu-override": ("Un archivo incluido cambia la conexión MCU seleccionada. Corregilo antes de instalar.", "Um arquivo incluído altera a conexão MCU selecionada. Corrija antes de instalar."),
-    "probe-z-endstop": ("El sensor y el final de carrera Z no coinciden. Revisá la selección del sensor.", "A sonda e o fim de curso Z não correspondem. Revise a seleção da sonda."),
+    "probe-z-endstop": ("El endstop virtual de Z requiere una sección [probe] o [bltouch].", "O fim de curso virtual Z requer uma seção [probe] ou [bltouch]."),
     "physical-z-position": ("Falta la posición del final de carrera Z.", "Falta a posição do fim de curso Z."),
-    "homing-geometry": ("La geometría de homing está incompleta. Revisá límites y finales de carrera.", "A geometria de homing está incompleta. Revise limites e fins de curso."),
+    "homing-geometry": ("La geometría de homing está incompleta o tiene límites/finales de carrera inválidos.", "A geometria de homing está incompleta ou tem limites/fins de curso inválidos."),
+    "homing-direction": ("La dirección de homing debe ser un booleano válido de Klipper.", "A direção de homing deve ser um booleano válido do Klipper."),
     "homing-ambiguous": ("La dirección de homing es ambigua; confirmala en el asistente.", "A direção de homing é ambígua; confirme no assistente."),
     "homing-contradiction": ("La dirección de homing contradice la posición del final de carrera.", "A direção de homing contradiz a posição do fim de curso."),
     "homing-inferred": ("Verificá la dirección del movimiento y los finales de carrera durante el commissioning.", "Verifique a direção do movimento e os fins de curso durante o comissionamento."),
@@ -372,7 +628,8 @@ _REVIEW_MESSAGES = {
     "heater-watermark-pid": ("El calentador usa control por histéresis pero conserva parámetros PID incompatibles.", "O aquecedor usa controle por histerese mas contém parâmetros PID incompatíveis."),
     "heater-pid-macro": ("La macro PID no es compatible con el control del calentador seleccionado.", "A macro PID não é compatível com o controle do aquecedor selecionado."),
     "probe-calibration-missing": ("Falta la guía de calibración del sensor Z.", "Falta a orientação de calibração da sonda Z."),
-    "probe-calibration-extra": ("La guía de calibración del sensor no corresponde a un final de carrera físico.", "A orientação de calibração da sonda não corresponde a um fim de curso físico."),
+    "probe-calibration-extra": ("PROBE_CALIBRATE requiere un sensor [probe] o [bltouch] configurado.", "PROBE_CALIBRATE requer uma sonda [probe] ou [bltouch] configurada."),
+    "probe-calibration-guidance": ("Calibrá el desplazamiento Z del sensor con PROBE_CALIBRATE por separado del final de carrera Z físico.", "Calibre o deslocamento Z da sonda com PROBE_CALIBRATE separadamente do fim de curso Z físico."),
     "endstop-calibration-missing": ("Falta la guía de calibración del final de carrera Z.", "Falta a orientação de calibração do fim de curso Z."),
     "active-unresolved": ("La configuración contiene un valor sin resolver; completá los datos antes de instalar.", "A configuração contém um valor não resolvido; complete os dados antes de instalar."),
 }

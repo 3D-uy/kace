@@ -40,7 +40,6 @@ from core.wizard.ui import (
     _normalize_mcu_family,
     get_current_board_parsed,
     _print_step_header,
-    _get_active_phase_steps,
 )
 
 # Re-export step submodules
@@ -51,6 +50,7 @@ from core.wizard.steps.hardware import (
     _step_z_socket_assignment,
     _step_driver_type,
     _step_driver_mode,
+    _step_tmc_currents,
     _apply_z_tmc_mappings,
     _has_fan_options,
     _get_mcu_search_terms,
@@ -65,6 +65,7 @@ from core.wizard.steps.motion import (
     _step_y_limits,
     _step_z_limits,
     _step_homing_directions,
+    _step_z_mechanics,
     _get_printer_profiles,
     _load_printer_profiles,
     print_detected_profile_summary,
@@ -165,93 +166,6 @@ def resolve_bltouch_pins(user_data: dict, parsed_data: dict) -> None:
         _blt["control_pin"] = _cp.strip()
 
 
-def _check_is_non_stock(board_name: str, printer_profile: str, board_parsed: dict, profile_parsed: dict) -> bool:
-    """Determine if the selected board is a non-stock upgrade for the selected printer profile."""
-    if not board_name or not printer_profile or not profile_parsed or not board_parsed:
-        return False
-
-    # 1. Look up printer profile expected MCU database in data/boards.yaml
-    expected_mcus = []
-    try:
-        from core.loader import load_boards_yaml
-        db = load_boards_yaml()
-        printer_profiles_db = db.get('printer_profiles', [])
-        for entry in printer_profiles_db:
-            if any(term.lower() in printer_profile.lower() for term in entry.get("search_terms", [])):
-                expected_mcus = entry.get("expected_mcu", [])
-                break
-    except Exception:
-        pass
-
-    # 2. If expected stock MCUs are defined, retrieve selected board's MCU and compare
-    if expected_mcus:
-        board_mcu = ""
-        try:
-            for entry in db.get('boards', []):
-                mcu = entry.get('mcu', '')
-                search_terms = entry.get('search_terms', [])
-                if any(term.lower() in board_name.lower() for term in search_terms):
-                    board_mcu = mcu
-                    break
-        except Exception:
-            pass
-
-        if board_mcu:
-            norm_board = _normalize_mcu_family(board_mcu)
-            match_found = any(
-                norm_board == _normalize_mcu_family(exp)
-                or board_mcu.lower().startswith(exp.lower())
-                or exp.lower().startswith(board_mcu.lower())
-                for exp in expected_mcus
-            )
-            if not match_found:
-                return True
-            return False
-
-    # 3. Fallback: Heuristic style check based on pin formats
-    profile_pins = []
-    for section, sdata in profile_parsed.items():
-        if isinstance(sdata, dict):
-            for k, val in sdata.items():
-                if (k == 'pin' or k == 'pins' or k.endswith('_pin')) and isinstance(val, str):
-                    cleaned = val.strip().lstrip('!^~')
-                    if ':' in cleaned:
-                        cleaned = cleaned.split(':', 1)[1].strip().lstrip('!^~')
-                    if cleaned and not cleaned.upper().startswith("TODO"):
-                        profile_pins.append(cleaned)
-
-    board_pins = []
-    for section, sdata in board_parsed.items():
-        if isinstance(sdata, dict):
-            for k, val in sdata.items():
-                if (k == 'pin' or k == 'pins' or k.endswith('_pin')) and isinstance(val, str):
-                    cleaned = val.strip().lstrip('!^~')
-                    if ':' in cleaned:
-                        cleaned = cleaned.split(':', 1)[1].strip().lstrip('!^~')
-                    if cleaned and not cleaned.upper().startswith("TODO"):
-                        board_pins.append(cleaned)
-
-    def get_pin_style(pin: str) -> str:
-        pin_upper = pin.upper()
-        if '.' in pin_upper:
-            return 'LPC'
-        if pin_upper.startswith('GPIO'):
-            return 'RP2040'
-        import re
-        if re.match(r'^P[A-L]\d+', pin_upper):
-            return 'STM32_AVR'
-        return 'UNKNOWN'
-
-    profile_styles = {get_pin_style(p) for p in profile_pins} - {'UNKNOWN'}
-    board_styles = {get_pin_style(p) for p in board_pins} - {'UNKNOWN'}
-
-    if profile_styles and board_styles:
-        if not (profile_styles & board_styles):
-            return True
-
-    return False
-
-
 def run_wizard(user_data_arg=None):
     """Runs the interactive CLI wizard to gather user preferences.
 
@@ -283,28 +197,8 @@ def run_wizard(user_data_arg=None):
     suggested_configs = []
     if detected_mcu:
         print(f"\n{t('wizard.detected_mcu')}: {detected_mcu.upper()}\n")
-        exact_matches = []
-        for base_mcu, terms in _get_mcu_search_terms().items():
-            if detected_mcu == base_mcu or detected_mcu.startswith(base_mcu):
-                for b in board_configs:
-                    if any(term in b.lower() for term in terms) and b not in exact_matches:
-                        exact_matches.append(b)
-                if exact_matches:
-                    break
-        if exact_matches:
-            suggested_configs = exact_matches
-        else:
-            norm_det = _normalize_mcu_family(detected_mcu)
-            if norm_det:
-                fallback_matches = []
-                for base_mcu, terms in _get_mcu_search_terms().items():
-                    if (_normalize_mcu_family(base_mcu) == norm_det
-                            or base_mcu.startswith(norm_det)
-                            or norm_det.startswith(base_mcu)):
-                        for b in board_configs:
-                            if any(term in b.lower() for term in terms) and b not in fallback_matches:
-                                fallback_matches.append(b)
-                suggested_configs = fallback_matches
+        from core.board_identity import suggested_board_configs
+        suggested_configs = suggested_board_configs(board_configs, detected_mcu)
 
     if mcu_hint == "manual" and not detected_mcu:
         print("\nUsing manual MCU. You will have a chance to enter the compiler configuration later.")
@@ -371,6 +265,8 @@ def run_wizard(user_data_arg=None):
         "y_limits",
         "z_limits",
         "homing_directions",
+        "z_mechanics",
+        "tmc_currents",
         "probe",
         "custom_probe",
         "custom_probe_offset_preview",
@@ -421,15 +317,19 @@ def run_wizard(user_data_arg=None):
             "next":   lambda ans, ud: "homing_directions" if ans == "confirm" else _BACK
         },
         "kinematics": {
+            "visible": lambda ud: "kinematics" not in ud.get("_authoritative", set()),
             "prompt": lambda ud: _step_kinematics(ud)
         },
         "x_volume": {
+            "visible": lambda ud: "x_size" not in ud.get("_authoritative", set()),
             "prompt": lambda ud: _step_volume(ud, "x_size", "x_position_max", t("wizard.x_volume"))
         },
         "y_volume": {
+            "visible": lambda ud: "y_size" not in ud.get("_authoritative", set()),
             "prompt": lambda ud: _step_volume(ud, "y_size", "y_position_max", t("wizard.y_volume"))
         },
         "z_volume": {
+            "visible": lambda ud: "z_size" not in ud.get("_authoritative", set()),
             "prompt": lambda ud: _step_volume(ud, "z_size", "z_position_max", t("wizard.z_volume"))
         },
         "x_limits": {
@@ -443,6 +343,14 @@ def run_wizard(user_data_arg=None):
         },
         "homing_directions": {
             "prompt": lambda ud: _step_homing_directions(ud)
+        },
+        "z_mechanics": {
+            "visible": lambda ud: int(ud.get("z_motors") or 1) > 1,
+            "prompt": lambda ud: _step_z_mechanics(ud)
+        },
+        "tmc_currents": {
+            "visible": lambda ud: ud.get("driver_mode") != "Standalone" and str(ud.get("driver_type", "")).startswith("TMC"),
+            "prompt": lambda ud: _step_tmc_currents(ud)
         },
         "probe": {
             "prompt": lambda ud: _step_probe(ud),
@@ -497,6 +405,7 @@ def run_wizard(user_data_arg=None):
             "next": lambda ans, ud: "custom_probe",
         },
         "custom_probe": {
+            "visible": lambda ud: False,
             "prompt": lambda ud: _step_custom_probe(ud),
             "next": lambda ans, ud: "custom_probe_review",
         },
@@ -516,9 +425,11 @@ def run_wizard(user_data_arg=None):
             "prompt": lambda ud: _step_probe_offsets(ud)
         },
         "hotend_therm": {
+            "visible": lambda ud: "hotend_thermistor" not in ud.get("_authoritative", set()),
             "prompt": lambda ud: _step_therm(ud, "hotend_thermistor", t("wizard.select_hotend_therm"), t("wizard.custom_hotend_therm"))
         },
         "bed_therm": {
+            "visible": lambda ud: "bed_thermistor" not in ud.get("_authoritative", set()),
             "prompt": lambda ud: _step_therm(ud, "bed_thermistor", t("wizard.select_bed_therm"), t("wizard.custom_bed_therm"))
         },
         "display": {
@@ -540,26 +451,14 @@ def run_wizard(user_data_arg=None):
 
     runner = WizardRunner(steps_config, step_order, initial_data=user_data)
     result_data = runner.run(start_step)
-    _apply_z_tmc_mappings(result_data)
 
-    # Merge printer profile pins into board_parsed to override board-default pins
-    profile_parsed = result_data.get("_profile_parsed")
-    board_parsed = result_data.get("board_parsed")
-    if profile_parsed and board_parsed is not None:
-        board_name = result_data.get("board", "")
-        printer_profile = result_data.get("printer_profile", "")
-        is_non_stock = _check_is_non_stock(board_name, printer_profile, board_parsed, profile_parsed)
-
-        for section, section_data in profile_parsed.items():
-            if section == "board_pins" and is_non_stock:
-                continue
-            if section not in board_parsed:
-                board_parsed[section] = {}
-            for key, value in section_data.items():
-                if is_non_stock and (key == "pin" or key == "pins" or key.endswith("_pin")):
-                    continue
-                board_parsed[section][key] = value
-
+    # Hardware remains the selected board plus explicit wizard assignments.
+    # Sharing an MCU (or even selecting the same profile again) must not replace
+    # its circuits or undo Z socket/probe assignments made by the user.
+    # Mechanical/thermal profile values are resolved separately by
+    # profile_values.resolve_generation_values at the generation boundary.
+    from core.profile_values import HARDWARE_SOURCE_POLICY
+    result_data["hardware_source_policy"] = HARDWARE_SOURCE_POLICY
     return result_data
 
 

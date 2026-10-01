@@ -11,7 +11,7 @@ import getpass
 import shutil
 import textwrap
 from core.exceptions import WizardExit
-from core.terminal import ERROR, INPUT, QUESTION, RESET, WARNING
+from core.terminal import ERROR, QUESTION, RESET, WARNING
 from core.translations import t
 
 class Choice:
@@ -211,10 +211,7 @@ def numbered_select(prompt, choices, default=0, require_explicit=False):
     for is_selectable, item in display_lines:
         if is_selectable:
             label, value = item
-            if (selectable_idx - 1) == default:
-                print(f"    {INPUT}{selectable_idx}) {label}{RESET}")
-            else:
-                print(f"    {selectable_idx}) {label}")
+            print(f"    {selectable_idx}) {label}")
             selectable_map[str(selectable_idx)] = value
             selectable_idx += 1
         else:
@@ -247,13 +244,14 @@ def numbered_select(prompt, choices, default=0, require_explicit=False):
             if val.lower() == str(label).lower() or val.lower() == str(val_choice).lower():
                 return val_choice
                 
-        print(f"  {ERROR}Invalid choice. Please select a number between 1 and {len(selectable_choices)}.{RESET}")
+        print(f"  {ERROR}{t('menu.invalid_choice', count=len(selectable_choices))}{RESET}")
 
-def simple_input(prompt, default=None, validate=None):
+def simple_input(prompt, default=None, validate=None, *, back_value=None):
     """
     Replace questionary.text().
     validate: optional callable(str) -> bool/str. Re-prompts on failure.
-    Returns stripped string.
+    Returns stripped string, or back_value for explicit navigation when enabled.
+    Navigation is resolved before domain validation and default substitution.
     """
     mock_val = _check_questionary_mock("simple_input", prompt)
     if mock_val is not _MOCK_DEFAULT:
@@ -263,8 +261,9 @@ def simple_input(prompt, default=None, validate=None):
         return str(default).strip() if default is not None else ""
         
     prompt = prompt.rstrip(" :")
+    if back_value is not None:
+        prompt += f" [{t('choice.back')}: <]"
     if default is not None and str(default).strip() != "":
-        from core.translations import t
         full_prompt = f"  {prompt} ({t('menu.default', value=default)}): "
     else:
         full_prompt = f"  {prompt}: "
@@ -279,6 +278,9 @@ def simple_input(prompt, default=None, validate=None):
             # connections) before the process exits.
             raise WizardExit
             
+        if back_value is not None and val.lower() in ("<", "back", "volver", "voltar", "__back__"):
+            return back_value
+
         if not val and default is not None:
             val = str(default).strip()
             
@@ -288,7 +290,7 @@ def simple_input(prompt, default=None, validate=None):
                 print(f"  {ERROR}[!] {res}{RESET}")
                 continue
             elif not res:
-                print(f"  {ERROR}[!] Invalid input. Please try again.{RESET}")
+                print(f"  {ERROR}[!] {t('menu.invalid_input')}{RESET}")
                 continue
                 
         return val
@@ -296,7 +298,7 @@ def simple_input(prompt, default=None, validate=None):
 def yes_no(prompt, default=False):
     """
     Replace questionary.confirm().
-    Returns bool. default shown in prompt as [Y/n] or [y/N].
+    Returns bool. Lowercase choices show the Enter default explicitly.
     """
     mock_val = _check_questionary_mock("yes_no", prompt)
     if mock_val is not _MOCK_DEFAULT:
@@ -306,10 +308,7 @@ def yes_no(prompt, default=False):
         return default
         
     prompt = prompt.rstrip(" :")
-    from core.translations import get_lang
-    language = get_lang()
-    affirmative = "s" if language in ("Español", "Português") else "y"
-    indicator = f"[{affirmative.upper()}/n]" if default else f"[{affirmative}/N]"
+    indicator = t("menu.yes_no_default_yes" if default else "menu.yes_no_default_no")
     full_prompt = f"  {prompt} {indicator}: "
     while True:
         try:
@@ -327,8 +326,7 @@ def yes_no(prompt, default=False):
         if val in ('n', 'no', 'não', 'nao'):
             return False
             
-        expected = "'s' o 'n'" if language == "Español" else ("'s' ou 'n'" if language == "Português" else "'y' or 'n'")
-        print(f"  {ERROR}Please enter {expected}.{RESET}")
+        print(f"  {ERROR}{t('menu.yes_no_expected')}{RESET}")
 
 def autocomplete_select(prompt, choices, default=0):
     """
@@ -358,12 +356,14 @@ def autocomplete_select(prompt, choices, default=0):
     default_label, default_val = selectable_choices[default]
     
     prompt = prompt.rstrip(" :")
-    print(f"\n  {prompt}")
-    print(f"  (This is a long list of {len(selectable_choices)} options. Type search query to filter.)")
+    print()
+    for line in _wrapped_prompt_lines(prompt):
+        print(f"  {line}")
+    print(f"  {t('menu.search_help', count=len(selectable_choices))}")
     
     while True:
         try:
-            query = input(f"  Search (default: {default_label}): ").strip()
+            query = input(f"  {t('menu.search_prompt', value=default_label)} ").strip()
         except (KeyboardInterrupt, EOFError):
             print()
             # S2-01: Raise WizardExit instead of sys.exit(0).
@@ -375,7 +375,7 @@ def autocomplete_select(prompt, choices, default=0):
         matches = [item for item in selectable_choices if query.lower() in item[0].lower()]
         
         if not matches:
-            print(f"  No matches found for '{query}'. Please try again.")
+            print(f"  {t('menu.search_no_matches', query=query)}")
             continue
             
         # Check for exact match
@@ -385,12 +385,12 @@ def autocomplete_select(prompt, choices, default=0):
             
         # Show matches
         while True:
-            print(f"\n  Matches for '{query}':")
+            print(f"\n  {t('menu.search_matches', query=query)}")
             for idx, (lbl, _) in enumerate(matches, 1):
                 print(f"    {idx}) {lbl}")
             
             try:
-                sel = input(f"  Select [1-{len(matches)}] or type new query: ").strip()
+                sel = input(f"  {t('menu.search_select', count=len(matches))} ").strip()
             except (KeyboardInterrupt, EOFError):
                 print()
                 # S2-01: Raise WizardExit instead of sys.exit(0).
@@ -408,7 +408,7 @@ def autocomplete_select(prompt, choices, default=0):
             query = sel
             matches = [item for item in selectable_choices if query.lower() in item[0].lower()]
             if not matches:
-                print(f"  No matches found for '{query}'. Returning to search.")
+                print(f"  {t('menu.search_retry', query=query)}")
                 break
                 
             exact_matches = [item for item in matches if item[0].lower() == query.lower()]

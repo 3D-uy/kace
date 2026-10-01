@@ -104,6 +104,8 @@ def _print_risk_panel(analysis: dict, display_key: str) -> None:
     comp_class = analysis.get("compatibility_class", "experimental")
     color, badge = _CLASS_BADGE.get(comp_class, (_C, "?"))
     label = t(f"display.class_{comp_class}")
+    if analysis.get("hardware_evidence") == "unknown":
+        label = t("display.class_unknown")
     confidence = analysis.get("confidence_level", "Unknown")
 
     border = _R if comp_class == "unsafe" else _Y if comp_class in ("compatible_with_adapter", "experimental") else _G
@@ -186,6 +188,10 @@ def _confirm_risk(analysis: dict, display_key: str) -> bool:
     Returns False if the user declined or pressed Ctrl+C.
     """
     comp_class = analysis.get("compatibility_class", "experimental")
+
+    if analysis.get("hardware_evidence") == "unknown":
+        print(f"\n  {_Y}{t('display.hardware_evidence_required')}{_RS}")
+        return False
 
     if comp_class == "fully_compatible":
         return True

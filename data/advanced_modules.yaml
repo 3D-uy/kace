@@ -8,13 +8,14 @@
 #
 #  Philosophy: parse → emit (commented) → inform → PASS.
 #  No section listed here is ever written as active config.
-#  The user must review, uncomment, and calibrate manually.
+#  Commented data is a reference, not a complete configuration to activate.
 #
 #  Fields per entry:
 #    section_prefix : Klipper section name prefix (lowercase).
-#                     Matched as a substring against parsed keys.
-#    passthrough    : true  → emit as commented block (PASS in sweep)
+#                     Matched against the exact section type before any name.
+#    passthrough    : true  → emit an inactive reference; does not imply upstream support
 #                     false → keep as UNSUPPORTED gate (no change)
+#    upstream_section: false → no native section; UNSUPPORTED even if preserved
 #    banner         : human-readable label for the comment header
 #    note           : one-line note shown above the commented block
 #    fields         : ordered field names to emit. Use ["*"] to emit all.
@@ -27,8 +28,9 @@ advanced_modules:
     passthrough: true
     banner: "Neopixel / WS2812 LED"
     note: >
-      Neopixel LED section detected. Pin data preserved below.
-      Review pin, chain_count, and color_order, then uncomment to enable.
+      Reference only. Neopixel fields preserved as comments.
+      A manual configuration requires verified module wiring, pin, chain_count,
+      color_order and any dependent sections; this block is not validated for activation.
     fields:
       - pin
       - chain_count
@@ -44,8 +46,9 @@ advanced_modules:
     passthrough: true
     banner: "DotStar / APA102 LED"
     note: >
-      DotStar LED section detected. Pin data preserved below.
-      Review data_pin, clock_pin, and chain_count, then uncomment to enable.
+      Reference only. DotStar fields preserved as comments.
+      A manual configuration requires verified wiring, data_pin, clock_pin,
+      chain_count and dependent sections; this block is not validated for activation.
     fields:
       - data_pin
       - clock_pin
@@ -60,8 +63,9 @@ advanced_modules:
     passthrough: true
     banner: "ADXL345 Accelerometer (Input Shaper)"
     note: >
-      ADXL345 accelerometer detected. SPI pin data preserved below.
-      After wiring, uncomment and run SHAPER_CALIBRATE for input shaper tuning.
+      Reference only. ADXL345 fields preserved as comments.
+      Verify the sensor, MCU and SPI configuration independently. Resonance testing
+      requires additional configuration and calibration outside this passthrough.
     fields:
       - cs_pin
       - spi_bus
@@ -74,10 +78,12 @@ advanced_modules:
   # ── PCA9685 PWM expander ──────────────────────────────────────
   - section_prefix: pca9685
     passthrough: true
-    banner: "PCA9685 PWM Expander"
+    upstream_section: false
+    banner: "PCA9685 - Unsupported Standalone Section"
     note: >
-      PCA9685 PWM expander detected. I2C data preserved below.
-      Uncomment and verify i2c_address before enabling.
+      This is not a valid standalone Klipper section. Do not uncomment.
+      Source fields are retained only as an inactive reference. PCA9685 support
+      is internal to Replicape; KACE does not convert this block into Replicape.
     fields:
       - i2c_bus
       - i2c_address
@@ -90,9 +96,9 @@ advanced_modules:
     passthrough: true
     banner: "SX1509 GPIO Expander"
     note: >
-      SX1509 GPIO expander detected. I2C data preserved below.
-      This board uses SX1509 for extended GPIO (e.g. display I/O).
-      Uncomment and verify i2c_address before enabling.
+      Reference only. SX1509 fields preserved as comments.
+      A manual configuration requires verified I2C MCU, bus, address and all
+      consuming GPIO sections; this block is not validated for activation.
     fields:
       - i2c_bus
       - i2c_address

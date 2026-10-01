@@ -18,74 +18,15 @@ class TestStockValidation(unittest.TestCase):
         self.assertEqual(_normalize_mcu_family("stm32f446"), "stm32f4")
         self.assertEqual(_normalize_mcu_family("rp2040"), "rp2040")
 
-    @patch('core.wizard.MCU_SEARCH_TERMS', {
-        'lpc1769': ['skr-v1.4'],
-        'lpc1768': ['skr-v1.4', 'skr-v1.3', 'sgen-l']
-    })
-    @patch('core.wizard.fetch_config_list', return_value=['generic-bigtreetech-skr-v1.4.cfg', 'generic-bigtreetech-skr-v1.3.cfg'])
-    @patch('core.wizard.discover_mcu', return_value={'mcu_path': '', 'derived_mcu': 'lpc1769', 'hint': ''})
-    @patch('core.wizard.get_lang', return_value='English')
-    def test_exact_priority_suggestions_lpc1769(self, mock_get_lang, mock_discover, mock_fetch):
-        """Test that LPC1769 prioritizes exact SKR 1.4 mapping over LPC1768 fallbacks."""
-        # We need to simulate the wizard up to board selection.
-        # But run_wizard is a while loop. We can just test the inner logic.
-        
-        # Capture stdout to avoid clutter
-        import io
-        from contextlib import redirect_stdout
-        
-        # We can extract the logic out or just run the wizard up to a point.
-        # It's better to just replicate the exact snippet from wizard.py since it's hard to break out.
-        detected_mcu = 'lpc1769'
-        board_configs = ['generic-bigtreetech-skr-v1.4.cfg', 'generic-bigtreetech-skr-v1.3.cfg']
-        
-        exact_matches = []
-        for base_mcu, terms in wizard.MCU_SEARCH_TERMS.items():
-            if detected_mcu == base_mcu or detected_mcu.startswith(base_mcu):
-                for b in board_configs:
-                    if any(term in b.lower() for term in terms):
-                        if b not in exact_matches:
-                            exact_matches.append(b)
-                if exact_matches:
-                    break
-        
-        suggested_configs = exact_matches
-        
-        self.assertEqual(suggested_configs, ['generic-bigtreetech-skr-v1.4.cfg'])
+    def test_exact_model_suggestions_use_reviewed_filenames(self):
+        from core.board_identity import suggested_board_configs
+        names = ['generic-bigtreetech-skr-v1.4.cfg', 'generic-bigtreetech-skr-v1.3.cfg']
+        self.assertEqual(suggested_board_configs(names, 'lpc1769'), names[:1])
 
-    @patch('core.wizard.MCU_SEARCH_TERMS', {
-        'lpc1769': ['skr-v1.4'],
-        'lpc1768': ['skr-v1.4', 'skr-v1.3', 'sgen-l']
-    })
-    def test_fallback_family_suggestions(self):
-        """Test fallback family suggestions when exact match doesn't exist."""
-        detected_mcu = 'lpc176x_custom'
-        board_configs = ['generic-bigtreetech-skr-v1.4.cfg', 'generic-bigtreetech-skr-v1.3.cfg']
-        
-        exact_matches = []
-        for base_mcu, terms in wizard.MCU_SEARCH_TERMS.items():
-            if detected_mcu == base_mcu or detected_mcu.startswith(base_mcu):
-                for b in board_configs:
-                    if any(term in b.lower() for term in terms):
-                        if b not in exact_matches:
-                            exact_matches.append(b)
-                if exact_matches:
-                    break
-                    
-        if exact_matches:
-            suggested_configs = exact_matches
-        else:
-            norm_det = _normalize_mcu_family(detected_mcu)
-            fallback_matches = []
-            for base_mcu, terms in wizard.MCU_SEARCH_TERMS.items():
-                if _normalize_mcu_family(base_mcu) == norm_det or base_mcu.startswith(norm_det) or norm_det.startswith(base_mcu):
-                    for b in board_configs:
-                        if any(term in b.lower() for term in terms) and b not in fallback_matches:
-                            fallback_matches.append(b)
-            suggested_configs = fallback_matches
-
-        self.assertIn('generic-bigtreetech-skr-v1.4.cfg', suggested_configs)
-        self.assertIn('generic-bigtreetech-skr-v1.3.cfg', suggested_configs)
+    def test_unknown_family_does_not_invent_model_suggestions(self):
+        from core.board_identity import suggested_board_configs
+        names = ['generic-bigtreetech-skr-v1.4.cfg', 'generic-bigtreetech-skr-v1.3.cfg']
+        self.assertEqual(suggested_board_configs(names, 'lpc176x_custom'), [])
 
     def test_generic_stock_validation(self):
         """Test validation behavior with exact/family matching and missing expectations."""

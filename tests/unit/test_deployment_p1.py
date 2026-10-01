@@ -95,7 +95,10 @@ class TransactionIdentityTests(unittest.TestCase):
                 transport = FakeTransport({"printer.cfg": b"# original\n"})
                 transport.host, transport.port, transport.api_key = "pi.local", 7125, None
                 user = {"workflow_checkpoint": checkpoint, "host": "pi.local",
-                        "user": "kace", "dest_path": "~/printer_data/config/"}
+                        "user": "kace", "dest_path": "~/printer_data/config/",
+                        # This identity test needs complete board evidence to
+                        # reach the deliberately mismatched firmware fingerprint.
+                        "board_raw_config": GENERATED.decode()}
                 def snapshot(*args, **kwargs):
                     kwargs["persist_root"] = root
                     return create_snapshot(*args, **kwargs)

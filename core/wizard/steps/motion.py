@@ -16,10 +16,169 @@ from core.profile_values import (
     mark_profile_values,
     mark_user_override,
     safe_defaults,
+    resolve_generation_values,
+    require_resolved_safety_values,
+    Z_MECHANICAL_OPTIONS,
+    z_mechanics_context,
+    z_mechanics_confirmation_matches,
+    _z_mechanical_number,
 )
 
 _PRINTER_PROFILES_DB = None
 _INTERACTIVE_MODE = True
+
+
+def _z_mechanics_input(option, value):
+    text = str(value).strip()
+    if option == "gear_ratio" and not text:
+        text = "1:1"
+    if option == "full_steps_per_rotation":
+        steps = int(text)
+        if steps < 1 or steps % 4:
+            raise ValueError("full steps must be a positive multiple of four")
+        return str(steps)
+    _z_mechanical_number(f"{option}_z", text)
+    if option in ("rotation_distance", "microsteps"):
+        finite_number(option, text, minimum=0, minimum_inclusive=False,
+                      maximum=256 if option == "microsteps" else 2000,
+                      integer=option == "microsteps")
+    return text
+
+
+def _clear_copied_z_mechanics(user_data):
+    receipt = user_data.pop("_z_mechanics_confirmation", {})
+    owned = receipt.get("owned_values", {}) if isinstance(receipt, dict) else {}
+    if not isinstance(owned, dict):
+        owned = {}
+    provenance = dict(user_data.get("_value_provenance") or {})
+    for key, value in owned.items():
+        if key not in {f"{option}_z{i}" for i in (1, 2, 3) for option in Z_MECHANICAL_OPTIONS}:
+            continue
+        if user_data.get(key) == value and provenance.get(key) == "USER_OVERRIDE":
+            user_data.pop(key, None)
+            provenance.pop(key, None)
+    user_data["_value_provenance"] = provenance
+
+
+def _step_z_mechanics(user_data):
+    """Stage every additional motor, then confirm the displayed values once."""
+    staged = copy.deepcopy(user_data)
+    board = staged.get("board_parsed") or {}
+    count = int(staged.get("z_motors") or 1)
+    if count <= 1:
+        _clear_copied_z_mechanics(user_data)
+        return "__skip__"
+    if os.environ.get("KACE_AUTO") == "1":
+        _, provenance = resolve_generation_values(board, staged)
+        require_resolved_safety_values({key: value for key, value in provenance.items()
+                                        if not key.startswith(("run_current_", "hold_current_", "stealthchop_threshold_"))})
+        return "__skip__"
+    draft, provenance = resolve_generation_values(board, staged, validate_motors=False)
+    fresh = False
+    try:
+        fresh = z_mechanics_confirmation_matches(board, staged, draft)
+    except (ValueError, TypeError):
+        pass
+    previous = staged.get("_z_mechanics_confirmation") or {}
+    owned = dict(previous.get("owned_values", {})) if fresh else {}
+    if not fresh and "_z_mechanics_confirmation" in staged:
+        _clear_copied_z_mechanics(staged)
+        draft, provenance = resolve_generation_values(board, staged, validate_motors=False)
+        print(f"{WARNING}{t('wizard.z_mechanics.changed')}{RESET}")
+    staged.pop("_z_mechanics_confirmation", None)
+    try:
+        primary = {option: _z_mechanics_input(option, draft[f"{option}_z"])
+                   for option in Z_MECHANICAL_OPTIONS}
+    except (ValueError, TypeError, KeyError, GenerationError) as exc:
+        print(f"{ERROR}{t('wizard.z_mechanics.invalid_primary', detail=str(exc))}{RESET}")
+        return _BACK
+    entry_context = z_mechanics_context(board, staged, draft)
+    selected_keys = [f"{option}_z{i}" for i in range(1, count) for option in Z_MECHANICAL_OPTIONS]
+    entry_inputs = {key: (user_data.get(key), (user_data.get("_value_provenance") or {}).get(key))
+                    for key in selected_keys}
+    for index in range(1, count):
+        target = f"z{index}"
+        fields = {option: f"{option}_{target}" for option in Z_MECHANICAL_OPTIONS}
+        current = {option: draft.get(key, "") for option, key in fields.items()}
+        can_keep = all(provenance.get(fields[option]) in ("PROFILE", "USER_OVERRIDE")
+                       for option in ("rotation_distance", "microsteps"))
+        try:
+            for option, value in current.items():
+                _z_mechanics_input(option, value)
+        except (ValueError, TypeError, GenerationError):
+            can_keep = False
+        print(f"\n{SECTION}{t('wizard.z_mechanics.title', motor=target.upper())}{RESET}")
+        for option in Z_MECHANICAL_OPTIONS:
+            print(f"  {t('wizard.z_mechanics.' + option)}: {current[option]}")
+        choices = []
+        if can_keep:
+            choices.append({"name": t("wizard.z_mechanics.keep"), "value": "keep"})
+        choices += [{"name": t("wizard.z_mechanics.individual"), "value": "individual"},
+                    {"name": t("wizard.z_mechanics.same"), "value": "same"}, _back_choice(), _quit_choice()]
+        mode = numbered_select(t("wizard.z_mechanics.choose"), choices=choices)
+        if mode == _BACK:
+            return _BACK
+        if mode in (_QUIT, None):
+            raise WizardExit()
+        if mode == "keep" and can_keep:
+            continue
+        if mode not in ("same", "individual"):
+            return "__retry__"
+        for option, key in fields.items():
+            value = primary[option]
+            if mode == "individual":
+                def validate(text, field=option):
+                    try:
+                        _z_mechanics_input(field, text)
+                        return True
+                    except (ValueError, TypeError, GenerationError):
+                        return t("wizard.z_mechanics.invalid")
+                value = simple_input(t("wizard.z_mechanics." + option),
+                                     default=current[option] or ("1:1" if option == "gear_ratio" else ""),
+                                     validate=validate, back_value=_BACK)
+                if value == _BACK:
+                    return _BACK
+                if value is None:
+                    raise WizardExit()
+            try:
+                staged[key] = _z_mechanics_input(option, value)
+            except (ValueError, TypeError, GenerationError):
+                print(f"{ERROR}{t('wizard.z_mechanics.invalid')}{RESET}")
+                return "__retry__"
+            mark_user_override(staged, key)
+            owned[key] = staged[key]
+    resolved, provenance = resolve_generation_values(board, staged)
+    require_resolved_safety_values({key: value for key, value in provenance.items()
+                                    if not key.startswith(("run_current_", "hold_current_", "stealthchop_threshold_"))})
+    print(f"\n{SECTION}{t('wizard.z_mechanics.review')}{RESET}")
+    for index in range(count):
+        target = "z" + (str(index) if index else "")
+        print(f"  {target.upper()}")
+        for option in Z_MECHANICAL_OPTIONS:
+            print(f"    {t('wizard.z_mechanics.' + option)}: {resolved[f'{option}_{target}'] or '1:1'}")
+    if not yes_no(t("wizard.z_mechanics.confirm"), default=False):
+        return "__retry__"
+    try:
+        live_board = user_data.get("board_parsed") or {}
+        live, _ = resolve_generation_values(live_board, user_data, validate_motors=False)
+        unchanged = z_mechanics_context(live_board, user_data, live) == entry_context
+        unchanged = unchanged and entry_inputs == {
+            key: (user_data.get(key), (user_data.get("_value_provenance") or {}).get(key))
+            for key in selected_keys}
+    except (ValueError, TypeError, GenerationError):
+        unchanged = False
+    if not unchanged:
+        print(f"{WARNING}{t('wizard.z_mechanics.changed')}{RESET}")
+        return "__retry__"
+    staged["_z_mechanics_confirmation"] = {
+        "schema": 1, "context": z_mechanics_context(board, staged, resolved),
+        "values": {f"{option}_z{i}": resolved[f"{option}_z{i}"]
+                   for i in range(1, count) for option in Z_MECHANICAL_OPTIONS},
+        "owned_values": owned,
+    }
+    user_data.clear()
+    user_data.update(staged)
+    return "done"
 
 def set_interactive_mode(interactive: bool) -> None:
     """Configure whether interactive operations (like clear screen, sleep) are performed."""
@@ -273,11 +432,17 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 staged_parsed.setdefault('printer', {})['kinematics'] = new_kin
 
         elif prop == "volume":
-            new_x = simple_input("Enter X build volume (mm):", default=str(x_sz))
+            new_x = simple_input("Enter X build volume (mm):", default=str(x_sz), back_value=_BACK)
+            if new_x == _BACK:
+                return "back"
             if new_x is not None and validate_pos_float(new_x):
-                new_y = simple_input("Enter Y build volume (mm):", default=str(y_sz))
+                new_y = simple_input("Enter Y build volume (mm):", default=str(y_sz), back_value=_BACK)
+                if new_y == _BACK:
+                    return "back"
                 if new_y is not None and validate_pos_float(new_y):
-                    new_z = simple_input("Enter Z build volume (mm):", default=str(z_sz))
+                    new_z = simple_input("Enter Z build volume (mm):", default=str(z_sz), back_value=_BACK)
+                    if new_z == _BACK:
+                        return "back"
                     if new_z is not None and validate_pos_float(new_z):
                         # Update bed sizes (Printable Area logical bounds)
                         for key, val in [("x_size", new_x), ("y_size", new_y), ("z_size", new_z),
@@ -337,8 +502,11 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             new_val = simple_input(
                 f"Enter {axis.upper()} {field} (mm):",
                 default=str(curr_val),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value=_BACK,
             )
+            if new_val == _BACK:
+                return "back"
             
             if new_val is not None and new_val.strip().lower() not in ("<", "back", "volver", ""):
                 val_clean = new_val.strip()
@@ -359,7 +527,9 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 default=th_choices.index(ht) if ht in THERMISTOR_PRESETS else 0
             )
             if new_th == "Other (Manual Entry)":
-                new_th = simple_input("Enter custom hotend thermistor name:", validate=questionary_thermistor_validator)
+                new_th = simple_input("Enter custom hotend thermistor name:", validate=questionary_thermistor_validator, back_value=_BACK)
+                if new_th == _BACK:
+                    return "back"
             if new_th:
                 staged_user_data["hotend_thermistor"] = new_th
                 mark_user_override(staged_user_data, "hotend_thermistor")
@@ -374,7 +544,9 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 default=bt_choices.index(bt) if bt in THERMISTOR_PRESETS else 0
             )
             if new_tb == "Other (Manual Entry)":
-                new_tb = simple_input("Enter custom bed thermistor name:", validate=questionary_thermistor_validator)
+                new_tb = simple_input("Enter custom bed thermistor name:", validate=questionary_thermistor_validator, back_value=_BACK)
+                if new_tb == _BACK:
+                    return "back"
             if new_tb:
                 staged_user_data["bed_thermistor"] = new_tb
                 mark_user_override(staged_user_data, "bed_thermistor")
@@ -504,8 +676,11 @@ def _step_volume(user_data, size_key, max_key, msg_text):
     ans = simple_input(
         msg_text,
         default=str(user_data.get(size_key) or ""),
-        validate=questionary_pos_numeric_validator
+        validate=questionary_pos_numeric_validator,
+        back_value=_BACK,
     )
+    if ans == _BACK:
+        return _BACK
     if ans is None or ans.strip().lower() in ("<", "back", "volver"):
         return _BACK
     val_clean = ans.strip()
@@ -535,7 +710,8 @@ def _step_x_limits(user_data):
             val = simple_input(
                 t("wizard.x_position_min") or "Enter X position_min (mm) [type '<' to go back]:",
                 default=str(user_data.get("x_position_min") if user_data.get("x_position_min") is not None else "0"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -548,7 +724,8 @@ def _step_x_limits(user_data):
             val = simple_input(
                 t("wizard.x_position_max") or "Enter X position_max (mm) [type '<' to go back]:",
                 default=str(user_data.get("x_position_max") or user_data.get("x_size") or "235"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -562,7 +739,8 @@ def _step_x_limits(user_data):
             val = simple_input(
                 t("wizard.x_position_endstop") or "Enter X position_endstop (mm) [type '<' to go back]:",
                 default=str(user_data.get("x_position_endstop") if user_data.get("x_position_endstop") is not None else "0"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -584,7 +762,8 @@ def _step_y_limits(user_data):
             val = simple_input(
                 t("wizard.y_position_min") or "Enter Y position_min (mm) [type '<' to go back]:",
                 default=str(user_data.get("y_position_min") if user_data.get("y_position_min") is not None else "0"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -597,7 +776,8 @@ def _step_y_limits(user_data):
             val = simple_input(
                 t("wizard.y_position_max") or "Enter Y position_max (mm) [type '<' to go back]:",
                 default=str(user_data.get("y_position_max") or user_data.get("y_size") or "235"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -611,7 +791,8 @@ def _step_y_limits(user_data):
             val = simple_input(
                 t("wizard.y_position_endstop") or "Enter Y position_endstop (mm) [type '<' to go back]:",
                 default=str(user_data.get("y_position_endstop") if user_data.get("y_position_endstop") is not None else "0"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -633,7 +814,8 @@ def _step_z_limits(user_data):
             val = simple_input(
                 t("wizard.z_position_min") or "Enter Z position_min (mm) [type '<' to go back]:",
                 default=str(user_data.get("z_position_min") if user_data.get("z_position_min") is not None else "0"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -646,7 +828,8 @@ def _step_z_limits(user_data):
             val = simple_input(
                 t("wizard.z_position_max") or "Enter Z position_max (mm) [type '<' to go back]:",
                 default=str(user_data.get("z_position_max") or user_data.get("z_size") or "250"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()
@@ -660,7 +843,8 @@ def _step_z_limits(user_data):
             val = simple_input(
                 t("wizard.z_position_endstop") or "Enter Z position_endstop (mm) [type '<' to go back]:",
                 default=str(user_data.get("z_position_endstop") if user_data.get("z_position_endstop") is not None else "0"),
-                validate=questionary_numeric_validator
+                validate=questionary_numeric_validator,
+                back_value="<",
             )
             if val is None:
                 raise WizardExit()

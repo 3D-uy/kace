@@ -474,6 +474,31 @@ class FirmwareDeploymentTests(unittest.TestCase):
                 with self.subTest(method=method), self.assertRaises(DeploymentArtifactError):
                     service.plan(unsafe, target, method)
 
+    def test_provenance_and_flashability_independently_block_before_preparation(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = write_artifact(root, "klipper.elf.hex", b"payload")
+            valid = artifact(source, fmt=FirmwareFormat.IHEX)
+            target = DeploymentTarget("generic-ramps.cfg", "atmega2560")
+            resolver = Mock()
+            service = FirmwareDeploymentService(
+                resolver=resolver, output_dir=root, event_sink=lambda _event: None
+            )
+            for unsafe in (
+                replace(valid, provenance=BuildProvenance.MOCK, flashable=True),
+                replace(valid, provenance=BuildProvenance.REAL, flashable=False),
+            ):
+                for method in (DeploymentMethodId.MANUAL, DeploymentMethodId.USB):
+                    with self.subTest(provenance=unsafe.provenance, method=method):
+                        self.assertEqual(service.available_methods(target, unsafe), ())
+                        with self.assertRaises(DeploymentArtifactError):
+                            service.plan(unsafe, target, method)
+                        # Even a caller supplying a plan directly must stop before staging.
+                        with self.assertRaises(DeploymentArtifactError):
+                            service.prepare(Mock(artifact=unsafe))
+                        resolver.resolve.assert_not_called()
+                        resolver.available.assert_not_called()
+                        self.assertFalse(os.path.exists(os.path.join(root, "deploy")))
+
     def test_tampered_prepared_media_is_rejected_before_sd_copy(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as media:
             source = write_artifact(root, payload=b"original")

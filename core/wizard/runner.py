@@ -24,7 +24,23 @@ PHASE_MAP = {
     "y_limits": "Motion",
     "z_limits": "Motion",
     "homing_directions": "Motion",
+    "z_mechanics": "Motion",
+    "tmc_currents": "Motion",
     "probe": "Sensors",
+    "custom_probe": "Sensors",
+    "custom_probe_pin": "Sensors",
+    "custom_probe_pullup": "Sensors",
+    "custom_probe_inverted": "Sensors",
+    "custom_probe_offset_preview": "Sensors",
+    "custom_probe_z_offset": "Sensors",
+    "custom_probe_speed": "Sensors",
+    "custom_probe_samples": "Sensors",
+    "custom_probe_samples_result": "Sensors",
+    "custom_probe_samples_tolerance": "Sensors",
+    "custom_probe_samples_tolerance_retries": "Sensors",
+    "custom_probe_sample_retract_dist": "Sensors",
+    "custom_probe_review": "Sensors",
+    "custom_probe_offsets": "Sensors",
     "bltouch_pins": "Sensors",
     "probe_offsets": "Sensors",
     "hotend_therm": "Sensors",
@@ -80,7 +96,16 @@ class WizardRunner:
                                     print(f"{SUCCESS}{t('wizard.phase.complete', phase=translated_last_phase)}{RESET}")
             
             # Print the header orientation box for the step
-            _print_step_header(current_id, self.user_data)
+            visible = step_cfg.get("visible", lambda ud: True)
+            if visible(self.user_data):
+                # Count the actual branch visited so far. Future answers can change
+                # the route; no speculative denominator or second branch resolver.
+                active_steps = [sid for sid in self.history_stack if
+                                PHASE_MAP.get(sid) == current_phase and
+                                self.steps_config[sid].get("visible", lambda ud: True)(self.user_data)]
+                if current_id not in active_steps:
+                    active_steps.append(current_id)
+                _print_step_header(current_id, self.user_data, active_steps=active_steps)
             
             try:
                 ans = step_cfg["prompt"](self.user_data)

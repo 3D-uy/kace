@@ -51,6 +51,9 @@ pid_Kp: 20
 pid_Ki: 1
 pid_Kd: 100
 [heater_bed]
+heater_pin: PA6
+sensor_pin: PA7
+sensor_type: Generic 3950
 control: {bed_control}
 {bed_pid}{probe_section}{calibration}""".encode()
 

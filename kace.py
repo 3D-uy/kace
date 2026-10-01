@@ -235,6 +235,9 @@ def _resume_firmware_workflow():
 
 def _show_prepared_firmware(checkpoint, *, view_only=False):
     artifact = checkpoint.get("artifact") or {}
+    if artifact.get('transformation') is not None:
+        from core.firmware_workflow import validate_checkpoint
+        validate_checkpoint(checkpoint, verify_artifact=True)
     # Publish a discoverable, verified convenience copy. The immutable artifact
     # in the checkpoint remains the authority used by deployment and Studio.
     path = artifact.get("path")
@@ -270,7 +273,8 @@ def _show_prepared_firmware(checkpoint, *, view_only=False):
         f"    {t('firmware.manual.final_filename', filename=artifact.get('final_filename') or t('firmware.manual.board_specific'))}"
     )
     from core.translations import get_mode
-    for index, instruction in enumerate((artifact.get("instructions") or ()) if get_mode() == "Advanced" else (), 1):
+    for index, instruction in enumerate((artifact.get("instructions") or ())
+            if get_mode() == "Advanced" or artifact.get('transformation') is not None else (), 1):
         text = instruction.get("text") if isinstance(instruction, dict) else str(instruction)
         if text:
             print(f"    {index}. {text}")
@@ -493,6 +497,7 @@ def main():
             parsed_data,
             printer_filename=user_data.get('printer_profile', ''),
             board_filename=user_data.get('board', ''),
+            detected_mcu=user_data.get('mcu_type', ''),
         )
 
         # If the user made a manual/override selection in the wizard, filter findings
@@ -727,7 +732,11 @@ def main():
     if needs_generation:
         print(f"\033[91m[*]\033[0m {t('kace.generating_cfg')}", end="", flush=True)
         try:
+            from core.wizard.steps.thermal import review_thermal_policy
+            review_thermal_policy(parsed_data, user_data, include_macros=generate_macros)
             generate_config(parsed_data, user_data, include_macros=generate_macros)
+        except (WizardExit, KeyboardInterrupt):
+            _finish(cancelled(t("wizard.thermal.declined")))
         except GenerationError as gen_err:
             print(f"\r\033[91m[!]\033[0m {t('kace.generating_cfg')} FAILED")
             print(f"\n\033[91mERROR:\033[0m {gen_err}")
@@ -735,12 +744,19 @@ def main():
                 print("\033[93m    Unresolved TODO pins:\033[0m")
                 for section, key in gen_err.todos:
                     print(f"\033[93m      • {section} → {key}\033[0m")
-            print("\033[93m    Resolve the missing pins and re-run KACE.\033[0m")
+            print("\033[93m    Review the reported configuration error and re-run KACE.\033[0m")
             _finish(failed(WorkflowOutcome.GENERATION_FAILED, str(gen_err)))
         time.sleep(0.5)
         print(f"\r\033[92m[*]\033[0m {t('kace.generating_cfg_done')}")
     
     cfg_path = os.path.expanduser('~/kace/printer.cfg')
+    from core.board_auxiliary import selected_board_electrical_source, validate_board_electrical_artifact
+    try:
+        from core.deployer import _generated_config_bytes
+        _, hardware, _ = _generated_config_bytes()
+        validate_board_electrical_artifact(selected_board_electrical_source(user_data), hardware)
+    except (GenerationError, OSError) as exc:
+        _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc)))
     generated_serial = extract_mcu_serial(cfg_path)
     if not generated_serial:
         _finish(failed(

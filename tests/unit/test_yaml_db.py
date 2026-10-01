@@ -16,10 +16,10 @@ class TestYamlDb(unittest.TestCase):
 
     def test_bltouch_db_loader(self):
         db = _load_bltouch_db()
-        self.assertIn('skr-v1.4', db)
-        self.assertEqual(db['skr-v1.4']['sensor_pin'], '^P0.10')
-        self.assertIn('creality-v4.2.2', db)
-        self.assertEqual(db['creality-v4.2.2']['control_pin'], 'PB0')
+        self.assertIn('generic-bigtreetech-octopus-max-ez.cfg', db)
+        self.assertEqual(db['generic-bigtreetech-octopus-max-ez.cfg']['sensor_pin'], '^PB15')
+        self.assertNotIn('skr-v1.4', db)
+        self.assertNotIn('creality-v4.2.2', db)
 
     def test_firmware_db_loader_order(self):
         db = _load_firmware_db()

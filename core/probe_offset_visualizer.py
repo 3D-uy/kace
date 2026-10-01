@@ -334,10 +334,11 @@ def run_probe_offset_step(
             t("wizard.probe_x_offset") or "Probe X offset from nozzle (mm, e.g. -38 or 0):",
             default=f"{x_off:.1f}" if x_off != 0.0 else "0",
             validate=_validate_offset,
+            back_value="__back__",
         )
 
-        if raw_x is None:
-            # Ctrl+C or escape → signal back to caller
+        if raw_x is None or raw_x == "__back__":
+            # Explicit Back (legacy None remains compatible); Ctrl+C exits.
             result["probe_x_offset"] = "__back__"
             return result
 
@@ -355,9 +356,10 @@ def run_probe_offset_step(
             t("wizard.probe_y_offset") or "Probe Y offset from nozzle (mm, e.g. 0 or 25):",
             default=f"{y_off:.1f}" if y_off != 0.0 else "0",
             validate=_validate_offset,
+            back_value="__back__",
         )
 
-        if raw_y is None:
+        if raw_y is None or raw_y == "__back__":
             result["probe_y_offset"] = "__back__"
             return result
 

@@ -171,6 +171,9 @@ def validate_firmware_configuration(
 
     comparable_actual = dict(normalized)
     comparable_expected = dict(expected)
+    port = comparable_actual.pop("KACE_SERIAL_PORT", None)
+    if port is not None and (expected_arch != "stm32" or communication != "uart" or port not in {"USART1", "USART3"}):
+        raise FirmwareConfigurationError("Invalid explicit STM32 serial port")
     reference = comparable_actual.pop("CONFIG_CLOCK_REF_FREQ", None)
     if reference is not None and (expected_arch != "stm32" or reference not in
                                  {"8000000", "12000000", "16000000", "20000000", "24000000", "25000000", "1"}):
@@ -202,7 +205,7 @@ def render_config(config: Mapping[str, object]) -> str:
     return "".join(f"{key}={config[key]}\n" for key in sorted(config))
 
 
-def klipper_config(config: Mapping[str, object], processor: str) -> dict[str, str]:
+def klipper_config(config: Mapping[str, object], processor: str, *, board=None) -> dict[str, str]:
     """Translate the wizard's editing contract into writable Klipper choices.
 
     CONFIG_MCU, CLOCK_FREQ and FLASH_APPLICATION_ADDRESS are derived outputs,
@@ -213,6 +216,10 @@ def klipper_config(config: Mapping[str, object], processor: str) -> dict[str, st
     arch = processor_architecture(processor)
     model = processor.lower()
     choices = {"CONFIG_LOW_LEVEL_OPTIONS": "y"}
+    from firmware.startup_gpio import required_startup_pins
+    startup = required_startup_pins(board, processor)
+    if startup:
+        choices["CONFIG_INITIAL_PINS"] = '"' + ','.join(startup) + '"'
     machine = {"stm32": "STM32", "lpc176x": "LPC176X", "rp2040": "RPXXXX",
                "avr": "AVR", "linux": "LINUX"}.get(arch)
     if machine is None:
@@ -255,6 +262,10 @@ def klipper_config(config: Mapping[str, object], processor: str) -> dict[str, st
         "avr": {"uart": "AVR_SERIAL_UART0", "usb": "AVR_SERIAL_UART0"},
     }
     transport = transports[arch].get(comm)
+    from firmware.board_serial import board_serial_selector
+    serial_selector = board_serial_selector(board, processor, values)
+    if serial_selector:
+        transport = serial_selector
     if transport is None:
         raise FirmwareConfigurationError(f"No verified {comm} interface for {model}")
     choices[f"CONFIG_{transport}"] = "y"

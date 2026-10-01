@@ -134,122 +134,157 @@ def detect_display_sections(parsed_cfg: dict) -> list:
 
 
 def _match_printer_profile(printer_filename: str) -> tuple[str, dict] | tuple[None, None]:
-    """Try to match a printer filename against known printer display profiles.
+    """Resolve an exact declared OEM filename or explicit legacy alias.
 
-    Returns (profile_key, profile_dict) on match, (None, None) if no match.
-    Checked before display_configs — printer profile takes precedence.
+    Identity is not hardware qualification. Family substrings and dictionary
+    order must never select a different variant. Ambiguous database identities
+    are errors, rather than permission to fall back to a generic display.
     """
-    fname_lower = printer_filename.lower()
+    identities = {}
     for profile_key, profile_data in _get_printer_profiles().items():
-        if profile_key in fname_lower:
-            return profile_key, profile_data
-    return None, None
+        for field in ("config_filenames", "filename_aliases"):
+            names = profile_data.get(field, [])
+            if not isinstance(names, list):
+                raise RuntimeError(f"[KACE] invalid OEM {field}: {profile_key}")
+            for name in names:
+                if (not isinstance(name, str) or not name.endswith(".cfg")
+                        or name != name.strip().casefold() or "/" in name or "\\" in name):
+                    raise RuntimeError(f"[KACE] invalid OEM filename: {profile_key}")
+                if name in identities:
+                    raise RuntimeError(f"[KACE] ambiguous OEM filename: {name}")
+                identities[name] = (profile_key, profile_data)
+    return identities.get(printer_filename.strip().casefold(), (None, None))
 
 
-def _find_board_entry(board_filename: str) -> dict | None:
+def _find_board_entry(board_filename: str, detected_mcu: str = "") -> dict | None:
+    """Resolve display metadata only for an exact reviewed filename/MCU pair.
+
+    A selected MCU narrows known variants; it never legitimizes another filename.
+    This resolves declared identity, not physical wiring or processor detection.
+    """
     if not board_filename:
         return None
-    fname_lower = board_filename.lower()
-    for board in _get_boards():
-        for term in board.get("search_terms", []):
-            if term.lower() in fname_lower:
-                return board
-    return None
+    filename = board_filename.strip().casefold()
+    mcu = str(detected_mcu or "").strip().casefold()
+    candidates = [board for board in _get_boards()
+                  if filename in board.get("display_config_filenames", [])]
+    if mcu:
+        candidates = [board for board in candidates if board.get("mcu", "").casefold() == mcu]
+    elif any(filename in board.get("display_requires_mcu", []) for board in candidates):
+        return None
+    # Conflicting/duplicate bindings cannot be resolved by database order.
+    return candidates[0] if len(candidates) == 1 else None
 
 
-def _infer_board_mcu(board_filename: str, parsed_cfg: dict) -> str | None:
-    # 1. Check boards.yaml matching first
-    board_entry = _find_board_entry(board_filename)
+def _infer_board_mcu(board_filename: str, parsed_cfg: dict, detected_mcu: str = "") -> str | None:
+    board_entry = _find_board_entry(board_filename, detected_mcu)
     if board_entry and board_entry.get("mcu"):
         return board_entry["mcu"].lower()
     
-    # 2. Check if mcu is defined in parsed config
-    if "mcu" in parsed_cfg and isinstance(parsed_cfg["mcu"], dict):
-        # We don't have a direct chip config inside [mcu] typically, but checking for properties:
-        pass
-        
-    # 3. Guess based on filename terms
-    bf_lower = board_filename.lower()
-    if "rp2040" in bf_lower or "pico" in bf_lower:
-        return "rp2040"
-    if "stm32" in bf_lower:
-        return "stm32"
-    if "lpc176" in bf_lower:
-        return "lpc176x"
-    if "mega2560" in bf_lower or "ramps" in bf_lower or "atmega" in bf_lower:
-        return "atmega2560"
-    if "duet2" in bf_lower or "sam4e" in bf_lower:
-        return "sam4e8e"
     return None
 
 
-def _infer_board_voltage(board_filename: str, parsed_cfg: dict) -> str:
-    board_entry = _find_board_entry(board_filename)
+def _infer_board_voltage(board_filename: str, parsed_cfg: dict, detected_mcu: str = "") -> str | None:
+    board_entry = _find_board_entry(board_filename, detected_mcu)
     if board_entry and board_entry.get("voltage"):
         return board_entry["voltage"]
         
-    mcu = _infer_board_mcu(board_filename, parsed_cfg)
-    if mcu:
-        mcu = mcu.lower()
-        if "stm32" in mcu or "lpc176" in mcu or "rp2040" in mcu or "sam4" in mcu or "samd" in mcu:
-            return "3.3V"
-        if "atmega" in mcu or "at90usb" in mcu:
-            return "5V"
-            
-    return "3.3V" # safe default for modern 3D printer boards
+    return None
 
 
-def _infer_board_tolerance(board_filename: str, parsed_cfg: dict) -> str:
-    board_entry = _find_board_entry(board_filename)
+def _infer_board_tolerance(board_filename: str, parsed_cfg: dict, detected_mcu: str = "") -> str | None:
+    board_entry = _find_board_entry(board_filename, detected_mcu)
     if board_entry and board_entry.get("gpio_voltage_tolerance"):
         return board_entry["gpio_voltage_tolerance"]
         
-    mcu = _infer_board_mcu(board_filename, parsed_cfg)
-    if mcu:
-        mcu = mcu.lower()
-        if "rp2040" in mcu:
-            return "3.3V_only"
-        if "atmega" in mcu or "at90usb" in mcu:
-            return "5V_native"
-            
-    return "3.3V_tolerant"
+    return None
 
 
-def _infer_board_interfaces(board_filename: str, parsed_cfg: dict) -> list:
-    interfaces = []
-    board_entry = _find_board_entry(board_filename)
-    if board_entry and board_entry.get("display_interfaces"):
-        interfaces = list(board_entry["display_interfaces"])
-    else:
-        # Default interfaces for generic boards
-        interfaces = ["SPI", "I2C", "UART"]
-        
-    # Check if [board_pins] contains EXP1 or EXP2 pins
-    has_exp = False
-    for section in parsed_cfg:
-        if section.startswith("board_pins"):
-            content = parsed_cfg[section]
-            if isinstance(content, dict):
-                for k, v in content.items():
-                    if "EXP" in str(k) or "EXP" in str(v):
-                        has_exp = True
-                        break
-            if has_exp:
-                break
-    if has_exp and "EXP1_EXP2" not in interfaces:
-        interfaces.append("EXP1_EXP2")
-        
+def _infer_board_interfaces(board_filename: str, parsed_cfg: dict, detected_mcu: str = "") -> list:
+    board_entry = _find_board_entry(board_filename, detected_mcu)
     if not board_entry:
-        if "pico" not in board_filename.lower() and "EXP1_EXP2" not in interfaces:
-            interfaces.append("EXP1_EXP2")
-            
+        return []
+    # Legacy MCU bus flags establish neither exposed pins nor display wiring.
+    # Only the separately reviewed connector mapping is evidence here.
+    interfaces = []
+    from core.loader import load_boards_yaml
+    mappings = load_boards_yaml().get("display_exp_mappings", {})
+    mapped = mappings.get(board_filename.strip().casefold()) if isinstance(mappings, dict) else None
+    if mapped == ["EXP1", "EXP2"]:
+        interfaces.extend(["EXP1", "EXP2", "EXP1_EXP2"])
+    elif mapped == ["EXP1"]:
+        interfaces.append("EXP1")
+    # Missing/malformed mapping stays unknown. Runtime aliases are not evidence.
     return interfaces
+
+
+def _display_hardware_entry(display_section: str, parsed_cfg: dict) -> dict:
+    """Use the selected controller, not generic EXP metadata, for real LCDs."""
+    key = display_section.lower().strip()
+    if key.split()[0] == "display":
+        sections = [fields for name, fields in parsed_cfg.items()
+                    if name.lower() == key or (key == "display" and name.lower().startswith("display "))]
+        if sections:
+            drivers = {str(fields.get("lcd_type", "")).strip().lower()
+                       for fields in sections if isinstance(fields, dict)}
+            # A base-section diagnostic may aggregate several displays. Do not
+            # let one known controller certify missing or different controllers.
+            if len(drivers) != 1 or not all(isinstance(fields, dict) for fields in sections):
+                return {}
+            key = drivers.pop()
+            # LCD_chips at the reviewed Klipper refs. A software section or
+            # catalog-only OEM entry is not a valid lcd_type.
+            from core.display_configuration import DISPLAY_REQUIRED_OPTIONS
+            if key not in DISPLAY_REQUIRED_OPTIONS:
+                return {}
+    return _get_display_configs().get(key.split()[0] if key else "", {})
+
+
+def _display_voltage_conflict(entry: dict, board_filename: str, detected_mcu: str = "") -> bool:
+    board = _find_board_entry(board_filename, detected_mcu) or {}
+    return ((entry.get("voltage_logic") == "3.3V" and board.get("voltage") == "5V")
+            or (entry.get("voltage_logic") == "5V" and board.get("voltage") == "3.3V"
+                and board.get("gpio_voltage_tolerance") == "3.3V_only"))
+
+
+def _missing_display_board_evidence(display_entry: dict, board_filename: str, detected_mcu: str = "") -> list:
+    if display_entry.get("interface_required") == "none":
+        return []
+    board = _find_board_entry(board_filename, detected_mcu)
+    if not board:
+        return ["board identity", "interface", "electrical data"]
+    missing = [field for field in ("mcu", "voltage", "gpio_voltage_tolerance", "display_interfaces")
+               if not board.get(field)]
+    display_voltage = display_entry.get("voltage_logic")
+    if display_voltage not in ("3.3V", "5V", "3.3V_tolerant"):
+        # Only software-only entries may treat voltage as unrestricted.
+        missing.append("display logic voltage")
+    elif display_voltage == "3.3V_tolerant" and board.get("voltage") == "5V":
+        # A nominal 3.3 V label is not evidence that a module accepts 5 V
+        # signals. Its supply voltage and Klipper driver do not prove this.
+        missing.append("5V input tolerance of the display module")
+    interface = display_entry.get("interface_required")
+    if interface in ("EXP1", "EXP2", "EXP1_EXP2"):
+        # Current EXP entries identify controller families, not exact modules
+        # with reviewed signal thresholds, wiring and supply requirements.
+        # Board aliases and accepted risk cannot supply that evidence.
+        missing.append("display module identity and reviewed electrical/wiring specification")
+    if (interface != "none"
+            and interface not in _infer_board_interfaces(board_filename, {}, detected_mcu)):
+        missing.append("reviewed connector/bus mapping for " + str(interface))
+    if (display_entry.get("voltage_logic") == "5V" and board.get("voltage") == "3.3V"
+            and board.get("gpio_voltage_tolerance") not in ("3.3V_only", "5V_tolerant")):
+        # 3.3 V tolerance says nothing about whether a selected GPIO accepts 5 V.
+        # A known 3.3 V-only incompatibility remains unsafe, rather than unknown.
+        missing.append("5V input tolerance of the selected GPIOs")
+    return missing
 
 
 def classify_hardware_combination(
     display_section: str,
     board_filename: str,
     parsed_cfg: dict,
+    detected_mcu: str = "",
 ) -> dict:
     """Classify the hardware compatibility between a display and a board.
 
@@ -258,12 +293,28 @@ def classify_hardware_combination(
     display_lower = display_section.lower().split()[0]
     board_lower = board_filename.lower()
 
+    entry = _display_hardware_entry(display_section, parsed_cfg)
+    voltage_conflict = _display_voltage_conflict(entry, board_filename, detected_mcu)
+    missing = _missing_display_board_evidence(entry, board_filename, detected_mcu)
+    if missing and entry.get("compatibility_class") != "unsafe" and not voltage_conflict:
+        return {
+            "compatibility_class": "experimental", "status": "untested",
+            "hardware_evidence": "unknown", "missing_evidence": missing,
+            "damage_risks": list(entry.get("damage_risks", [])),
+            "required_modifications": [], "recommendation": "none",
+            "notes": ["Hardware compatibility is unknown: missing " + ", ".join(missing) + ".",
+                      "Klipper LCD driver support and EXP aliases do not establish electrical compatibility.",
+                      "KACE cannot generate an active display configuration without board and display hardware evidence."],
+        }
+
     # 1. Check board-display matrix overrides first
     for b_sub, displays_in_matrix in _get_board_display_matrix().items():
+        if entry.get("compatibility_class") == "unsafe" or voltage_conflict:
+            break  # Positive matrix metadata cannot erase a known hazard.
         if b_sub.lower() in board_lower:
             for d_sub, override_data in displays_in_matrix.items():
                 if d_sub.lower() in display_lower:
-                    display_entry = _get_display_configs().get(display_lower, {})
+                    display_entry = entry
                     comp_class = override_data.get("compatibility_class", display_entry.get("compatibility_class", "experimental"))
                     
                     status_map = {
@@ -294,7 +345,7 @@ def classify_hardware_combination(
                     }
 
     # 2. Fall back to generic display entry lookups
-    display_entry = _get_display_configs().get(display_lower)
+    display_entry = entry
     if not display_entry:
         return {
             "compatibility_class": "experimental",
@@ -327,18 +378,10 @@ def classify_hardware_combination(
         }
 
     # Otherwise, perform algorithmic checks based on inferred board hardware features
-    board_voltage = _infer_board_voltage(board_filename, parsed_cfg)
-    board_tolerance = _infer_board_tolerance(board_filename, parsed_cfg)
-    board_interfaces = _infer_board_interfaces(board_filename, parsed_cfg)
+    board_voltage = _infer_board_voltage(board_filename, parsed_cfg, detected_mcu)
+    board_tolerance = _infer_board_tolerance(board_filename, parsed_cfg, detected_mcu)
 
     display_voltage = display_entry.get("voltage_logic", "any")
-    display_interface = display_entry.get("interface_required", "none")
-
-    # Check interface compatibility
-    if display_interface != "none" and display_interface not in board_interfaces:
-        comp_class = "compatible_with_adapter"
-        status = "partial"
-        req_mods.append(f"Install an adapter board or custom wiring harness to expose the {display_interface} interface.")
 
     # Check voltage compatibility rules
     if display_voltage == "3.3V" and board_voltage == "5V":
@@ -352,14 +395,14 @@ def classify_hardware_combination(
             comp_class = "unsafe"
             status = "unsupported"
             damage_risks.append("5V logic signals fed back from the display will permanently destroy the 3.3V-only RP2040 GPIO pins.")
-            req_mods.append("Install an active level shifter (e.g. 74AHCT125) to safely interface 3.3V outputs to 5V display inputs.")
+            req_mods.append("Do not connect 5V feedback to 3.3V-only GPIOs. Voltage translation must be reviewed for each signal direction and device.")
             recommendation = "disconnect"
-        elif board_tolerance == "3.3V_tolerant":
+        elif board_tolerance == "5V_tolerant":
             if comp_class == "fully_compatible":
                 comp_class = "experimental"
                 status = "partial"
-            notes.append("Board MCU is 5V-tolerant, but 3.3V logic outputs might not reliably trigger the 5V display logic threshold (noise issues).")
-            req_mods.append("If display fails to register or glitches, use a 3.3V-to-5V level shifter on logic lines.")
+            notes.append("Declared 5V input tolerance does not establish that 3.3V outputs meet the display's input thresholds.")
+            req_mods.append("Verify the selected GPIOs, display input thresholds and signal directions before connecting.")
 
     return {
         "compatibility_class": comp_class,
@@ -390,6 +433,9 @@ def get_display_compat(section_name: str, printer_filename: str = "") -> dict | 
         profile_key, profile_data = _match_printer_profile(printer_filename)
         if profile_data:
             comp_class = profile_data.get("compatibility_class", "experimental")
+            if comp_class != "unsafe":
+                result = classify_hardware_combination(profile_data.get("display_type", section_name), "", {})
+                return {**result, "source": "printer_profile"}
             return {
                 "status":                 profile_data.get("status", "untested"),
                 "compatibility_class":     comp_class,
@@ -403,17 +449,7 @@ def get_display_compat(section_name: str, printer_filename: str = "") -> dict | 
     # 2. Try section-based lookup
     section_lower = section_name.lower().split()[0]
     if section_lower in _get_display_configs():
-        entry = _get_display_configs()[section_lower]
-        comp_class = entry.get("compatibility_class", "experimental")
-        return {
-            "status":                 entry.get("status", "untested"),
-            "compatibility_class":     comp_class,
-            "recommendation":         entry.get("recommendation", "none"),
-            "notes":                  entry.get("notes", []),
-            "source":                 "display_config",
-            "damage_risks":           entry.get("damage_risks", []),
-            "required_modifications": entry.get("required_modifications", []),
-        }
+        return {**classify_hardware_combination(section_lower, "", {}), "source": "display_config"}
 
     return None
 
@@ -422,6 +458,7 @@ def check_display_compatibility(
     parsed_cfg: dict,
     printer_filename: str = "",
     board_filename:   str = "",
+    detected_mcu:     str = "",
 ) -> list:
     """Main public entry point — check a parsed config for display compatibility issues.
 
@@ -455,6 +492,10 @@ def check_display_compatibility(
                 "damage_risks":           profile_data.get("damage_risks", []),
                 "required_modifications": profile_data.get("required_modifications", []),
             })
+            if comp_class != "unsafe":
+                findings[-1].update(classify_hardware_combination(
+                    display_type, board_filename, parsed_cfg, detected_mcu,
+                ))
             seen_sections.add(display_type)
 
     # ── Step 2: Scan config sections ──────────────────────────────────────────
@@ -465,7 +506,7 @@ def check_display_compatibility(
             continue  # Already reported via printer profile
 
         # ── Step 3: Check compatibility using hardware inference/matrix rules ──
-        hw_info = classify_hardware_combination(section, board_filename, parsed_cfg)
+        hw_info = classify_hardware_combination(section, board_filename, parsed_cfg, detected_mcu)
         findings.append({
             "section":                 section,
             "status":                  hw_info["status"],
@@ -476,6 +517,9 @@ def check_display_compatibility(
             "damage_risks":           hw_info["damage_risks"],
             "required_modifications": hw_info["required_modifications"],
         })
+        if hw_info.get("hardware_evidence") == "unknown":
+            findings[-1]["hardware_evidence"] = "unknown"
+            findings[-1]["missing_evidence"] = list(hw_info["missing_evidence"])
         seen_sections.add(section)
 
     return findings
@@ -540,7 +584,7 @@ def get_recommended_displays(
     Args:
         board_filename: Board config filename (e.g. "generic-skr-mini-e3-v3.0.cfg")
         detected_mcu:   MCU string from firmware detector (e.g. "stm32g0b1")
-        parsed_cfg:     Parsed board config dict (optional; used for EXP pin detection)
+        parsed_cfg:     Parsed board config dict (optional; aliases do not establish hardware compatibility)
     """
     if parsed_cfg is None:
         parsed_cfg = {}
@@ -556,7 +600,7 @@ def get_recommended_displays(
         if section_key in _WIZARD_SKIP_SECTIONS:
             continue
 
-        hw_info = classify_hardware_combination(section_key, board_filename, parsed_cfg)
+        hw_info = classify_hardware_combination(section_key, board_filename, parsed_cfg, detected_mcu)
         comp_class = hw_info.get("compatibility_class", "experimental")
 
         # Clamp to known buckets
@@ -615,13 +659,29 @@ def run_manual_selection_analysis(
     display_key_lower = display_key.lower().strip()
 
     # Base hardware classification
-    hw_info = classify_hardware_combination(display_key_lower, board_filename, parsed_cfg)
+    hw_info = classify_hardware_combination(display_key_lower, board_filename, parsed_cfg, detected_mcu)
+    display_entry = _display_hardware_entry(display_key_lower, parsed_cfg)
+    missing = _missing_display_board_evidence(display_entry, board_filename, detected_mcu)
+    if hw_info.get("hardware_evidence") == "unknown" or missing:
+        voltage_conflict = _display_voltage_conflict(display_entry, board_filename, detected_mcu)
+        interface = display_entry.get("interface_required")
+        interface_mapped = interface in _infer_board_interfaces(board_filename, parsed_cfg, detected_mcu)
+        return {**hw_info,
+            "voltage_validation": {
+                "result": "danger" if voltage_conflict else "unknown",
+                "detail": ("Declared board/display logic levels conflict; do not treat the connection as safe."
+                           if voltage_conflict else "Board/display electrical compatibility is not established.")},
+            "interface_validation": {
+                "result": "ok" if interface_mapped else "unknown",
+                "detail": (f"{interface} is mapped in the reviewed board reference; display wiring and electrical compatibility remain unverified."
+                           if interface_mapped else "Required connector and pinout are not established.")},
+            "cable_orientation_risks": [], "firmware_mode_requirements": [],
+            "adapter_requirements": [], "confidence_level": "Unknown"}
     comp_class = hw_info.get("compatibility_class", "experimental")
 
     # ── Voltage validation ────────────────────────────────────────────────────
-    board_voltage    = _infer_board_voltage(board_filename, parsed_cfg)
-    board_tolerance  = _infer_board_tolerance(board_filename, parsed_cfg)
-    display_entry    = _get_display_configs().get(display_key_lower, {})
+    board_voltage    = _infer_board_voltage(board_filename, parsed_cfg, detected_mcu)
+    board_tolerance  = _infer_board_tolerance(board_filename, parsed_cfg, detected_mcu)
     display_voltage  = display_entry.get("voltage_logic", "any")
 
     if display_voltage == "any":
@@ -629,7 +689,10 @@ def run_manual_selection_analysis(
         voltage_detail = f"No specific voltage requirement — compatible with {board_voltage} board."
     elif display_voltage == "3.3V_tolerant":
         voltage_result = "ok"
-        voltage_detail = f"Display accepts both 3.3V and 5V logic — compatible with {board_voltage} board."
+        voltage_detail = (
+            "The catalog declares 3.3V logic compatibility; this does not establish 5V input tolerance. "
+            "Verify the exact module's supply, signal directions and input thresholds."
+        )
     elif display_voltage == "3.3V" and board_voltage == "3.3V":
         voltage_result = "ok"
         voltage_detail = "Display and board both operate at 3.3V — direct compatible."
@@ -644,14 +707,13 @@ def run_manual_selection_analysis(
             voltage_result = "danger"
             voltage_detail = (
                 f"Display 5V feedback lines will permanently damage RP2040 GPIO pins (3.3V-only, not 5V tolerant). "
-                f"An active level shifter (e.g. 74AHCT125) is mandatory."
+                f"Do not connect until voltage translation for each signal direction has been reviewed."
             )
         else:
             voltage_result = "warn"
             voltage_detail = (
-                f"Board MCU is 5V-tolerant but outputs 3.3V logic. "
-                f"Display may not reliably detect 3.3V signals as HIGH (display VIH ≥ 0.7×5V = 3.5V). "
-                f"A 3.3V→5V level shifter is recommended."
+                f"Declared 5V input tolerance does not establish that 3.3V outputs meet the display's input thresholds. "
+                f"Verify the selected GPIOs and the specific display's electrical specifications."
             )
     elif display_voltage == "5V" and board_voltage == "5V":
         voltage_result = "ok"
@@ -661,7 +723,7 @@ def run_manual_selection_analysis(
         voltage_detail = f"Voltage relationship between '{display_voltage}' display and '{board_voltage}' board is uncharted. Verify before connecting."
 
     # ── Interface validation ──────────────────────────────────────────────────
-    board_interfaces   = _infer_board_interfaces(board_filename, parsed_cfg)
+    board_interfaces   = _infer_board_interfaces(board_filename, parsed_cfg, detected_mcu)
     display_interface  = display_entry.get("interface_required", "none")
 
     if display_interface == "none":
@@ -669,13 +731,16 @@ def run_manual_selection_analysis(
         interface_detail = "No external interface required — software-only section."
     elif display_interface in board_interfaces:
         interface_result = "ok"
-        interface_detail = f"{display_interface} interface is available on this board."
+        if display_interface in ("EXP1", "EXP2", "EXP1_EXP2"):
+            interface_detail = f"{display_interface} is mapped in the reviewed board reference; verify the exact display wiring and electrical limits separately."
+        else:
+            interface_detail = f"{display_interface} has a reviewed mapping; verify the selected device and wiring separately."
     else:
         interface_result = "warn"
         interface_detail = (
             f"{display_interface} interface is NOT listed for this board. "
-            f"An adapter board or custom wiring harness is required. "
-            f"Available interfaces: {', '.join(board_interfaces) if board_interfaces else 'none detected'}."
+            f"Wiring and transport must be reviewed before connecting. "
+            f"Reviewed mappings: {', '.join(board_interfaces) if board_interfaces else 'none'}."
         )
 
     # ── Cable orientation risks ───────────────────────────────────────────────
@@ -706,12 +771,10 @@ def run_manual_selection_analysis(
 
     # ── Adapter requirements ──────────────────────────────────────────────────
     adapter_reqs = []
-    if interface_result == "warn":
-        adapter_reqs.append(f"An adapter board or wiring harness exposing the {display_interface} bus is required.")
     if voltage_result in ("warn", "danger") and display_voltage in ("3.3V", "5V"):
         adapter_reqs.append(
-            "A bidirectional logic level shifter (e.g. 74AHCT125 for 3.3V→5V, or voltage divider for 5V→3.3V) "
-            "is required on all data, clock, and chip-select lines."
+            "Voltage translation is not specified by KACE: review each signal's direction, voltage limits, "
+            "input thresholds, pull-ups and timing for the exact board and display."
         )
 
     # ── Confidence level ─────────────────────────────────────────────────────

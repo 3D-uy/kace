@@ -18,6 +18,7 @@ from core.workflow_outcome import (
 )
 from core.capabilities import validate_firmware_processor_for_architecture
 from firmware.derivation import derive_config
+from firmware.board_serial import board_serial_ports, board_serial_selector, SERIAL_PINS, KINGROON
 from firmware.configuration import (
     BootloaderOffset,
     FirmwareConfigurationError,
@@ -302,6 +303,48 @@ def _run_board_contract_firmware(user_data, decision):
         "BoardContract firmware built and a non-executing DeploymentPlan was created."
     )
 
+def _select_board_serial(board, previous=None):
+    ports = board_serial_ports(board)
+    if previous is not None:
+        if previous not in ports:
+            raise FirmwareConfigurationError("Saved USART connection is incompatible with selected board")
+        if previous == 'USART1':
+            print(f"{WARNING}{t('deployment.robin.direct_uart_limit')}{RESET}")
+        return previous
+    if len(ports) == 1:
+        return ports[0]
+    if os.environ.get("KACE_AUTO") == "1":
+        raise FirmwareConfigurationError("An explicit Sapphire connection is required; select USB-serial bridge or direct UART")
+    port = numbered_select("Select the physical connection used by this board:", choices=[
+        {"name": "USB-serial bridge (USART3 PB11/PB10)", "value": "USART3"},
+        {"name": t('deployment.robin.direct_uart_choice'), "value": "USART1"},
+    ])
+    if port not in ports:
+        _cancel_firmware_configuration()
+    if port == 'USART1':
+        print(f"{WARNING}{t('deployment.robin.direct_uart_limit')}{RESET}")
+    return port
+
+
+def _select_robin_lcd(user_data):
+    if user_data['board'] == KINGROON:
+        return None
+    if 'robin_lcd_removed' in user_data and type(user_data['robin_lcd_removed']) is not bool:
+        raise FirmwareConfigurationError(t('deployment.robin.lcd_invalid'))
+    if os.environ.get('KACE_AUTO') == '1':
+        if 'robin_lcd_removed' not in user_data:
+            raise FirmwareConfigurationError(t('deployment.robin.lcd_required'))
+        return user_data['robin_lcd_removed']
+    answer = numbered_select(t('deployment.robin.lcd_prompt'), choices=[
+        {'name': t('deployment.robin.lcd_present'), 'value': 'present'},
+        {'name': t('deployment.robin.lcd_removed'), 'value': 'removed'},
+        {'name': t('builder.abort'), 'value': 'cancel'},
+    ], require_explicit=True)
+    if answer not in ('present', 'removed'):
+        _cancel_firmware_configuration()
+    return answer == 'removed'
+
+
 def run_firmware_wizard(user_data: dict) -> WorkflowResult:
     """Configure/build firmware and always return a typed terminal decision."""
     try:
@@ -339,9 +382,22 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
     # ── 1. Resolve firmware configuration interactively (derivation prompts) ──
     current_mcu = mcu
     current_hint = hint
-    config_dict, current_mcu, current_hint = _resolve_firmware_configuration(
-        current_mcu, current_hint
-    )
+    serial_ports = board_serial_ports(user_data.get("board"))
+    if serial_ports:
+        try:
+            port = _select_board_serial(user_data['board'], user_data.get('firmware_serial_port'))
+            current_mcu = current_mcu or 'stm32f103'
+            current_hint = 'uart'
+            config_dict = derive_config(current_mcu, current_hint, flash_start='0x7000')
+            config_dict['KACE_SERIAL_PORT'] = port
+            board_serial_selector(user_data['board'], current_mcu, config_dict)
+            user_data['firmware_serial_port'] = port
+        except ValueError as exc:
+            return failed(WorkflowOutcome.FIRMWARE_FAILED, str(exc))
+    else:
+        config_dict, current_mcu, current_hint = _resolve_firmware_configuration(
+            current_mcu, current_hint
+        )
     initial_config = dict(config_dict)
 
     # ── 2. Run the interactive compile summary wizard ──
@@ -366,6 +422,8 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
     _M = INFO
 
     while True:
+        if serial_ports:
+            config_dict['KACE_SERIAL_PORT'] = user_data['firmware_serial_port']
         arch = config_dict.get("CONFIG_MCU", "Unknown").replace('"', '')
         model = current_mcu if current_mcu else "Unknown"
         flash = config_dict.get("CONFIG_FLASH_START")
@@ -395,6 +453,8 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
                "CAN" if config_dict.get("CONFIG_CANBUS") == "y" else \
                "UART" if config_dict.get("CONFIG_SERIAL") == "y" else \
                "SPI" if config_dict.get("CONFIG_SPI") == "y" else "Unknown"
+        if serial_ports:
+            comm = f"UART {user_data['firmware_serial_port']} ({SERIAL_PINS[user_data['firmware_serial_port']]})"
 
         _SEP = "═" * 47
         def _fw_row(label, value):
@@ -435,7 +495,8 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
         if ans_summary == t("builder.compile_now"):
             try:
                 validate_firmware_configuration(config_dict, processor=current_mcu)
-            except FirmwareConfigurationError as exc:
+                board_serial_selector(user_data.get('board'), current_mcu, config_dict)
+            except ValueError as exc:
                 print(f"\n\033[91mERROR:\033[0m {exc}")
                 continue
             diff = render_config_diff(initial_config, config_dict)
@@ -491,6 +552,10 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
                 except (FirmwareConfigurationError, ValueError) as exc:
                     print(f"\n\033[91mERROR:\033[0m {exc}")
         elif ans_summary == t("builder.edit_comm"):
+            if serial_ports:
+                port = _select_board_serial(user_data['board'])
+                user_data['firmware_serial_port'] = port
+                continue
             c_ans = numbered_select(t("builder.select_interface"), choices=["USB", "UART", "CAN", "SPI"])
             if c_ans:
                 try:
@@ -520,6 +585,7 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
             hint=current_hint,
             output_dir="~/kace",
             config_dict=config_dict,
+            board=user_data.get('board'),
             build_context=BuildContext(make_command=user_data.get('make_command', 'make'))
         )
     except Exception as exc:
@@ -550,6 +616,12 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
                 size_warning=bool(result.get('size_warning', False)),
             )
         user_data['firmware_artifact'] = artifact
+        if serial_ports:
+            # A new build invalidates prior runtime deployment objects, even
+            # when the operator skips or cancels the new preparation.
+            for key in ('firmware_deployment_service', 'firmware_deployment_plan',
+                        'prepared_firmware_deployment', 'pending_firmware_deployment'):
+                user_data.pop(key, None)
         identity = getattr(artifact, "firmware_identity", None)
         if identity is not None:
             user_data['firmware_identity'] = identity
@@ -613,8 +685,17 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
 
         if deploy_fw in (DeploymentMethodId.MANUAL.value, DeploymentMethodId.USB.value):
             try:
+                lcd_removed = _select_robin_lcd(user_data) if serial_ports else None
                 plan = service.plan(artifact, target, DeploymentMethodId(deploy_fw))
-                prepared = service.prepare(plan)
+                if serial_ports:
+                    prepared = service.prepare_robin(plan,
+                        serial_port=user_data['firmware_serial_port'], lcd_removed=lcd_removed)
+                    plan = prepared.plan
+                    user_data['robin_lcd_removed'] = lcd_removed
+                else:
+                    prepared = service.prepare(plan)
+            except WizardExit:
+                raise
             except Exception as exc:
                 print(f"\n\033[91mERROR:\033[0m {t('deployment.prepare_failed', error=exc)}")
                 return failed(

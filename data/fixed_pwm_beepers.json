@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "reviewed_refs": ["fe4eb8650bd7de4c2100a14eaf09b0965c430e29", "ce7002bedf37e938bb483572949f3703ac6476cb"],
+  "profiles": {
+    "printer-anycubic-vyper-2021.cfg": {
+      "source_sha256": "10410a2c59471998860ec3191198a74a1f014f3870c3da62813e5467bd6e2c38",
+      "section": "output_pin BEEPER_PIN",
+      "physical_pin": "PB15",
+      "options": {"pin": "PB15", "pwm": "True", "value": "0", "shutdown_value": "0", "cycle_time": "0.001", "scale": "1"}
+    },
+    "printer-biqu-bx-2021.cfg": {
+      "source_sha256": "62d8b2e9e0a12794c5cac002cb8f4efafc450fcab119b16c116e0e24a5942ae3",
+      "section": "output_pin beeper",
+      "physical_pin": "PA14",
+      "options": {"pin": "PA14", "pwm": "True", "cycle_time": "0.001"}
+    },
+    "printer-eryone-thinker-series-v2-2020.cfg": {
+      "source_sha256": "8babc330ecd0f6278eb4a9b60e558b3329207866aa5c095f8481de66ed79e71d",
+      "section": "output_pin beeper",
+      "physical_pin": "PE6",
+      "options": {"pin": "EXP1_1", "pwm": "True", "value": "0", "shutdown_value": "0", "cycle_time": "0.001", "scale": "1000"}
+    }
+  }
+}

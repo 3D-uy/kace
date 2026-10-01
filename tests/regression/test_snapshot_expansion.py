@@ -96,6 +96,11 @@ max_velocity: 300
 max_accel: 500
 max_z_velocity: 5
 max_z_accel: 100
+
+# Explicit wiring for these synthetic scenarios, not a catalog recommendation.
+[bltouch]
+sensor_pin: ^PB1
+control_pin: PB0
 """
 
 MOCK_CREALITY_427 = MOCK_CREALITY_422  # Same pinout, different filename
@@ -370,6 +375,12 @@ endstop_pin: ^PC2
 position_endstop: 0.0
 position_max: 250
 
+[tmc2209 stepper_z]
+uart_pin: PC11
+tx_pin: PC10
+uart_address: 1
+run_current: 0.580
+
 [extruder]
 step_pin: PB3
 dir_pin: !PB4
@@ -387,6 +398,12 @@ pid_Ki: 1.063
 pid_Kd: 108.982
 min_temp: 0
 max_temp: 250
+
+[tmc2209 extruder]
+uart_pin: PC11
+tx_pin: PC10
+uart_address: 3
+run_current: 0.650
 
 [heater_bed]
 heater_pin: PC9
@@ -411,8 +428,8 @@ max_z_accel: 100
 """
 
 
-def _make_user_data(parsed, board_name, mcu_path, drivers="TMC2209", probe="None",
-                    probe_x_offset="0", probe_y_offset="0"):
+def _make_user_data(parsed, board_name, mcu_path, drivers="None (Standard)", probe="None",
+                    probe_x_offset="0", probe_y_offset="0", driver_mode="Standalone"):
     defaults = extract_profile_defaults(parsed)
     ud = {
         "mcu_path":          mcu_path,
@@ -420,7 +437,8 @@ def _make_user_data(parsed, board_name, mcu_path, drivers="TMC2209", probe="None
         "x_size":            defaults.get("x_size", "235"),
         "y_size":            defaults.get("y_size", "235"),
         "z_size":            defaults.get("z_size", "250"),
-        "stepper_drivers":   drivers,
+        "driver_type":       drivers,
+        "driver_mode":       driver_mode,
         "hotend_thermistor": defaults["hotend_thermistor"],
         "bed_thermistor":    defaults["bed_thermistor"],
         "probe":             probe,
@@ -445,10 +463,10 @@ class TestSnapshotExpansion(KaceTestCase):
     """Regression snapshots for 6 additional board families."""
 
     def _run_snapshot(self, snapshot_name, raw_cfg, board_filename,
-                      mcu_path, drivers="TMC2209", probe="None"):
+                      mcu_path, drivers="None (Standard)", probe="None", driver_mode="Standalone"):
         parsed = parse_config(raw_cfg, board_filename)
         user_data = _make_user_data(parsed, board_filename, mcu_path,
-                                    drivers=drivers, probe=probe)
+                                    drivers=drivers, probe=probe, driver_mode=driver_mode)
         kace_dir   = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         output_file = os.path.join(kace_dir, "tests", "fixtures",
                                    f"{snapshot_name}.temp.cfg")
@@ -513,12 +531,17 @@ class TestSnapshotExpansion(KaceTestCase):
         )
 
     def test_skr_mini_e3_sensorless_snapshot(self):
-        """Regression snapshot for SKR Mini E3 with sensorless homing (STM32F103)."""
+        """Synthetic sensorless rendering; official-source coverage is separate."""
+        # This abbreviated mock intentionally has no heater_fan. It must not
+        # claim the official source's identity/hash. Full-source cooling and
+        # rejection of this mock under the real name are tested in
+        # test_skr_v2_required_cooling.py; keep all snapshot assertions intact.
         self._run_snapshot(
             "skr-mini-e3-v2-sensorless-expected",
             MOCK_SKR_MINI_E3_SENSORLESS,
-            "generic-bigtreetech-skr-mini-e3-v2.0.cfg",
+            "synthetic-skr-mini-e3-sensorless.cfg",
             "/dev/serial/by-id/usb-Klipper_stm32f103xe_mock-if00",
+            drivers="TMC2209", driver_mode="UART",
         )
 
 

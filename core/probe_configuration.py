@@ -9,6 +9,8 @@ separate from structured KACE-owned probe sections.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
+from configparser import ConfigParser
 from typing import Optional, Protocol, runtime_checkable
 
 from core.custom_probe import CustomProbeConfig
@@ -20,6 +22,136 @@ PROBE_KIND_BLTOUCH = "bltouch"
 PROBE_KIND_CR_TOUCH = "cr_touch"
 PROBE_KIND_INDUCTIVE = "inductive"
 PROBE_KIND_CUSTOM = "custom"
+
+# Preserve explicit device behavior; omitted flags belong to Klipper's defaults.
+# A parsed boolean is not evidence that a particular physical probe needs it.
+BLTOUCH_BOOLEAN_OPTIONS = (
+    "pin_up_touch_mode_reports_triggered", "probe_with_touch_mode",
+    "pin_up_reports_not_triggered", "stow_on_each_sample",
+)
+
+
+def is_probe_virtual_endstop(token: str) -> bool:
+    """Identify the probe dependency using Klipper's chip/pin whitespace rule.
+
+    This identifies the resource, not the legality of pin modifiers or wiring.
+    Reuse the pin splitter so generation, review and guidance agree.
+    """
+    from core.pin_validator import PinAliases
+    return PinAliases.split_pin(token) == ("probe", "z_virtual_endstop")
+
+
+def _bltouch_boolean(option: str, value: object) -> bool:
+    token = str(value).strip().lower()
+    if token not in ConfigParser.BOOLEAN_STATES:
+        raise GenerationError(f"[bltouch] {option}: invalid boolean {value!r}.")
+    return ConfigParser.BOOLEAN_STATES[token]
+
+
+def validate_bltouch_flags(sections: Mapping) -> None:
+    """Validate flags in the rendered/effective configuration, including includes."""
+    options = sections.get("bltouch", {})
+    for option in BLTOUCH_BOOLEAN_OPTIONS:
+        if option in options:
+            _bltouch_boolean(option, options[option])
+
+
+def selected_bltouch_flags(board: Mapping, user: dict) -> dict:
+    """Resolve explicit probe flags independently from board-owned wiring.
+
+    Both a board config and a printer profile may define probe behavior. A
+    disagreement requires resolution instead of silently changing a safety
+    check. No values are inferred from BLTouch/CR-Touch names or clone labels.
+    """
+    selected = {}
+    for source, config in (("board", board), ("printer_profile", user.get("_profile_parsed"))):
+        if not isinstance(config, Mapping):
+            continue
+        for option in BLTOUCH_BOOLEAN_OPTIONS:
+            options = config.get("bltouch", {})
+            if option not in options:
+                continue
+            value = str(_bltouch_boolean(option, options[option]))
+            if option in selected and selected[option]["value"] != value:
+                raise GenerationError(f"conflicting [bltouch] {option} in board and printer profile.")
+            entry = selected.setdefault(option, {"value": value, "sources": []})
+            entry["sources"].append(source)
+    return selected
+
+
+BLTOUCH_HARDWARE_SOURCE = "_bltouch_hardware_source"
+BLTOUCH_HARDWARE_OPTIONS = ("set_output_mode", "pin_move_time")
+
+
+def _bltouch_hardware_value(option, value):
+    import math
+    text = str(value).strip()
+    if option == "set_output_mode":
+        if text not in ("5V", "OD"):
+            raise GenerationError(f"[bltouch] {option}: expected exactly 5V or OD.")
+        return text
+    try:
+        number = float(text)
+    except (ValueError, TypeError) as exc:
+        raise GenerationError(f"[bltouch] {option}: expected a positive finite duration.") from exc
+    if not math.isfinite(number) or number <= 0:
+        raise GenerationError(f"[bltouch] {option}: expected a positive finite duration.")
+    return str(number)
+
+
+def validate_bltouch_hardware_options(sections, *, expected=None):
+    options = sections.get("bltouch", {})
+    for key in BLTOUCH_HARDWARE_OPTIONS:
+        if key in options:
+            _bltouch_hardware_value(key, options[key])
+    for key, entry in (expected or {}).items():
+        if key not in options or _bltouch_hardware_value(key, options[key]) != entry["value"]:
+            raise GenerationError(f"[bltouch] {key}: selected hardware setting is missing or changed; regenerate before publication.")
+
+
+def _bltouch_hardware_source(parsed):
+    source = parsed.get(BLTOUCH_HARDWARE_SOURCE, parsed.get("bltouch", {}))
+    if not isinstance(source, Mapping):
+        raise GenerationError("[bltouch] invalid active hardware source; reload the board.")
+    return source
+
+
+def selected_bltouch_hardware_options(board, user, rendered):
+    """Keep explicit board hardware settings without transferring voltage to new wiring.
+
+    A printer profile cannot authorize an electrical setting for another board.
+    Legacy dictionary inputs are treated as explicit source; parser inputs carry
+    active-option evidence so commented examples never activate output voltage.
+    """
+    source = _bltouch_hardware_source(board)
+    selected = {key: {"value": _bltouch_hardware_value(key, source[key]), "sources": ["board"]}
+                for key in BLTOUCH_HARDWARE_OPTIONS if key in source}
+    profile = user.get("_profile_parsed")
+    if isinstance(profile, Mapping):
+        profile_source = _bltouch_hardware_source(profile)
+        for key in BLTOUCH_HARDWARE_OPTIONS:
+            if key not in profile_source:
+                continue
+            value = _bltouch_hardware_value(key, profile_source[key])
+            if key not in selected or selected[key]["value"] != value:
+                raise GenerationError(f"[bltouch] {key}: printer profile hardware setting requires agreement with the selected board source.")
+            selected[key]["sources"].append("printer_profile")
+    if selected:
+        # Deliberately require the same source connection. Alias/pin remapping
+        # needs electrical review; a syntactically legal GPIO is not that proof.
+        for key in ("sensor_pin", "control_pin"):
+            original = source.get(key)
+            actual = rendered.get("bltouch", {}).get(key)
+            if not isinstance(original, str) or not original.strip() or original.strip() != str(actual).strip():
+                raise GenerationError(f"[bltouch] {key}: explicit hardware settings cannot move to unreviewed wiring.")
+    return selected
+
+
+def validate_source_bltouch_hardware(board, sections):
+    validate_bltouch_hardware_options(sections)
+    if board is not None and "bltouch" in sections:
+        expected = selected_bltouch_hardware_options(board, {}, sections)
+        validate_bltouch_hardware_options(sections, expected=expected)
 
 
 @dataclass(frozen=True)

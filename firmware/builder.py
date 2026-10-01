@@ -61,20 +61,21 @@ def build_firmware_orchestrator(
     output_dir="~/kace",
     config_dict=None,
     build_context: Optional[BuildContext] = None,
+    board=None,
 ):
     # The legacy checkout and its out/.config files are shared by all CLI runs.
     # Keep the lock through artifact publication, not only through make.
     try:
         with exclusive_file_lock(Path(klipper_path).expanduser().resolve() / ".kace-build.lock"):
             return _build_firmware_locked(
-                mcu_path, derived_mcu, hint, klipper_path, output_dir, config_dict, build_context,
+                mcu_path, derived_mcu, hint, klipper_path, output_dir, config_dict, build_context, board,
             )
     except (OSError, TimeoutError) as exc:
         return {"status": "error", "message": f"Could not lock firmware build workspace: {exc}"}
 
 
 def _build_firmware_locked(
-    mcu_path, derived_mcu, hint, klipper_path, output_dir, config_dict, build_context,
+    mcu_path, derived_mcu, hint, klipper_path, output_dir, config_dict, build_context, board=None,
 ):
     """
     Orchestrates the firmware derivation, generation, validation, and build process.
@@ -111,7 +112,7 @@ def _build_firmware_locked(
     print_build_mode_banner(build_context.make_command)
 
     # 2. Generate minimal .config
-    success, msg = generate_firmware_config(config_dict, klipper_path, processor=derived_mcu)
+    success, msg = generate_firmware_config(config_dict, klipper_path, processor=derived_mcu, board=board)
     if not success:
          return {"status": "error", "message": msg}
 
@@ -156,7 +157,7 @@ def _build_firmware_locked(
             _identity_error = str(exc)
 
         # 4b. Post-olddefconfig Validation
-        val_success, val_msg = validate_config(klipper_path, requested=config_dict, processor=derived_mcu)
+        val_success, val_msg = validate_config(klipper_path, requested=config_dict, processor=derived_mcu, board=board)
         if not val_success:
              return {"status": "error", "message": val_msg}
         
@@ -336,6 +337,15 @@ def _build_firmware_locked(
                         from .boards.kconfig import artifact_contains_firmware_fingerprint
                         if not artifact_contains_firmware_fingerprint(Path(p).read_bytes(), _klipper_version_override):
                             raise FirmwareIdentityError("Compiled artifact does not contain the expected firmware fingerprint")
+                    from .startup_gpio import required_startup_pins, verify_startup_artifact
+                    if required_startup_pins(board, derived_mcu):
+                        candidate = BuildArtifact.create(
+                            path=p, native_filename=binary, size_bytes=os.path.getsize(p),
+                            mcu=derived_mcu or "", firmware_fingerprint=_klipper_version_override or "",
+                            mock_build=is_mock_build(build_context.make_command), size_warning=False,
+                            build_identity=_build_identity,
+                        )
+                        verify_startup_artifact(board, p, candidate.firmware_identity)
                     dest = os.path.join(output_dir, binary)
                     shutil.copy2(p, dest)
 

@@ -95,6 +95,11 @@ max_velocity: 400
 max_accel: 500
 max_z_velocity: 10
 max_z_accel: 100
+
+# Explicit wiring for this synthetic scenario, not a catalog recommendation.
+[bltouch]
+sensor_pin: ^P0.10
+control_pin: P2.0
 """
 
 @_skip_no_jinja2
@@ -114,7 +119,8 @@ class TestConfigGeneration(KaceTestCase):
             "x_size": "235",
             "y_size": "235",
             "z_size": "250",
-            "stepper_drivers": "TMC2209",
+            "driver_type": "None (Standard)",
+            "driver_mode": "Standalone",
             "hotend_thermistor": defaults["hotend_thermistor"],
             "bed_thermistor": defaults["bed_thermistor"],
             "probe": "BLTouch",

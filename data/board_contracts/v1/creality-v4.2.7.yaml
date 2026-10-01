@@ -65,9 +65,10 @@ hardware_variants:
           kind: UART
           selection: {CONFIG_STM32_SERIAL_USART1: true}
           endpoint: {peripheral: USART1, rx_pin: PA10, tx_pin: PA9}
-          host_connection: lcd-idc-cable
+          host_connection: usb-serial-bridge
           provenance:
             - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Default serial transport and pins}
+            - {source: klipper-config, reference: "config/generic-creality-v4.2.7.cfg:[mcu].serial", detail: Default USB serial endpoint; LCD IDC direct connection belongs to the USART3 alternative}
         low_level:
           enabled: false
           startup_gpio: []
@@ -163,4 +164,4 @@ warnings:
     incompatible_board_ids: []
     provenance:
       - {source: klipper-config-header, reference: config/generic-creality-v4.2.7.cfg, detail: Bootloader filename restriction}
-contract_digest: f324c88c658494196e8f826cf7692c7b383794d6a89f775b76698797807e37ff
+contract_digest: 0571daf0bc28bf7493bb0f4ce4aaf8e1827472ddb1152a515068f04e0dbd4ec7

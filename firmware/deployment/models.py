@@ -198,12 +198,45 @@ class PreparedDeployment:
     plan: DeploymentPlan
     staged_path: str
     sha256: str
+    transformation: Optional[dict] = None
 
     def to_dict(self) -> dict:
         data = self.plan.to_dict()
         data["staged_path"] = self.staged_path
         data["staged_sha256"] = self.sha256
+        if self.transformation is not None:
+            data["transformation"] = dict(self.transformation)
         return data
+
+
+def verify_prepared_artifact(prepared):
+    """Validate native identity and, when present, the complete Robin relation."""
+    import hashlib
+    from pathlib import Path
+    from firmware.identity import FirmwareIdentityError
+    require_deployable_artifact(prepared.plan.artifact)
+    proof = prepared.transformation
+    if proof is not None:
+        from firmware.robin import verify_robin
+        plan = prepared.plan
+        try:
+            if (plan.method is not DeploymentMethodId.MANUAL
+                    or plan.profile.strategy is not DeploymentStrategyId.PREPARE_ONLY
+                    or not isinstance(proof, dict)
+                    or Path(proof.get('native_path', '')).resolve() != Path(plan.artifact.path).resolve()
+                    or proof.get('native_sha256') != plan.artifact.sha256
+                    or proof.get('final_path') != prepared.staged_path
+                    or proof.get('final_filename') != plan.final_filename
+                    or proof.get('final_sha256') != prepared.sha256):
+                raise FirmwareIdentityError('Prepared Robin image differs from its plan or build')
+            return verify_robin(proof, plan.artifact.firmware_identity, board=plan.target.board,
+                                serial_port=proof.get('serial_port'), lcd_removed=proof.get('lcd_removed'))
+        except (FirmwareIdentityError, TypeError, ValueError) as exc:
+            raise DeploymentArtifactError(str(exc)) from exc
+    digest = hashlib.sha256(Path(prepared.staged_path).read_bytes()).hexdigest()
+    if digest != prepared.sha256 or digest != prepared.plan.artifact.sha256:
+        raise DeploymentArtifactError('prepared firmware checksum no longer matches the immutable artifact')
+    return prepared.staged_path
 
 
 @dataclass(frozen=True)

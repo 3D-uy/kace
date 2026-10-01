@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Mapping, Optional
 
 from core.reconciler import reconcile_moonraker_conf_content
+from core.config_sections import section_identity
 
 
 HARDWARE_REMOTE = "kace/generated-hardware.cfg"
@@ -44,11 +45,14 @@ _PRESERVED_OPTIONS = {
         "pid_kp", "pid_ki", "pid_kd", "pressure_advance",
         "pressure_advance_smooth_time", "nozzle_diameter", "filament_diameter",
         "rotation_distance", "gear_ratio", "microsteps",
+        "max_extrude_only_distance", "max_extrude_only_velocity", "max_extrude_only_accel",
+        "instantaneous_corner_velocity", "min_extrude_temp", "smooth_time",
     },
     "heater_bed": {"pid_kp", "pid_ki", "pid_kd"},
     "force_move": {"enable_force_move"},
     "probe": {"z_offset"},
     "bltouch": {"z_offset"},
+    "bed_mesh": {"horizontal_move_z", "probe_count", "algorithm", "mesh_pps", "bicubic_tension"},
     "input_shaper": {"shaper_freq_x", "shaper_freq_y", "shaper_type_x", "shaper_type_y"},
 }
 _PRESERVED_PREFIX_OPTIONS = {
@@ -138,7 +142,7 @@ def _section_options(text: str) -> dict[str, dict[str, str]]:
                 options[previous_option] = match.group(2).strip()
             else:
                 previous_option = None
-        result.setdefault(name.casefold(), {}).update(options)
+        result.setdefault(section_identity(name), {}).update(options)
     return result
 
 
@@ -173,7 +177,7 @@ def _preserved_names(section: str) -> set[str]:
 
 def _replace_or_insert_option(text: str, section: str, option: str, value: str) -> str:
     for name, start, end in _section_spans(text):
-        if name.casefold() != section.casefold():
+        if section_identity(name) != section_identity(section):
             continue
         body = text[start:end]
         pattern = re.compile(
@@ -225,7 +229,7 @@ def _extract_generated_includes(generated: str) -> tuple[str, list[str]]:
 def _strip_owned_sections(root: str, owned_sections: set[str]) -> str:
     spans = list(_section_spans(root))
     for name, start, end in reversed(spans):
-        folded = name.casefold()
+        folded = section_identity(name)
         if folded.startswith("include "):
             continue
         if folded in owned_sections:
@@ -270,7 +274,7 @@ def _root_calibration(generated: str, saved: str, active: str = "") -> tuple[str
     active_options = _section_options(active)
     fragments = []
     for section, start, end in reversed(list(_section_spans(generated))):
-        folded = section.casefold()
+        folded = section_identity(section)
         options = _section_options(generated[start:end]).get(folded, {})
         names = set(saved_options.get(folded, {}))
         if folded in {"extruder", "heater_bed"} or folded.startswith("heater_generic "):
@@ -360,7 +364,7 @@ def effective_hardware_text(plan: ManagedConfigPlan, *, strict: bool = True) -> 
 def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: str = "", active: str = "", inline: bool = False) -> tuple[str, str, bool]:
     nl = _newline(existing or generated)
     generated, generated_includes = _extract_generated_includes(generated)
-    owned = {name.casefold() for name, _, _ in _section_spans(generated)}
+    owned = {section_identity(name) for name, _, _ in _section_spans(generated)}
     migrated = _LEGACY_HEADER in existing and MANAGED_BEGIN not in existing
 
     begin_count = existing.count(MANAGED_BEGIN)
@@ -378,7 +382,7 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
             # sections/includes even when they sit inside the generated block.
             retained = "".join(
                 managed[start:end] for name, start, end in _section_spans(managed)
-                if name.casefold() not in owned | own_includes
+                if section_identity(name) not in owned | own_includes
                 and f"[{name}]" not in generated_includes
             )
         base = _MANAGED_RE.sub(lambda _: retained, existing, count=1)
@@ -417,7 +421,8 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
         saved_options = _section_options(_autosave_text(saved))
         active_options = _section_options(active)
         for section, start, end in reversed(list(_section_spans(generated))):
-            removed = set(saved_options.get(section.casefold(), {})) - set(active_options.get(section.casefold(), {}))
+            identity = section_identity(section)
+            removed = set(saved_options.get(identity, {})) - set(active_options.get(identity, {}))
             lines = generated[start:end].splitlines(True)
             lines = [line for line in lines if not any(re.match(r"^" + re.escape(key) + r"\s*[:=]", line) for key in removed)]
             generated = generated[:start] + "".join(lines) + generated[end:]

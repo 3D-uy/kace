@@ -24,6 +24,7 @@ from core.mcu_monitor import (
     assess_mcu_identity,
 )
 from core.workspace import exclusive_file_lock
+from core.profile_values import HARDWARE_SOURCE_POLICY
 
 
 CHECKPOINT_SCHEMA = "kace-firmware-workflow/v1"
@@ -136,6 +137,25 @@ _DEPLOYABLE_STATES = {
 _STABLE_SERIAL_PREFIX = "/dev/serial/by-id/"
 
 
+def _require_robin_recovery_contract(checkpoint):
+    """Do not infer the flashed image or selected transport from a USB name."""
+    from firmware.board_serial import board_serial_ports
+    if not board_serial_ports(checkpoint['hardware']['board']):
+        return
+    proof = (checkpoint.get('artifact') or {}).get('transformation')
+    if not proof:
+        raise CheckpointIncompatible(
+            'Recovery requires the verified transformed Robin image and its native/final proof; '
+            'prepare the board-specific image before confirming manual installation'
+        )
+    if proof.get('serial_port') != 'USART3':
+        raise CheckpointIncompatible(
+            'Sapphire USART1 direct UART recovery is pending: a USB device cannot verify this transport. '
+            'The explicitly selected host UART, its console/pin mapping and the connected firmware '
+            'must be verified separately; do not substitute a USB path or assume /dev/serial0'
+        )
+
+
 def _same_mcu_model(board: str, expected: str, observed: str) -> bool:
     """Allow only exact model/resolved-name aliases from the selected contract."""
     if expected == observed:
@@ -245,6 +265,8 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     artifact_data = artifact.to_dict() if hasattr(artifact, "to_dict") else None
     plan = user_data.get("board_contract_deployment_plan")
     prepared = user_data.get("prepared_firmware_deployment")
+    robin_proof = None
+    native_path = None
     if artifact_data is None:
         return None
     digest = str(artifact_data.get("sha256") or "")
@@ -285,7 +307,19 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
             for item in getattr(plan, "instructions", ())
         ]
     if prepared is not None:
-        if prepared.sha256 != digest or prepared.plan.artifact.sha256 != digest:
+        robin_proof = getattr(prepared, 'transformation', None)
+        if robin_proof is not None:
+            from firmware.deployment.models import verify_prepared_artifact, DeploymentArtifactError
+            from firmware.robin import verify_robin
+            from firmware.identity import FirmwareIdentityError
+            try:
+                native_path = verify_prepared_artifact(prepared)
+                verify_robin(robin_proof, identity, board=user_data.get('board'),
+                             serial_port=user_data.get('firmware_serial_port'), lcd_removed=user_data.get('robin_lcd_removed'))
+            except (DeploymentArtifactError, FirmwareIdentityError, OSError) as exc:
+                raise FirmwareWorkflowError(str(exc)) from exc
+            digest = prepared.sha256
+        elif prepared.sha256 != digest or prepared.plan.artifact.sha256 != digest:
             raise FirmwareWorkflowError("prepared firmware does not match the immutable build")
         legacy_plan = getattr(prepared, "plan", None)
         path = str(getattr(prepared, "staged_path", "") or path)
@@ -309,10 +343,17 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
             raise FirmwareWorkflowError("firmware bytes changed after the verified build; rebuild required")
     except OSError as exc:
         raise FirmwareWorkflowError(f"verified firmware artifact could not be read: {exc}") from exc
+    from firmware.startup_gpio import verify_startup_artifact
+    from firmware.identity import FirmwareIdentityError
+    try:
+        verify_startup_artifact(user_data.get("board"), native_path or expanded, identity,
+                                serial_port=user_data.get("firmware_serial_port"))
+    except FirmwareIdentityError as exc:
+        raise FirmwareWorkflowError(str(exc)) from exc
 
     if not expanded or not digest:
         return None
-    return {
+    result = {
         "path": expanded,
         "final_filename": final_filename or os.path.basename(expanded),
         "sha256": digest,
@@ -324,6 +365,9 @@ def artifact_evidence(user_data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         "expected_vid_pids": list(expected_vid_pids),
         "bootloader_vid_pids": list(bootloader_vid_pids),
     }
+    if robin_proof is not None:
+        result['transformation'] = dict(robin_proof)
+    return result
 
 
 def create_checkpoint(
@@ -518,6 +562,15 @@ def validate_checkpoint(
     if not board or not expected_mcu or wizard_data.get("board") != board:
         raise CheckpointCorrupt("firmware workflow hardware identity is incomplete")
 
+    # Older wizards merged profile circuits into selected board data. A hash
+    # proves checkpoint integrity, not that those saved pins belong to a board.
+    # Require a fresh hardware selection instead of guessing how to undo it.
+    if (wizard_data.get("_profile_parsed")
+            and wizard_data.get("hardware_source_policy") != HARDWARE_SOURCE_POLICY):
+        raise CheckpointIncompatible(
+            "saved printer profile may contain mixed board pins; start a new hardware workflow"
+        )
+
     if current_hardware:
         current_board = str(current_hardware.get("board") or "").strip()
         current_mcu = str(
@@ -554,9 +607,33 @@ def validate_checkpoint(
         if not built_mcu or not _same_mcu_model(board, expected_mcu, built_mcu):
             raise CheckpointIncompatible("compiled MCU does not match the originally selected hardware")
         identity = build.get("firmware_identity") or {}
+        robin_proof = artifact.get('transformation')
+        native_path = artifact_path
+        native_digest = digest
+        if robin_proof is not None:
+            if (not isinstance(robin_proof, dict) or robin_proof.get('final_path') != artifact_path
+                    or robin_proof.get('final_sha256') != digest
+                    or robin_proof.get('final_filename') != artifact.get('final_filename')
+                    or robin_proof.get('size_bytes') != artifact.get('size_bytes')
+                    or robin_proof.get('native_path') != build.get('path')):
+                raise CheckpointIncompatible('checkpoint Robin image differs from its transformation evidence')
+            native_path = robin_proof.get('native_path')
+            native_digest = robin_proof.get('native_sha256')
+            if current_hardware is not None and 'robin_lcd_removed' in current_hardware:
+                if (type(current_hardware['robin_lcd_removed']) is not type(wizard_data.get('robin_lcd_removed'))
+                        or current_hardware['robin_lcd_removed'] != wizard_data.get('robin_lcd_removed')):
+                    raise CheckpointIncompatible('Physical Robin LCD choice differs from checkpoint')
+            if verify_artifact:
+                from firmware.robin import verify_robin
+                from firmware.identity import FirmwareIdentityError
+                try:
+                    verify_robin(robin_proof, identity, board=board,
+                                 serial_port=wizard_data.get('firmware_serial_port'), lcd_removed=wizard_data.get('robin_lcd_removed'))
+                except (FirmwareIdentityError, OSError) as exc:
+                    raise CheckpointIncompatible(str(exc)) from exc
         # Reject old checkpoints which blessed changed bytes with a fresh hash.
         for recorded in (build.get("sha256"), identity.get("artifact_sha256")):
-            if recorded is not None and recorded != digest:
+            if recorded is not None and recorded != native_digest:
                 raise CheckpointIncompatible("checkpoint artifact differs from its immutable build")
         for recorded in (build.get("size_bytes"), identity.get("artifact_size")):
             if recorded is not None and recorded != artifact.get("size_bytes"):
@@ -573,7 +650,73 @@ def validate_checkpoint(
                     raise CheckpointIncompatible("checkpoint firmware artifact hash changed")
             except OSError as exc:
                 raise CheckpointIncompatible(f"could not revalidate firmware artifact: {exc}") from exc
+            from firmware.startup_gpio import verify_startup_artifact
+            from firmware.identity import FirmwareIdentityError
+            try:
+                if (current_hardware is not None and current_hardware.get("firmware_serial_port") is not None
+                        and current_hardware.get("firmware_serial_port") != wizard_data.get("firmware_serial_port")):
+                    raise FirmwareIdentityError("Recorded board serial connection differs from current selection")
+                verify_startup_artifact(board, native_path, identity,
+                                        serial_port=(value.get("wizard_data") or {}).get("firmware_serial_port"))
+            except FirmwareIdentityError as exc:
+                raise CheckpointIncompatible(str(exc)) from exc
+    if state in {FirmwareWorkflowState.MCU_VERIFIED, FirmwareWorkflowState.CONFIG_GENERATED,
+                 *_DEPLOYABLE_STATES}:
+        _require_robin_recovery_contract(value)
     return value
+
+
+def generation_pin_reservations(user_data: Mapping[str, Any], *, config=None) -> dict:
+    """Re-read primary MCU reservations from runtime or durable build evidence.
+
+    Configuration-only generation has no compiled firmware evidence and returns
+    an empty MCU map, not a claim that its firmware has no reserved pins.
+    Optional config text (already expanded) or effective sections contributes
+    reviewed hardware bus selections. Other MCU evidence is not inferred.
+    """
+    from firmware.identity import FirmwareIdentityError
+    from firmware.pin_reservations import read_reserved_pins
+
+    runtime = user_data.get("firmware_artifact")
+    workflow = user_data.get("workflow_checkpoint")
+    identity = None
+    path = None
+    if workflow is not None:
+        checked = validate_checkpoint(workflow, verify_artifact=True, current_hardware=user_data)
+        evidence = checked.get("artifact") or {}
+        identity = (evidence.get("build") or {}).get("firmware_identity")
+        path = evidence.get("path")
+        if evidence.get('transformation') is not None:
+            path = evidence['transformation']['native_path']
+        if runtime is not None:
+            other = getattr(runtime, "firmware_identity", None)
+            if (other is None or not isinstance(identity, Mapping)
+                    or other.to_dict() != identity):
+                raise FirmwareIdentityError("runtime firmware differs from checkpoint pin evidence")
+    elif runtime is not None:
+        identity = getattr(runtime, "firmware_identity", None)
+        path = user_data.get("firmware_path") or getattr(runtime, "path", None)
+        prepared = user_data.get('prepared_firmware_deployment')
+        if prepared is not None and getattr(prepared, 'transformation', None) is not None:
+            checked_artifact = artifact_evidence(user_data)
+            path = checked_artifact['transformation']['native_path']
+    elif user_data.get("firmware_path") or user_data.get("firmware_identity"):
+        raise FirmwareIdentityError("firmware pin reservations require a bound build artifact")
+    else:
+        return {}
+    buses = []
+    if config is not None:
+        from core.bus_pins import hardware_bus_requests
+        from core.pin_validator import _read_pin_config, PinAliasError
+        try:
+            sections = _read_pin_config(config)[0] if isinstance(config, str) else config
+            buses = hardware_bus_requests(sections).get("mcu", [])
+        except PinAliasError as exc:
+            raise FirmwareIdentityError(f"firmware bus selection: {exc}") from exc
+    from firmware.startup_gpio import verify_startup_artifact
+    verify_startup_artifact(user_data.get("board"), path, identity,
+                            serial_port=user_data.get("firmware_serial_port"))
+    return {"mcu": read_reserved_pins(path, identity, buses=buses)}
 
 
 def extract_mcu_serial(config_path: str) -> str:
@@ -623,6 +766,7 @@ def verify_reappeared_mcu(
         raise FirmwareWorkflowError(
             "explicit evidence that the board-specific flashing step completed is required"
         )
+    _require_robin_recovery_contract(checked)
     expected_mcu = str(checked["hardware"]["mcu"]).lower()
     reader = identity_reader or McuIdentityReader()
     baseline_data = checked["hardware"].get("baseline_identity")
@@ -658,6 +802,15 @@ def verify_reappeared_mcu(
                 and profile.usb.topology is UsbTopology.USB_SERIAL_BRIDGE
                 for vid_pid in profile.usb.application_vid_pids
             }
+            # Reviewed Robin USART3 uses a USB-serial bridge whose by-id name
+            # does not expose the STM32 model. validate_checkpoint above has
+            # revalidated its native/final proof. Bind to the original adapter;
+            # the positive MATCH check below still rejects missing topology,
+            # conflicting serials and user-confirmed ambiguous substitutes.
+            robin = evidence.get('transformation')
+            if (robin is not None and robin.get('serial_port') == 'USART3'
+                    and baseline_data and baseline.vid_pid):
+                bridge_ids.add(baseline.vid_pid)
             # A native UART target keeps the originally selected USB adapter's
             # identity. The adapter cannot expose the MCU model after flashing.
             from firmware.boards.runtime import resolve_firmware_authority, FirmwareAuthority

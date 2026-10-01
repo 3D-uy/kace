@@ -5,6 +5,8 @@ import shutil
 import sys
 import tempfile
 
+from core.exceptions import GenerationError
+
 from core.known_hosts import (
     get_known_hosts_path,
     known_hosts_lock,
@@ -30,7 +32,7 @@ def _preflight_check(cfg_path, user_data, yes_no_fn):
         DeploymentInvariantError,
         enforce_deployment_invariants,
     )
-    from core.pin_validator import validate_required_sections, validate_pins_for_mcu
+    from core.pin_validator import PinAliasError, validate_required_sections, validate_pins_for_mcu
 
     # This is the shared live-deployment boundary used by SSH, Moonraker and
     # the composed firmware transaction.  Interactive choices cannot override
@@ -52,14 +54,18 @@ def _preflight_check(cfg_path, user_data, yes_no_fn):
         print("\033[91m[!] Pre-flight check FAILED — printer.cfg is not deployable:\033[0m")
         for p in problems:
             print(f"\033[91m    • {p}\033[0m")
-        print("\033[93m    Deploying this file would make Klipper fail to start and\033[0m")
-        print("\033[93m    can restart-loop (and lock up) a low-memory Raspberry Pi.\033[0m")
+        print("\033[93m    Local configuration validation failed; this file was not uploaded.\033[0m")
+        print("\033[93m    Klipper runtime and host status were not checked by this validation.\033[0m")
         print("\033[93m    Regenerate the config before deploying.\033[0m")
         return False
 
     # ── Soft: pin namespace vs detected MCU family ────────────────
     mcu = user_data.get('mcu_type') or user_data.get('derived_mcu')
-    issues = validate_pins_for_mcu(cfg_path, mcu)
+    try:
+        issues = validate_pins_for_mcu(cfg_path, mcu)
+    except PinAliasError as exc:
+        print(f"\033[91m[!] Invalid board pin aliases: {exc}\033[0m")
+        return False
     if issues:
         print(f"\033[93m[!] Pre-flight warning: {len(issues)} pin(s) don't match the '{mcu}' namespace:\033[0m")
         for lineno, field, pin, arch in issues[:10]:
@@ -94,10 +100,8 @@ def _sleep_with_progress(seconds):
 def _detect_ram_mb():
     """Best-effort detection of total system RAM in MB.
 
-    Used to scale the verification poll budget down on low-RAM hosts (e.g.
-    a 1 GB Pi 3) where tight polling contributes to OOM during a Klipper
-    restart loop. Returns None on any failure — callers treat that as
-    "unknown, use the default budget".
+    Reads local MemTotal, not available memory, remote host status or OOM
+    evidence. Returns None if the local value cannot be read.
     """
     try:
         with open("/proc/meminfo", "r", encoding="utf-8") as f:
@@ -226,11 +230,15 @@ def _generated_config_bytes():
         raise FileNotFoundError(f"printer.cfg not found at {hardware_path}")
     with open(hardware_path, "rb") as source:
         hardware = source.read()
+    from core.display_configuration import validate_generated_display_artifacts
+    validate_generated_display_artifacts(hardware)
     macros = None
     from core.managed_config import _has_include
     if _has_include(hardware.decode("utf-8"), "macros.cfg"):
         with open(macros_path, "rb") as source:
             macros = source.read()
+    if macros is not None:
+        validate_generated_display_artifacts(b"", macros)
     return hardware_path, hardware, macros
 
 
@@ -310,9 +318,18 @@ def _run_config_transaction(
     activation_selector=None,
 ):
     from core.config_transaction import ConfigDeploymentTransaction
+    from core.firmware_workflow import generation_pin_reservations
     from core.menu import yes_no
 
-    hardware_path, hardware, macros = generated or _generated_config_bytes()
+    from core.board_auxiliary import selected_board_electrical_source, validate_board_electrical_artifact
+    try:
+        hardware_path, hardware, macros = generated or _generated_config_bytes()
+        from core.display_configuration import validate_generated_display_artifacts
+        validate_generated_display_artifacts(hardware, macros)
+        selected_board = selected_board_electrical_source(user_data)
+        validate_board_electrical_artifact(selected_board, hardware)
+    except GenerationError as exc:
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc))
     if not _preflight_check(hardware_path, user_data, yes_no):
         return failed(
             WorkflowOutcome.PRECONDITION_FAILED,
@@ -352,6 +369,8 @@ def _run_config_transaction(
         kace_version=_KACE_VERSION,
         state_sink=state_sink,
         verify_existing_ready=True,
+        selected_board=selected_board,
+        firmware_reservation_reader=lambda hardware: generation_pin_reservations(user_data, config=hardware),
         verify_firmware=(
             lambda: _require_running_firmware_checkpoint(user_data, transport)
         ) if checkpoint is not None else None,
@@ -410,7 +429,7 @@ def deploy_config(user_data):
     password = user_data.pop("password", "")
     try:
         generated = _generated_config_bytes()
-    except (OSError, FileNotFoundError) as exc:
+    except (OSError, GenerationError) as exc:
         password = None
         print(f"\033[91m[!] Deployment aborted: {exc}\033[0m")
         print("\033[93m    Run 'Generate new config' first and retry.\033[0m")
@@ -527,7 +546,7 @@ def deploy_moonraker(user_data):
                 return deploy_config(user_data)
             user_data.pop("password", None)
             return cancelled("SSH fallback was not fully configured.")
-        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Moonraker is unreachable: {detail}")
+        return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Moonraker check failed: {detail}")
 
     user_data["moonraker_host"] = host
     user_data["moonraker_port"] = port
@@ -558,6 +577,8 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
         from core.menu import yes_no
 
         try:
+            from core.firmware_workflow import generation_pin_reservations
+            from core.board_auxiliary import selected_board_electrical_source
             _, hardware, macros = _generated_config_bytes()
             transaction = ConfigDeploymentTransaction(
                 LocalConfigTransport(dest),
@@ -567,6 +588,8 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
                 review=lambda review: _review_configuration_export(review, yes_no),
                 board=user_data.get("board", ""),
                 kace_version=_KACE_VERSION,
+                selected_board=selected_board_electrical_source(user_data),
+                firmware_reservation_reader=lambda hardware: generation_pin_reservations(user_data, config=hardware),
             )
             result = transaction.run()
             config_success = result.state in {
@@ -578,6 +601,10 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
         except Exception as exc:
             print(f"\033[91mConfiguration export failed: {exc}\033[0m")
             config_success = False
+        # An "all" export is a combined handoff. Do not stage firmware on the
+        # selected media after its companion configuration failed or was denied.
+        if not config_success:
+            return False
     
     if artifact_type in ["firmware", "all"]:
         fw_path = user_data.get("firmware_path")
@@ -898,6 +925,9 @@ def _deploy_firmware_installation_locked(user_data):
     # failed/ambiguous read is never interpreted as an empty config root.
     try:
         hardware_path, generated_hardware, generated_macros = _generated_config_bytes()
+        from core.board_auxiliary import selected_board_electrical_source, validate_board_electrical_artifact
+        selected_board = selected_board_electrical_source(user_data)
+        validate_board_electrical_artifact(selected_board, generated_hardware)
         if not _preflight_check(hardware_path, user_data, yes_no):
             return DeployResult(
                 DeployState.FAILED_PRECONDITION,
@@ -910,9 +940,23 @@ def _deploy_firmware_installation_locked(user_data):
         config_plan = build_managed_config_plan(
             generated_hardware, generated_macros, remote_files
         )
-        from core.configuration_review import build_configuration_review
+        from core.display_configuration import validate_generated_display_artifacts
+        validate_generated_display_artifacts(
+            generated_hardware, generated_macros,
+            included_files={**remote_files, **{item.remote_name: item.content for item in config_plan.artifacts}},
+        )
+        from core.configuration_review import build_configuration_review, validate_configuration_plan
+        from core.firmware_workflow import generation_pin_reservations
         require_conditional_writes(config_transport, config_plan)
-        configuration_review = build_configuration_review(config_plan)
+        def reservation_reader(hardware):
+            return generation_pin_reservations({
+                **user_data, "firmware_artifact": artifact,
+                "firmware_path": getattr(prepared, "staged_path", None) or getattr(artifact, "path", None),
+            }, config=hardware)
+        configuration_review = build_configuration_review(
+            config_plan, firmware_reservation_reader=reservation_reader,
+            selected_board=selected_board,
+        )
         if not configuration_review.validation.valid:
             _interactive_configuration_review(configuration_review, yes_no)
             return DeployResult(
@@ -926,6 +970,11 @@ def _deploy_firmware_installation_locked(user_data):
         snapshot = None
         current_files = revalidate_config_state(config_transport, remote_files)
         require_conditional_writes(config_transport, config_plan)
+        validation = validate_configuration_plan(config_plan, firmware_reservation_reader=reservation_reader,
+                                                 selected_board=selected_board)
+        if not validation.valid:
+            raise ValueError("firmware pin validation changed before deployment: "
+                             + "; ".join(item.message for item in validation.errors))
         if config_plan.changed_artifacts:
             snapshot = create_snapshot(
                 {

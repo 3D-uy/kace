@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import uuid
+from dataclasses import replace
 from typing import Callable, Optional
 
 from core.translations import t
@@ -22,9 +23,21 @@ from .models import (
     DeploymentTarget,
     PreparedDeployment,
     require_deployable_artifact,
+    verify_prepared_artifact,
+    DeploymentStrategyId,
+    DeploymentInstruction,
 )
 from .profiles import DeploymentProfileResolver
 from .registry import DeploymentMethodRegistry
+from firmware.startup_gpio import verify_startup_artifact
+from firmware.identity import FirmwareIdentityError
+
+
+def _require_startup(artifact, board, path=None):
+    try:
+        verify_startup_artifact(board, path or artifact.path, getattr(artifact, "firmware_identity", None))
+    except FirmwareIdentityError as exc:
+        raise DeploymentArtifactError(str(exc)) from exc
 
 
 EVENT_PREFIX = "=== KACE_WORKFLOW_EVENT: "
@@ -77,6 +90,7 @@ class FirmwareDeploymentService:
     def available_methods(self, target: DeploymentTarget, artifact) -> tuple[DeploymentMethodId, ...]:
         try:
             require_deployable_artifact(artifact)
+            _require_startup(artifact, target.board)
         except DeploymentArtifactError:
             return ()
         profiles = self.resolver.available(target, artifact)
@@ -85,12 +99,14 @@ class FirmwareDeploymentService:
     def profile_blockers(self, target: DeploymentTarget, artifact) -> tuple[str, ...]:
         try:
             require_deployable_artifact(artifact)
+            _require_startup(artifact, target.board)
         except DeploymentArtifactError as exc:
             return (str(exc),)
         return self.resolver.blockers(target, artifact)
 
     def plan(self, artifact, target: DeploymentTarget, method: DeploymentMethodId):
         require_deployable_artifact(artifact)
+        _require_startup(artifact, target.board)
         method = DeploymentMethodId(method)
         profile = self.resolver.resolve(target, artifact, method)
         deployment_id = str(uuid.uuid4())
@@ -114,6 +130,7 @@ class FirmwareDeploymentService:
 
     def prepare(self, plan) -> PreparedDeployment:
         require_deployable_artifact(plan.artifact)
+        _require_startup(plan.artifact, plan.target.board)
         self._emit(
             plan.deployment_id,
             "PREPARING_ARTIFACT",
@@ -163,12 +180,8 @@ class FirmwareDeploymentService:
         context = context or DeploymentExecutionContext()
         plan = prepared.plan
         try:
-            require_deployable_artifact(plan.artifact)
-            staged_digest = _sha256(prepared.staged_path)
-            if staged_digest != prepared.sha256 or staged_digest != plan.artifact.sha256:
-                raise DeploymentArtifactError(
-                    "prepared firmware checksum no longer matches the immutable artifact"
-                )
+            native_path = verify_prepared_artifact(prepared)
+            _require_startup(plan.artifact, plan.target.board, native_path)
         except (DeploymentArtifactError, OSError) as exc:
             result = DeploymentResult(
                 DeploymentStatus.FAILED,
@@ -213,6 +226,30 @@ class FirmwareDeploymentService:
         )
         self._write_manifest(prepared, terminal_state, result=result)
         return result
+
+    def prepare_robin(self, plan, *, serial_port, lcd_removed) -> PreparedDeployment:
+        """Explicit native-to-Robin preparation; physical delivery remains blocked."""
+        from firmware.robin import prepare_robin
+        require_deployable_artifact(plan.artifact)
+        if plan.method is not DeploymentMethodId.MANUAL or plan.profile.strategy is not DeploymentStrategyId.PREPARE_ONLY:
+            raise DeploymentArtifactError('Robin preparation requires the reviewed manual prepare-only boundary')
+        proof = prepare_robin(plan.artifact.path, plan.artifact.firmware_identity,
+            board=plan.target.board, serial_port=serial_port, lcd_removed=lcd_removed,
+            output_dir=os.path.join(self.output_dir, 'deploy', plan.deployment_id))
+        filename = proof['final_filename']
+        instructions = tuple(DeploymentInstruction(key, self.translate(key, filename=filename))
+            for key in ('deployment.robin.transformed', 'deployment.robin.manual_sd',
+                        'deployment.robin.manual_verify'))
+        plan = replace(plan, final_filename=filename,
+                       profile=replace(plan.profile, final_filename=filename), instructions=instructions)
+        prepared = PreparedDeployment(plan, proof['final_path'], proof['final_sha256'], proof)
+        verify_prepared_artifact(prepared)
+        self._write_manifest(prepared, 'ARTIFACT_READY')
+        self._emit(plan.deployment_id, 'ARTIFACT_READY', self.translate('deployment.event.ready', filename=filename),
+                   staged_path=prepared.staged_path, sha256=prepared.sha256,
+                   final_filename=filename, instructions=[i.__dict__ for i in instructions],
+                   automation=plan.to_dict()['automation'])
+        return prepared
 
     def _write_manifest(self, prepared: PreparedDeployment, state: str, result=None) -> None:
         payload = {

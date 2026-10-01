@@ -1,0 +1,25 @@
+{
+  "profile": "printer-biqu-bx-2021.cfg",
+  "source_sha256": "62d8b2e9e0a12794c5cac002cb8f4efafc450fcab119b16c116e0e24a5942ae3",
+  "sections": {
+    "neopixel led": {
+      "pin": "PH3",
+      "chain_count": "15"
+    },
+    "neopixel knob": {
+      "pin": "PB1",
+      "chain_count": "2"
+    },
+    "gcode_button lcd_button": {
+      "pin": "PH8",
+      "press_gcode": "\nSET_PIN PIN=screen VALUE=1\nSET_LED LED=led BLUE=1.0 RED=1.0 GREEN=1.0"
+    },
+    "idle_timeout": {
+      "gcode": "\nTURN_OFF_HEATERS\nM84\nSET_PIN PIN=screen VALUE=0\nSET_LED LED=led BLUE=0.0 RED=0.0 GREEN=0.0"
+    },
+    "delayed_gcode welcome": {
+      "initial_duration": "0.1",
+      "gcode": "\nSET_LED LED=knob RED=0.0 BLUE=1.0 GREEN=0.0\nSET_LED LED=led RED=0.0 BLUE=1.0 GREEN=0.0\nG4 P1000\nSET_LED LED=led RED=1.0 BLUE=0.0 GREEN=0.0\nG4 P1000\nSET_LED LED=led RED=0.0 BLUE=0.0 GREEN=1.0\nG4 P1000\nSET_LED LED=led RED=1.0 BLUE=1.0 GREEN=1.0"
+    }
+  }
+}

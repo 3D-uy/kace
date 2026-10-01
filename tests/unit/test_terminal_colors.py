@@ -19,14 +19,24 @@ class TestTerminalColorSemantics(unittest.TestCase):
         self.assertNotEqual(terminal.ERROR, terminal.WARNING)
         self.assertNotEqual(terminal.SECTION, terminal.QUESTION)
 
-    @patch("builtins.input", side_effect=["invalid", "1"])
+    @patch("builtins.input", side_effect=["invalid", "2"])
     @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
     def test_menu_uses_question_input_and_error_roles(self, stdout, _input):
-        self.assertEqual(numbered_select("Choose", ["one"]), "one")
+        recommended = f"two {terminal.WARNING}(recommended){terminal.RESET}"
+        choices = [("one", "one"), (recommended, "two")]
+        self.assertEqual(numbered_select("Choose", choices, default=0), "two")
         output = stdout.getvalue()
         self.assertIn(f"{terminal.QUESTION}Choose{terminal.RESET}", output)
-        self.assertIn(f"{terminal.INPUT}1) one{terminal.RESET}", output)
+        self.assertIn("    1) one\n", output)
+        self.assertIn(f"    2) {recommended}\n", output)
+        self.assertNotIn(terminal.INPUT, output)
         self.assertIn(terminal.ERROR, output)
+        error_line = next(line for line in output.splitlines() if terminal.ERROR in line)
+        self.assertTrue(error_line.endswith(terminal.RESET))
+        self.assertEqual(_input.call_count, 2)
+        prompt = _input.call_args.args[0]
+        self.assertIn(terminal.QUESTION, prompt)
+        self.assertTrue(prompt.endswith(f"{terminal.RESET} "))
 
     @patch("builtins.input", side_effect=["maybe", "y"])
     @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
