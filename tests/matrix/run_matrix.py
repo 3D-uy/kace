@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate representative KACE configs and validate them with pinned Klipper."""
+"""Generate synthetic factor fixtures and validate them with pinned Klipper."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tests.matrix.cases import (
     FACTOR_VALUES, build_cases, generate_case, pair_tokens,
-    pairwise_rows, supported_boards,
+    pairwise_rows, supported_boards, synthetic_profile,
 )
 from tests.klipper_contract import KLIPPER_REF
 
@@ -87,8 +87,9 @@ def _report(payload: dict) -> str:
              f"- Klipper validation errors: **{summary.get(FINAL_KLIPPER_ERROR, 0)}**",
              f"- Infrastructure errors: **{summary.get(FINAL_INFRA_ERROR, 0)}**",
              f"- Duration: **{payload['duration_seconds']:.3f}s**", "", "## Coverage", "",
-             f"- Boards: {', '.join(payload['coverage']['boards'])}",
-             f"- MCUs: {', '.join(payload['coverage']['mcus'])}",
+             "- Scope: synthetic factor coverage; no physical board or MCU qualification.",
+             f"- Board search-term labels: {', '.join(payload['coverage']['boards'])}",
+             f"- MCU labels (serial identifier only): {', '.join(payload['coverage']['mcus'])}",
              f"- Kinematics: {', '.join(payload['coverage']['kinematics'])}",
              f"- Probes: {', '.join(payload['coverage']['probes'])}", "", "## Results", "",
              "| ID | Board / MCU | Factors | Result | Reason |", "|---|---|---|---|---|"]
@@ -106,10 +107,12 @@ def execute(profile: str, artifact_dir: Path, skip_docker: bool = False) -> dict
     config_dir = artifact_dir / "configs"
     config_dir.mkdir(parents=True, exist_ok=True)
     cases = [{"id": spec.case_id, "spec": asdict(spec),
+              "fixture_profile": synthetic_profile(spec),
               "config_path": f"configs/{spec.case_id}.cfg",
               "generation": generate_case(spec, config_dir)} for spec in build_cases(profile)]
     manifest = {"schema_version": SCHEMA_VERSION, "profile": profile,
-                "klipper_ref": KLIPPER_REF, "cases": cases}
+                "klipper_ref": KLIPPER_REF, "cases": cases,
+                "fixture_scope": "synthetic-factors", "qualified_boards": []}
     manifest_path = artifact_dir / "manifest.generated.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     klipper_results, infra_error = ({}, "Docker validation explicitly skipped") if skip_docker \

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import itertools
 from pathlib import Path
+from unittest.mock import patch
+from dataclasses import replace
+
+from core.exceptions import GenerationError
+from tests.matrix import cases as case_module
 import tempfile
 import unittest
 
@@ -34,12 +39,12 @@ class TestPairwiseSelection(unittest.TestCase):
 
 
 class TestCoverage(unittest.TestCase):
-    def test_full_profile_covers_every_board_contract(self):
+    def test_full_profile_enumerates_every_catalog_label(self):
         expected = set(matrix.supported_boards())
         actual = {(case.mcu, case.board) for case in matrix.build_cases("full")}
         self.assertTrue(expected <= actual)
 
-    def test_every_board_has_a_non_rejection_generation_case(self):
+    def test_every_catalog_label_has_a_positive_synthetic_case(self):
         expected = set(matrix.supported_boards())
         actual = {
             (case.mcu, case.board)
@@ -111,6 +116,7 @@ class TestClassificationAndContracts(unittest.TestCase):
         }
         report = matrix._report(payload)
         self.assertIn("**PASS**", report)
+        self.assertIn("no physical board or MCU qualification", report)
         self.assertIn(matrix.KLIPPER_REF, report)
 
 
@@ -121,6 +127,79 @@ class TestGenerationFlow(unittest.TestCase):
             results = [matrix.generate_case(case, Path(temp_dir)) for case in rejects]
         self.assertTrue(results)
         self.assertTrue(all(result["status"] == "expected_reject" for result in results), results)
+
+
+class TestSyntheticSourceBoundary(unittest.TestCase):
+    def test_fixture_identities_do_not_claim_reviewed_sources(self):
+        from core.board_cooling import REVIEWED
+        for case in matrix.build_cases("full"):
+            name = case_module.synthetic_profile(case)
+            self.assertTrue(name.startswith("kace-synthetic-factors-"))
+            self.assertNotIn(name, REVIEWED)
+            self.assertEqual(case_module._user_data(case)["board"], name)
+            self.assertEqual(case_module._user_data(case)["printer_profile"], name)
+
+    def test_counterfeit_reviewed_source_still_fails_before_writing(self):
+        # Regression for the former fixture: synthetic pins under an official
+        # cooling identity must fail, including in an otherwise negative row.
+        cases = [case for case in matrix.build_cases("full") if case.board == "duet3-mini"]
+        self.assertEqual({case.expected for case in cases}, {"valid", "reject"})
+        for case in cases:
+            with self.subTest(case=case.case_id), tempfile.TemporaryDirectory() as folder:
+                with patch.object(case_module, "synthetic_profile", return_value="generic-duet3-mini.cfg"):
+                    result = matrix.generate_case(case, Path(folder))
+                self.assertEqual(result["status"], "kace_error", result)
+                self.assertIn("cooling source changed", result["reason"])
+                self.assertEqual(list(Path(folder).iterdir()), [])
+
+
+class TestExpectedRejectionEvidence(unittest.TestCase):
+    def display_case(self):
+        return case_module.CaseSpec("skr-v1.4", "lpc1769", "cartesian",
+            "standard", "origin_min", "none", "st7920", "minimal", "reject")
+
+    def test_display_rows_reject_but_other_factors_still_generate(self):
+        for profile in ("quick", "full"):
+            cases = matrix.build_cases(profile)
+            for case in cases:
+                if case.display != "st7920":
+                    continue
+                self.assertEqual(case.expected, "reject")
+                if case.probe != "dockable":
+                    self.assertIn(replace(case, display="none", expected="valid"), cases)
+
+    def test_unrelated_exception_is_not_a_safe_rejection(self):
+        for error in (OSError("disk failure"), GenerationError("unrelated validation failure"),
+                      RuntimeError("Unknown display hardware compatibility: test")):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as folder:
+                with patch.object(case_module, "generate_config", side_effect=error):
+                    result = matrix.generate_case(self.display_case(), Path(folder))
+                self.assertEqual(result["status"], "kace_error", result)
+
+    def test_expected_display_rejection_has_no_artifact(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result = matrix.generate_case(self.display_case(), Path(folder))
+            self.assertEqual(result["status"], "expected_reject", result)
+            self.assertEqual(list(Path(folder).iterdir()), [])
+
+    def test_partial_publication_is_an_error_and_evidence_is_preserved(self):
+        for suffix in ("", ".provenance.json"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as folder:
+                case = self.display_case()
+                artifact = Path(folder) / (case.case_id + ".cfg" + suffix)
+                def failing(*args, **kwargs):
+                    artifact.write_text("partial output")
+                    raise GenerationError("Unknown display hardware compatibility: test")
+                with patch.object(case_module, "generate_config", side_effect=failing):
+                    result = matrix.generate_case(case, Path(folder))
+                self.assertEqual(result["status"], "kace_error", result)
+                self.assertEqual(artifact.read_text(), "partial output")
+
+    def test_unexpected_generation_remains_an_error(self):
+        case = replace(self.display_case(), display="none")
+        with tempfile.TemporaryDirectory() as folder:
+            result = matrix.generate_case(case, Path(folder))
+            self.assertEqual(result["status"], "unexpected_generation", result)
 
 
 if __name__ == "__main__":

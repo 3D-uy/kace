@@ -1,8 +1,8 @@
-"""Deterministic pairwise cases and real KACE generation flow."""
+"""Synthetic factor fixtures through real generation; not board qualification."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import itertools
 import json
@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core.exceptions import GenerationError
 from core.custom_probe import parse_custom_probe_config  # noqa: E402
 from core.generator import generate_config  # noqa: E402
 from core.loader import load_boards_yaml  # noqa: E402
@@ -104,11 +105,20 @@ def build_cases(profile: str) -> list[CaseSpec]:
     for index in range(max(len(boards), len(rows))):
         mcu, board = boards[index % len(boards)]
         factors = dict(zip(factor_names, rows[index % len(rows)]))
-        expected = "reject" if factors["probe"] == "dockable" else "valid"
+        expected = "reject" if factors["probe"] == "dockable" or factors["display"] == "st7920" else "valid"
         cases.append(CaseSpec(board=board, mcu=mcu, expected=expected, **factors))
 
-    # Coverage is not credited merely because a board appeared in a rejected
-    # row. Guarantee at least one loadable baseline for every board/MCU pair.
+    # Synthetic LCD pins/controller names provide no electrical evidence.
+    # Retain those negative cases, and exercise their remaining factor tuples
+    # independently on the supported explicit no-display route.
+    for case in tuple(cases):
+        if case.display == "st7920" and case.probe != "dockable":
+            companion = replace(case, display="none", expected="valid")
+            if companion not in cases:
+                cases.append(companion)
+
+    # Exercise every catalog label in a positive synthetic row as well. These
+    # labels do not supply MCU pin namespaces, firmware or physical circuits.
     valid_boards = {(case.mcu, case.board) for case in cases if case.expected == "valid"}
     for mcu, board in boards:
         if (mcu, board) not in valid_boards:
@@ -174,13 +184,22 @@ def _raw_board_config(case: CaseSpec) -> str:
     return "\n\n".join(sections) + "\n"
 
 
+def synthetic_profile(case: CaseSpec) -> str:
+    """Keep artificial PA/PB/PC pins out of official source identities.
+
+    MCU/board labels are enumeration factors only. Source-bound hardware
+    contracts are exercised separately against reviewed source evidence.
+    """
+    return f"kace-synthetic-factors-{case.case_id}.cfg"
+
+
 def _user_data(case: CaseSpec) -> dict:
     probe_names = {"none": "None", "bltouch": "BLTouch", "cr_touch": "CR-Touch",
                    "inductive": "Inductive", "custom": "Custom Probe",
                    "dockable": "Custom Probe"}
     data = {
         "mcu_path": f"/dev/serial/by-id/usb-kace-matrix-{case.mcu}",
-        "board": f"generic-{case.board}.cfg", "printer_profile": f"generic-{case.board}.cfg",
+        "board": synthetic_profile(case), "printer_profile": synthetic_profile(case),
         "kinematics": case.kinematics, "probe": probe_names[case.probe],
         "probe_x_offset": "-18", "probe_y_offset": "7",
         "driver_type": "None (Standard)", "driver_mode": "Standalone",
@@ -203,11 +222,31 @@ def _user_data(case: CaseSpec) -> dict:
     return data
 
 
+def _matches_expected_rejection(case: CaseSpec, exc: Exception) -> bool:
+    """Match the independent negative input contract, never any exception."""
+    if case.expected != "reject" or not isinstance(exc, GenerationError):
+        return False
+    # Generation checks geometry before optional peripherals.
+    if case.bed == "invalid_numeric":
+        reason = "x_size must be a finite number;"
+    elif case.bed == "invalid_printable":
+        reason = "Printable X boundary [0, 200] is outside physical X travel limits [0, 120]."
+    elif case.kinematics == "delta":
+        reason = "kinematics must be one of [cartesian, corexy]; received delta."
+    elif case.probe == "dockable":
+        reason = "Dockable Probe requires a Klipper extension that is not part of stock Klipper;"
+    elif case.display == "st7920":
+        reason = "Unknown display hardware compatibility:"
+    else:
+        return False
+    return str(exc).startswith(reason)
+
+
 def generate_case(case: CaseSpec, config_dir: Path) -> dict:
     output_path = config_dir / f"{case.case_id}.cfg"
     started = time.monotonic()
     try:
-        parsed = parse_config(_raw_board_config(case), f"generic-{case.board}.cfg", keep_comments=True)
+        parsed = parse_config(_raw_board_config(case), synthetic_profile(case), keep_comments=True)
         generate_config(parsed, _user_data(case), output_path=str(output_path), verbose=False)
         if case.expected == "reject":
             return {"status": "unexpected_generation",
@@ -218,8 +257,12 @@ def generate_case(case: CaseSpec, config_dir: Path) -> dict:
                 "bytes": output_path.stat().st_size,
                 "duration_seconds": round(time.monotonic() - started, 6)}
     except Exception as exc:
-        if output_path.exists():
-            output_path.unlink()
-        return {"status": "expected_reject" if case.expected == "reject" else "kace_error",
+        written = [str(path) for path in (output_path, Path(str(output_path) + ".provenance.json"))
+                   if path.exists()]
+        # Preserve partial output as failure evidence instead of deleting it and
+        # reporting a safe rejection. The matrix uses fresh artifact directories.
+        safe_rejection = not written and _matches_expected_rejection(case, exc)
+        return {"status": "expected_reject" if safe_rejection else "kace_error",
+                "written_artifacts": written,
                 "reason": str(exc) or exc.__class__.__name__, "exception": exc.__class__.__name__,
                 "duration_seconds": round(time.monotonic() - started, 6)}

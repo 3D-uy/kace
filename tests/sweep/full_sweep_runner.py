@@ -4,7 +4,8 @@ KACE Full Klipper Config Sweep — Extended Runner
 =================================================
 Clones the Klipper config/ directory (sparse, shallow) using a discovered
 git binary, then runs parse + generate against every generic-*.cfg and
-printer-*.cfg config. Saves a full report to tests/sweep/last_sweep_report.txt.
+printer-*.cfg config, then validates generated files with pinned Klipper in
+Docker. Reports distinguish generation, loader, and infrastructure failures.
 
 Usage:
     python tests/sweep/full_sweep_runner.py [--verbose]
@@ -15,9 +16,11 @@ import re
 import sys
 import subprocess
 import time
-import datetime
 import argparse
-import shutil
+import json
+import hashlib
+import tempfile
+from pathlib import Path
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,11 +36,14 @@ except (AttributeError, OSError):
     pass
 
 from tests.sweep.result_codes import SweepResult, SweepSummary
+from tests.sweep.scope_inventory import InventoryError, verify_source_inventory
 from tests.klipper_contract import KLIPPER_REF, KLIPPER_REPO_URL
 from core.workspace import CLONE_MINIMUM_FREE_BYTES, ensure_free_space, heavy_workspace
 from core.scraper import parse_config, extract_profile_defaults
 from core.generator import generate_config
 from core.advanced_module_handler import is_unsupported_section
+from core.capabilities import supported_kinematics
+from tests.matrix.run_matrix import run_docker_validation
 
 CONFIG_SUBDIR    = "config"
 REPORT_PATH      = os.path.join(_HERE, "last_sweep_report.txt")
@@ -67,7 +73,6 @@ def _find_git():
 GIT = _find_git()
 
 _TODO_RE = re.compile(r'\bTODO\b', re.IGNORECASE)
-_ANSI_RE = re.compile(r'\033\[[0-9;]*m')
 
 
 # ── Git helpers ────────────────────────────────────────────────────────────────
@@ -125,7 +130,7 @@ def _has_unsupported_sections(parsed):
     """
     return any(is_unsupported_section(s) for s in parsed)
 
-def _classify_config(filename, raw, output_dir, verbose=False):
+def _classify_config(filename, raw, output_dir, verbose=False, *, without_display=False):
     """
     Full parse + generate pipeline for one config.
     Returns (SweepResult, generate_ok: bool, warnings: list[str])
@@ -142,6 +147,11 @@ def _classify_config(filename, raw, output_dir, verbose=False):
         if _has_unsupported_sections(parsed):
             return SweepResult(SweepResult.UNSUPPORTED, filename,
                                "Unsupported/experimental sections present"), False, warnings
+
+        kinematics = str(defaults.get("kinematics", "cartesian")).strip().lower()
+        if kinematics not in supported_kinematics():
+            return SweepResult(SweepResult.UNSUPPORTED, filename,
+                               f"Unsupported kinematics: {kinematics}"), False, warnings
 
         # Build a minimal user_data for generation
         user_data = {
@@ -174,154 +184,155 @@ def _classify_config(filename, raw, output_dir, verbose=False):
             "rotation_distance_e": defaults.get("rotation_distance_e"),
         }
 
+        # This is an explicit wizard choice, not permission to ignore display
+        # evidence for a selected panel. Keep the original auto-detect scenario.
+        if without_display:
+            user_data["display_choice"] = "none"
+
         out_file = os.path.join(output_dir, filename.replace(".cfg", ".out.cfg"))
         try:
             generate_config(parsed, user_data, output_path=out_file, include_macros=False)
+            if not os.path.isfile(out_file) or os.path.getsize(out_file) == 0:
+                raise RuntimeError("Generator did not produce a nonempty config file")
             generate_ok = True
         except Exception as gen_exc:
-            from core.exceptions import GenerationError
             generate_ok = False
-            if isinstance(gen_exc, GenerationError):
-                warnings.append(f"generate_config hit GenerationError (TODO pins in output): {gen_exc}")
-            else:
-                warnings.append(f"generate_config error: {gen_exc}")
+            detail = f"Generation failed: {gen_exc}"
+            warnings.append(detail)
+            return SweepResult(SweepResult.FAILURE, filename, detail), False, warnings
 
-        return SweepResult(SweepResult.PASS, filename), generate_ok, warnings
+        return SweepResult(SweepResult.GENERATED, filename,
+                           "Generated; official validation pending"), generate_ok, warnings
 
     except Exception as exc:
         return SweepResult(SweepResult.FAILURE, filename, str(exc)), False, warnings
 
 
 # ── Main sweep ─────────────────────────────────────────────────────────────────
-def run_full_sweep(verbose=False):
-    summary   = SweepSummary()
-    gen_fails = []
-    lines     = []  # for the saved report
+def run_full_sweep(verbose=False, artifact_dir=None, *, without_display=False):
+    """Generate every profile and require official validation before PASS."""
+    started = time.monotonic()
+    base = Path(artifact_dir) if artifact_dir is not None else Path(_HERE) / "out_cfg"
+    base.mkdir(parents=True, exist_ok=True)
+    output = Path(tempfile.mkdtemp(prefix="run-", dir=base))
+    records = []
+    fixture = {"z_motors": "1", "probe": "None", "driver_mode": "Standalone",
+               "display_choice": "none" if without_display else None,
+               "qualified_boards": []}
+    infrastructure_error = None
+    scope_inventory = None
 
-    def log(msg="", end="\n"):
-        print(msg, end=end, flush=True)
-        clean_msg = _ANSI_RE.sub("", msg)
-        lines.append(clean_msg + end)
-
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log(f"\n{'=' * 64}")
-    log(f"  KACE — Full Klipper Config Sweep")
-    log(f"  Run at: {timestamp}")
-    log(f"{'=' * 64}")
-
-    if not GIT:
-        log("\033[91m[ERROR]\033[0m git not found. Cannot clone Klipper.")
-        log("Install Git for Windows from https://git-scm.com/")
-        return False
-
-    output_dir = os.path.join(_HERE, "out_cfg")
-    if os.path.isdir(output_dir):
-        try:
-            shutil.rmtree(output_dir)
-        except Exception:
-            pass
-    os.makedirs(output_dir, exist_ok=True)
-
-    with heavy_workspace("klipper-sweep-") as workspace:
-        ensure_free_space(workspace, CLONE_MINIMUM_FREE_BYTES, "Klipper sweep clone")
-        tmpdir = str(workspace)
-        if not _clone_klipper(tmpdir):
-            log("\n\033[91mSweep aborted — could not clone Klipper.\033[0m")
-            return False
-
-        config_dir = os.path.join(tmpdir, CONFIG_SUBDIR)
-        if not os.path.isdir(config_dir):
-            log("\n\033[91mSweep aborted — config/ dir not found in clone.\033[0m")
-            return False
-
-        cfg_files = sorted(
-            f for f in os.listdir(config_dir)
-            if f.endswith(".cfg") and (
-                f.startswith("generic-") or f.startswith("printer-")
-            )
-        )
-
-        if not cfg_files:
-            log("\n\033[91mSweep aborted — no config files found.\033[0m")
-            return False
-
-        n = len(cfg_files)
-        log(f"\n  Found {n} config files. Processing...\n")
-        start = time.time()
-
-        for i, fname in enumerate(cfg_files, 1):
-            fpath = os.path.join(config_dir, fname)
-            try:
-                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                    raw = f.read()
-            except OSError as exc:
-                result = SweepResult(SweepResult.FAILURE, fname, f"Could not read: {exc}")
-                gen_ok, warns = False, []
-            else:
-                result, gen_ok, warns = _classify_config(fname, raw, output_dir, verbose)
-
-            summary.add(result)
-            if result.code == SweepResult.PASS and not gen_ok:
-                gen_fails.append((fname, warns))
-
-            bar    = f"[{i:>3}/{n}]"
-            detail = f"  ({result.detail})" if result.detail else ""
-            gen_tag = "" if gen_ok else "  [!gen]"
-            line = f"  {bar} {result.coloured_code():<32} {fname}{detail}{gen_tag}"
-
-            if verbose or result.code != SweepResult.PASS or not gen_ok:
-                log(line)
-            else:
-                print(".", end=("\n" if i % 10 == 0 else ""), flush=True)
-                lines.append(".")
-
-        if not verbose:
-            log()
-
-        elapsed = time.time() - start
-        log(f"\n  Sweep completed in {elapsed:.1f}s")
-
-    # ── Final report ─────────────────────────────────────────────────────────
-    log(f"\n{'=' * 64}")
-    log("  KACE — Full Klipper Config Sweep Report")
-    log(f"{'=' * 64}")
-    log(f"  Total configs processed  : {summary.total}")
-    log(f"  \033[92m[PASS]       \033[0m           : {summary.passes}")
-    log(f"  \033[93m[SAFE_ABORT] \033[0m           : {summary.safe_aborts}")
-    log(f"  \033[96m[UNSUPPORTED]\033[0m           : {summary.unsupported}")
-    log(f"  \033[91m[FAILURE]    \033[0m           : {summary.failures}")
-    log(f"  Generation warnings      : {len(gen_fails)}")
-    log(f"{'=' * 64}")
-
-    if summary.failures > 0:
-        log("\n\033[91mFAILED CONFIGS (crashes — bugs to fix):\033[0m")
-        for r in summary.results:
-            if r.code == SweepResult.FAILURE:
-                log(f"  [FAIL] {r.filename}")
-                if r.detail:
-                    log(f"         {r.detail}")
-
-    if gen_fails:
-        log("\n[WARN] GENERATION WARNINGS (parsed OK but output had issues):")
-        for fname, warns in gen_fails:
-            log(f"  [!]  {fname}")
-            for w in warns:
-                log(f"       {w}")
-
-    # Save clean report (ANSI stripped at log time)
     try:
-        with open(REPORT_PATH, "w", encoding="utf-8") as f:
-            f.writelines(lines)
-        print(f"\n  Report saved → {REPORT_PATH}")
-    except Exception as e:
-        print(f"\n  (Could not save report: {e})")
+        if not GIT:
+            raise RuntimeError("git not found; cannot fetch pinned Klipper profiles")
+        with heavy_workspace("klipper-sweep-") as workspace:
+            ensure_free_space(workspace, CLONE_MINIMUM_FREE_BYTES, "Klipper sweep clone")
+            if not _clone_klipper(str(workspace)):
+                raise RuntimeError("Could not clone pinned Klipper")
+            config_dir = Path(workspace) / CONFIG_SUBDIR
+            configs = sorted(path for path in config_dir.glob("*.cfg")
+                             if path.name.startswith(("generic-", "printer-")))
+            if not configs:
+                raise RuntimeError("No official generic/printer configs found")
+            scope_inventory = verify_source_inventory(config_dir)
+            print(f"Full sweep: {len(configs)} profiles; Klipper {KLIPPER_REF}")
+            for path in configs:
+                source_digest = None
+                try:
+                    raw = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeError) as exc:
+                    result = SweepResult(SweepResult.FAILURE, path.name, f"Could not read: {exc}")
+                    generated, warnings = False, []
+                else:
+                    source_digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+                    if source_digest != scope_inventory['source_sha256_lf'][path.name]:
+                        raise InventoryError(f'Source changed after inventory verification: {path.name}')
+                    result, generated, warnings = _classify_config(
+                        path.name, raw, str(output), verbose, without_display=without_display)
+                records.append({"filename": path.name, "code": result.code,
+                                "detail": result.detail, "generated": generated,
+                                "source_sha256_lf": source_digest,
+                                "warnings": warnings,
+                                "config_path": path.name.replace(".cfg", ".out.cfg") if generated else None})
 
-    return summary.failures == 0
+        cases = [{"id": row["filename"], "config_path": row["config_path"],
+                  "generation": {"status": "generated"}} for row in records if row["generated"]]
+        manifest = {"schema_version": 1, "klipper_ref": KLIPPER_REF, "fixture": fixture,
+                    "scope_inventory": scope_inventory, "cases": cases}
+        manifest_path = output / "manifest.generated.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        if cases:
+            print(f"Validating {len(cases)} generated configs with official Klipper (Docker)...", flush=True)
+            validations, infrastructure_error = run_docker_validation(output, manifest_path)
+            if not isinstance(validations, dict):
+                infrastructure_error = "Malformed validator result collection"
+                validations = {}
+            for row in records:
+                if not row["generated"]:
+                    continue
+                validation = validations.get(row["filename"])
+                row["klipper"] = validation
+                if infrastructure_error:
+                    row.update(code=SweepResult.INFRA_ERROR, detail=infrastructure_error)
+                elif not isinstance(validation, dict) or type(validation.get("valid")) is not bool:
+                    row.update(code=SweepResult.INFRA_ERROR,
+                               detail="Missing or malformed official validator result")
+                elif validation["valid"]:
+                    row.update(code=SweepResult.PASS,
+                               detail=validation.get("reason", "Klipper loaded config"))
+                else:
+                    row.update(code=SweepResult.FAILURE,
+                               detail="Klipper rejected config: " + validation.get("reason", "unknown error"))
+    except Exception as exc:
+        infrastructure_error = str(exc) or type(exc).__name__
+        for row in records:
+            if row["code"] == SweepResult.GENERATED:
+                row.update(code=SweepResult.INFRA_ERROR, detail=infrastructure_error)
+
+    summary = SweepSummary()
+    for row in records:
+        summary.add(SweepResult(row["code"], row["filename"], row["detail"]))
+    successful = not infrastructure_error and summary.was_successful()
+    counts = {code: summary.count(code) for code in (
+        SweepResult.PASS, SweepResult.SAFE_ABORT, SweepResult.UNSUPPORTED,
+        SweepResult.FAILURE, SweepResult.INFRA_ERROR, SweepResult.GENERATED)}
+    payload = {"schema_version": 1, "klipper_ref": KLIPPER_REF,
+               "scope_inventory": scope_inventory,
+               "pipeline": "parse-generate-official-loader", "fixture": fixture, "successful": successful,
+               "summary": {"total": summary.total, **counts}, "results": records,
+               "infrastructure_error": infrastructure_error,
+               "duration_seconds": round(time.monotonic() - started, 3)}
+    report = ["KACE full sweep: parse + generate + official Klipper loader",
+              f"Klipper commit: {KLIPPER_REF}",
+              "Fixture: one Z, no probe, standalone drivers; not hardware qualification.",
+              "Display choice: " + ("none (explicit wizard selection)" if without_display
+                                   else "unspecified (original auto-detect scenario)")]
+    report.extend(f"{row['code']}: {row['filename']} - {row['detail']}" for row in records)
+    report.append("Summary: " + json.dumps(payload["summary"]))
+    if infrastructure_error:
+        report.append("INFRA_ERROR: " + infrastructure_error)
+    text = "\n".join(report) + "\n"
+    try:
+        (output / "report.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        (output / "report.txt").write_text(text, encoding="utf-8")
+        Path(REPORT_PATH).write_text(text, encoding="utf-8")
+    except OSError as exc:
+        print(f"Could not save sweep evidence: {exc}")
+        return False
+    for line in report:
+        if verbose or not line.startswith(SweepResult.PASS + ":"):
+            print(line)
+    print(f"Sweep artifacts: {output}")
+    return successful
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="KACE Full Klipper Sweep")
     parser.add_argument("--verbose", action="store_true", help="Show all results")
+    parser.add_argument("--artifacts", type=Path, help="Base directory for isolated run artifacts")
+    parser.add_argument("--without-display", action="store_true",
+                        help="Exercise the explicit no-display wizard choice; retain other guards")
     args = parser.parse_args()
-    ok = run_full_sweep(verbose=args.verbose)
+    ok = run_full_sweep(verbose=args.verbose, artifact_dir=args.artifacts,
+                        without_display=args.without_display)
     sys.exit(0 if ok else 1)

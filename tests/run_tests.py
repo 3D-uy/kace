@@ -250,7 +250,7 @@ def main():
     parser.add_argument("--yaml-check",         action="store_true",
                         help="Validate data/boards.yaml schema and precedence only")
     parser.add_argument("--full-klipper-sweep", action="store_true",
-                        help="Clone Klipper and sweep all 192+ official configs")
+                        help="Generate official configs and validate with pinned Klipper (requires Docker)")
     args = parser.parse_args()
 
     # Propagate flags to test modules via env vars
@@ -271,7 +271,7 @@ def main():
 
     # ── Full Klipper sweep mode ───────────────────────────────────────────────
     if args.full_klipper_sweep:
-        from tests.sweep.klipper_sweep import run_full_sweep
+        from tests.sweep.full_sweep_runner import run_full_sweep
         ok = run_full_sweep(verbose=args.verbose)
         sys.exit(0 if ok else 1)
 

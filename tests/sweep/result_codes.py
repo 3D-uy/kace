@@ -2,17 +2,20 @@
 KACE Sweep Result Classification Codes
 =======================================
 
-Defines the four official result categories used by the full Klipper config
+Defines result categories used by the Klipper parser and full config
 sweep and the KACE test runner. Each config processed during a sweep is
 assigned exactly one of these codes.
 
 Classification rules (applied in priority order):
-  FAILURE     — an unhandled Python exception occurred (crash / bug)
+  FAILURE     — parsing, generation or official config validation failed
+  INFRA_ERROR — required validation could not be completed
+  GENERATED   — intermediate only; official validation is still required
   SAFE_ABORT  — graceful exit due to a known, expected limitation
                 (e.g. TODO placeholder pins still active in a generated section)
   UNSUPPORTED — the config uses syntax or sections not supported by the
                 current parser/generator (experimental / non-standard features)
-  PASS        — full parse + profile extraction completed without issues
+  PASS        — requested pipeline completed (parser-only or full validation);
+                the runner must identify which pipeline it executed
 """
 
 
@@ -23,6 +26,8 @@ class SweepResult:
     SAFE_ABORT  = "SAFE_ABORT"
     UNSUPPORTED = "UNSUPPORTED"
     FAILURE     = "FAILURE"
+    INFRA_ERROR = "INFRA_ERROR"
+    GENERATED   = "GENERATED"
 
     # ANSI colour codes for terminal output
     _COLOURS = {
@@ -30,6 +35,8 @@ class SweepResult:
         SAFE_ABORT:  "\033[93m",   # yellow
         UNSUPPORTED: "\033[96m",   # cyan
         FAILURE:     "\033[91m",   # red
+        INFRA_ERROR: "\033[91m",
+        GENERATED:   "\033[96m",
     }
     _RESET = "\033[0m"
 
@@ -40,7 +47,7 @@ class SweepResult:
             filename: The config filename that was processed (e.g. generic-skr-v1.4.cfg)
             detail:   Optional short description of why the result was assigned.
         """
-        if code not in (self.PASS, self.SAFE_ABORT, self.UNSUPPORTED, self.FAILURE):
+        if code not in self._COLOURS:
             raise ValueError(f"Unknown sweep result code: {code!r}")
         self.code     = code
         self.filename = filename
@@ -123,5 +130,8 @@ class SweepSummary:
             print()
 
     def was_successful(self) -> bool:
-        """Return True if no hard FAILURE results were recorded."""
-        return self.failures == 0
+        """Pending or unavailable validation is not a successful sweep."""
+        return bool(self.results) and not any(
+            result.code in (SweepResult.FAILURE, SweepResult.INFRA_ERROR, SweepResult.GENERATED)
+            for result in self.results
+        )

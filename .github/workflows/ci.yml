@@ -92,9 +92,9 @@ jobs:
       - name: Run unit tests
         run: python3 tests/run_tests.py --verbose
 
-      # The unittest runner does not collect pytest function/fixture regressions.
-      # Exercise them explicitly, including real pinned Kconfig/parser behavior.
-      - name: Run stabilization regressions against pinned Klipper
+      # unittest does not collect module-level pytest functions or fixtures.
+      # Collect the entire source suite so new regressions enter CI automatically.
+      - name: Run complete pytest suite against pinned Klipper
         run: |
           readarray -t klipper_source < <(python3 -c "from tests.klipper_contract import KLIPPER_REPO_URL, KLIPPER_REF; print(KLIPPER_REPO_URL); print(KLIPPER_REF)")
           git init .klipper-contract-source
@@ -102,13 +102,7 @@ jobs:
           git -C .klipper-contract-source fetch --depth 1 origin "${klipper_source[1]}"
           git -C .klipper-contract-source checkout --detach FETCH_HEAD
           test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"
-          python3 -m pytest -q \
-            tests/unit/test_audit_followup.py \
-            tests/unit/test_audit_stabilization.py \
-            tests/unit/test_deployment_p1.py \
-            tests/unit/test_final_readiness_fixes.py \
-            tests/unit/test_hardware_readiness.py \
-            tests/unit/test_stabilization_p2.py
+          python3 -m pytest tests --ignore=tests/results -q -rs
 
   # Stateful loopback lab: real Moonraker HTTP adapter, Power API, udev MCU
   # monitor, firmware strategies, verification, upload, and rollback. It never
@@ -185,6 +179,16 @@ jobs:
         env:
           KACE_UPDATE_SNAPSHOTS: ""
 
+      - name: Validate golden configs with pinned Klipper
+        run: python3 tests/regression/validate_snapshots.py
+
+      - name: Upload snapshot validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kace-snapshot-klipper-validation
+          path: tests/results/snapshot-validation/
+
   # Reduced deterministic KACE -> pinned Klipper loader matrix for PRs.
   config-matrix-quick:
     name: KACE / Klipper Config Matrix (quick)
@@ -213,7 +217,8 @@ jobs:
           name: kace-klipper-matrix-quick
           path: tests/matrix/artifacts/
 
-  # Full sweep is required before merging as well as on main.
+  # Keep the existing required-check identity and triggers. The reviewed contract
+  # retains raw observations and proves every supported scenario or concrete boundary.
   full-klipper-sweep:
     name: Full Klipper Config Sweep (192+ configs)
     runs-on: ubuntu-24.04
@@ -235,13 +240,25 @@ jobs:
       - name: Install dependencies
         run: python3 -m pip install --require-hashes -r requirements.txt
 
-      - name: Configure git identity (required for sparse clone)
+      - name: Prepare pinned Klipper scenario sources
         run: |
-          git config --global user.email "ci@kace"
-          git config --global user.name "KACE CI"
+          readarray -t klipper_source < <(python3 -c "from tests.klipper_contract import KLIPPER_REPO_URL, KLIPPER_REF; print(KLIPPER_REPO_URL); print(KLIPPER_REF)")
+          git init .klipper-contract-source
+          git -C .klipper-contract-source remote add origin "${klipper_source[0]}"
+          git -C .klipper-contract-source fetch --depth 1 origin "${klipper_source[1]}"
+          git -C .klipper-contract-source checkout --detach FETCH_HEAD
+          test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"
 
-      - name: Run full Klipper config sweep
-        run: python3 tests/run_tests.py --full-klipper-sweep --verbose
+      - name: Run complete reviewed Klipper scenario contract
+        run: python3 -m tests.sweep.scenario_contract --artifacts tests/results/reviewed-scenarios
+
+      - name: Upload full sweep evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kace-klipper-full-sweep
+          path: tests/results/reviewed-scenarios/
+          if-no-files-found: error
 
   # Full pairwise matrix: manual/pre-release, every boards.yaml board contract.
   config-matrix-full:

@@ -40,6 +40,58 @@ class ReproducibleCiContractTests(unittest.TestCase):
         self.assertTrue(action_refs)
         self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_refs))
 
+    def test_reviewed_scenarios_keep_required_check_and_fail_closed(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+        job = workflow["jobs"]["full-klipper-sweep"]
+        self.assertEqual(job["name"], "Full Klipper Config Sweep (192+ configs)")
+        self.assertEqual(job["needs"], "regression-tests")
+        self.assertEqual(job["runs-on"], "ubuntu-24.04")
+        self.assertEqual(" ".join(job["if"].split()),
+            "github.event_name == 'pull_request' || "
+            "(github.event_name == 'push' && github.ref == 'refs/heads/main') || "
+            "(github.event_name == 'workflow_dispatch' && inputs.full_klipper_sweep)")
+        self.assertNotIn("continue-on-error", job)
+        steps = job["steps"]
+        gates = [(i, step) for i, step in enumerate(steps)
+                 if "tests.sweep.scenario_contract" in step.get("run", "")]
+        self.assertEqual(len(gates), 1)
+        gate_index, gate = gates[0]
+        self.assertEqual(gate["run"],
+            "python3 -m tests.sweep.scenario_contract --artifacts tests/results/reviewed-scenarios")
+        self.assertNotIn("if", gate)
+        self.assertNotIn("env", gate)  # No optimized Python or test bypass environment.
+        self.assertNotIn("env", job)
+        for step in steps:
+            self.assertNotIn("continue-on-error", step)
+        preparation = next(i for i, step in enumerate(steps)
+                           if "git init .klipper-contract-source" in step.get("run", ""))
+        self.assertLess(preparation, gate_index)
+        command = steps[preparation]["run"]
+        self.assertNotIn("if", steps[preparation])
+        self.assertIn("from tests.klipper_contract import KLIPPER_REPO_URL, KLIPPER_REF", command)
+        self.assertIn('fetch --depth 1 origin "${klipper_source[1]}"', command)
+        self.assertIn("checkout --detach FETCH_HEAD", command)
+        self.assertIn('test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"', command)
+        install = next(i for i, step in enumerate(steps) if "pip install" in step.get("run", ""))
+        self.assertLess(install, preparation)
+        self.assertEqual(steps[install]["run"],
+                         "python3 -m pip install --require-hashes -r requirements.txt")
+
+    def test_reviewed_scenario_evidence_is_uploaded_even_after_failure(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["full-klipper-sweep"]["steps"]
+        gate_index = next(i for i, step in enumerate(steps)
+                          if "tests.sweep.scenario_contract" in step.get("run", ""))
+        uploads = [(i, step) for i, step in enumerate(steps)
+                   if step.get("uses", "").startswith("actions/upload-artifact@")]
+        self.assertEqual(len(uploads), 1)
+        index, upload = uploads[0]
+        self.assertGreater(index, gate_index)
+        self.assertEqual(upload["if"], "always()")
+        self.assertEqual(upload["with"]["name"], "kace-klipper-full-sweep")
+        self.assertEqual(upload["with"]["path"], "tests/results/reviewed-scenarios/")
+        self.assertEqual(upload["with"]["if-no-files-found"], "error")
+
     def test_firmware_container_pins_base_digest_and_hashed_locks(self):
         dockerfile = (ROOT / "docker" / "ci" / "Dockerfile").read_text(encoding="utf-8")
         self.assertRegex(
