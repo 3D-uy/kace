@@ -17,8 +17,9 @@ def discover_mcu_hardware(interactive=True):
       4. /dev/ttyACM*           — raw USB CDC-ACM devices (most STM32/RP2040)
       5. printer.cfg serial:    — read existing Klipper config as last resort
 
-    NOTE: ttyAMA0 / ttyS0 are the Pi's own GPIO UART pins, NOT a printer MCU.
-          They are deliberately excluded from the search.
+    NOTE: ttyAMA* / ttyS* identify host UARTs, not the connected MCU. They
+          can carry a supported direct MCU connection, but their presence
+          alone is not MCU evidence. Never auto-select one from this scan.
 
     Returns a dict with:
       - mcu_path    e.g. /dev/serial/by-id/usb-Klipper_stm32f446xx_...-if00
@@ -101,7 +102,7 @@ def discover_mcu_hardware(interactive=True):
         if interactive:
             if len(ports) == 1:
                 choice = ports[0]
-                print(f"\n{SUCCESS}[✔ ] Connected MCU auto-detected:{RESET} {INFO}{choice}{RESET}\n")
+                print(f"\n{SUCCESS}[✔ ] {t('mcu.auto_detected')}{RESET} {INFO}{choice}{RESET}\n")
             else:
                 choice = numbered_select(
                     t("wizard.detected_mcu"), choices=ports

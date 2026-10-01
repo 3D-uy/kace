@@ -1,0 +1,807 @@
+{
+  "schema": 1,
+  "revisions": [
+    "fe4eb8650bd7de4c2100a14eaf09b0965c430e29",
+    "ce7002bedf37e938bb483572949f3703ac6476cb"
+  ],
+  "profiles": {
+    "generic-I3DBEEZ9.cfg": {
+      "sha256": "31479d3ad128375ffe50d3507882c3932586f07ef628f504adca97df20a2ded5",
+      "sections": {
+        "heater_fan fan1": {
+          "pin": "PE5"
+        }
+      },
+      "heaters": {
+        "extruder": "PB1"
+      }
+    },
+    "generic-archim2.cfg": {
+      "sha256": "ffdd451cbb5cb55df55e9926a12b436c731102a1dd9cbeb91d0927175add162a",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PC25"
+        }
+      },
+      "heaters": {
+        "extruder": "PC24"
+      }
+    },
+    "generic-bigtreetech-e3-rrf-v1.1.cfg": {
+      "sha256": "34fc88ae8017d6475887d1a2a2b63ecad19415a9b4169f53357bf82cf76ff570",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PB6"
+        }
+      },
+      "heaters": {
+        "extruder": "PB3"
+      }
+    },
+    "generic-bigtreetech-gtr.cfg": {
+      "sha256": "465906f3aa5f7c8104a47e684a4ddc2ab19b735d9aef876330720407218640e4",
+      "sections": {
+        "heater_fan fan1": {
+          "pin": "PE6"
+        }
+      },
+      "heaters": {
+        "extruder": "PB1"
+      }
+    },
+    "generic-bigtreetech-skr-e3-turbo.cfg": {
+      "sha256": "dbaa1b9c5202b166bc9f93b5fc03223d45d18cb9a4e0b2936f86b53f0254c2cd",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "P2.2"
+        }
+      },
+      "heaters": {
+        "extruder": "P2.3"
+      }
+    },
+    "generic-bigtreetech-skr-mini-e3-v2.0.cfg": {
+      "sha256": "ac8059db8951299e157b62d5d5c4b683754ae112336383d27a6ace71e9db02e0",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PC7"
+        }
+      },
+      "heaters": {
+        "extruder": "PC8"
+      }
+    },
+    "generic-bigtreetech-skr-mini-e3-v3.0.cfg": {
+      "sha256": "26a86aacfab3a03e9d59e576b3382e31ba988cff27bb2b584583785e70d6e2b5",
+      "sections": {
+        "heater_fan controller_fan": {
+          "pin": "PB15"
+        },
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PC7"
+        }
+      },
+      "heaters": {
+        "extruder": "PC8"
+      }
+    },
+    "generic-bigtreetech-skr-mini-mz.cfg": {
+      "sha256": "d0d283ddd72f8e01075d479f319c097c0a3e18f2b0e24e2133ed2a44a2f9d510",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PC7"
+        }
+      },
+      "heaters": {
+        "extruder": "PC8"
+      }
+    },
+    "generic-bigtreetech-skr-pico-v1.0.cfg": {
+      "sha256": "1e428585029f05803e270ca5faef51ad351798b41413344aabffc3f622d37b1b",
+      "sections": {
+        "heater_fan controller_fan": {
+          "pin": "gpio20"
+        },
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "gpio18"
+        }
+      },
+      "heaters": {
+        "extruder": "gpio23"
+      }
+    },
+    "generic-bigtreetech-skr-pro.cfg": {
+      "sha256": "a0118e14809db66917f48dd8a35c97e4c58448bba44bcd4e59a04c663ce8a121",
+      "sections": {
+        "heater_fan fan1": {
+          "pin": "PE5"
+        }
+      },
+      "heaters": {
+        "extruder": "PB1"
+      }
+    },
+    "generic-duet2-duex.cfg": {
+      "sha256": "b50ae266b33cb58d656d6a09609ac2d5847344a31db8c441195d6bedfef95a33",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PC26",
+          "heater": "extruder",
+          "heater_temp": "45",
+          "fan_speed": "1.0"
+        }
+      },
+      "heaters": {
+        "extruder": "!PA20"
+      }
+    },
+    "generic-duet3-6hc.cfg": {
+      "sha256": "4a5dd2ca9ad7b477e7cc305f132f627df4c5b9aed89e663b841466bd53ff4bfa",
+      "sections": {
+        "heater_fan heatbreak_fan": {
+          "pin": "PA15",
+          "heater": "extruder",
+          "heater_temp": "50.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PA24"
+      }
+    },
+    "generic-duet3-6xd.cfg": {
+      "sha256": "a1e20094c8febf962744e365148bc54ab01fddf9c05bcd2f19bc63a4317df4bd",
+      "sections": {
+        "heater_fan heatbreak_fan": {
+          "pin": "PA15",
+          "heater": "extruder",
+          "heater_temp": "50.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PA24"
+      }
+    },
+    "generic-duet3-mini.cfg": {
+      "sha256": "2ab87ec3b6e49d28736ca8c17f1565439942b6bdb324aa0694b76db360dbe2d2",
+      "sections": {
+        "heater_fan heatbreak_fan": {
+          "pin": "PB11"
+        }
+      },
+      "heaters": {
+        "extruder": "PB13"
+      }
+    },
+    "generic-flyboard.cfg": {
+      "sha256": "4d31bdf5c049e4d04b0cadb65e1faf5893b1231e8cd7bc00875dd90dc65387fa",
+      "sections": {
+        "heater_fan fan1": {
+          "pin": "PF9"
+        }
+      },
+      "heaters": {
+        "extruder": "PF7"
+      }
+    },
+    "generic-fysetc-cheetah-v1.2.cfg": {
+      "sha256": "7215483f87c7b81d4a463712c5d601ec868664bf2cbb4d9f898e117cb10066bf",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PB0"
+        }
+      },
+      "heaters": {
+        "extruder": "PC6"
+      }
+    },
+    "generic-fysetc-cheetah-v2.0.cfg": {
+      "sha256": "59db8d8e3b4958d3b58b21db505ad515ff86a262b45307f173390f4ac405cd3b",
+      "sections": {
+        "controller_fan my_controller_fan": {
+          "pin": "PA14",
+          "heater": "extruder, heater_bed",
+          "stepper": "stepper_x, stepper_y, stepper_z, extruder"
+        },
+        "heater_fan my_hotend_fan": {
+          "pin": "PA13",
+          "heater": "extruder",
+          "heater_temp": "50.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PC6",
+        "heater_bed": "PC7"
+      }
+    },
+    "generic-mellow-fly-e3-v2.cfg": {
+      "sha256": "d6771574fcc42989577bc468001a19070453ce631c9c298defea466bc5372704",
+      "sections": {
+        "controller_fan controller_fan": {
+          "pin": "PA0",
+          "max_power": "1.0",
+          "kick_start_time": "0.5",
+          "heater": "extruder",
+          "stepper": "stepper_x, stepper_y, stepper_z",
+          "fan_speed": "1.0",
+          "idle_timeout": "60"
+        },
+        "heater_fan hotend_fan": {
+          "pin": "PA1",
+          "max_power": "1.0",
+          "kick_start_time": "0.5",
+          "heater": "extruder",
+          "heater_temp": "50",
+          "fan_speed": "1.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PC6"
+      }
+    },
+    "generic-mellow-super-infinty-hv.cfg": {
+      "sha256": "04fb835367eabd6bc91e4a97024086cb52ee747920767719c7cbf3b36e5a4a94",
+      "sections": {
+        "heater_fan fan1": {
+          "pin": "PA1"
+        }
+      },
+      "heaters": {
+        "extruder": "PB0"
+      }
+    },
+    "generic-mightyboard.cfg": {
+      "sha256": "2f9f577e0c0ee9b0231003e02e1caaff3c317b44bef76eafaa87e1e1995364ae",
+      "sections": {
+        "heater_fan extruder_fan": {
+          "pin": "PH4"
+        }
+      },
+      "heaters": {
+        "extruder": "PH3"
+      }
+    },
+    "generic-printrboard-g2.cfg": {
+      "sha256": "83d3cd55a4281fcc49644ae1fd396aaa252220e60a355f0dec2d8122c1fb1419",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PA6"
+        }
+      },
+      "heaters": {
+        "extruder": "PA5"
+      }
+    },
+    "generic-prusa-buddy.cfg": {
+      "sha256": "d0c9d6b6c3dd7dd2bd6c5ea3350daef1d6725a6fb2be68d6cc482e214b1f3569",
+      "sections": {
+        "heater_fan hotend_fan": {
+          "pin": "PE9",
+          "tachometer_pin": "PE14"
+        }
+      },
+      "heaters": {
+        "extruder": "PB1"
+      }
+    },
+    "printer-anycubic-4max-2018.cfg": {
+      "sha256": "02642dc6c675fd987cd8a8b7ba603e46f1293edec5ffd85f21437e4d50801025",
+      "sections": {
+        "heater_fan extruder_fan": {
+          "pin": "PL5"
+        },
+        "heater_fan stepstick_fan": {
+          "pin": "PH4",
+          "kick_start_time": "1.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PB4"
+      }
+    },
+    "printer-anycubic-4maxpro-2.0-2021.cfg": {
+      "sha256": "3c8cd4a24feb0c7215a343910ac04361cedb46f12adf6b1b728c762863795709",
+      "sections": {
+        "controller_fan system_fan": {
+          "pin": "PH4",
+          "hardware_pwm": "True",
+          "kick_start_time": "1.0",
+          "max_power": "1.0",
+          "idle_timeout": "300",
+          "idle_speed": "0.5",
+          "shutdown_speed": "1.0",
+          "heater": "heater_bed,extruder"
+        },
+        "heater_fan heatbreak_fan": {
+          "pin": "PL5",
+          "kick_start_time": "1.0",
+          "max_power": "1.0",
+          "heater_temp": "40.0",
+          "heater": "extruder"
+        }
+      },
+      "heaters": {
+        "heater_bed": "PH5",
+        "extruder": "PB4"
+      }
+    },
+    "printer-anycubic-i3-mega-2017.cfg": {
+      "sha256": "bea8db28662ff8073d0ac34107065e62727e71b9e9f0edf3a8a7c6dfa8e7ab63",
+      "sections": {
+        "heater_fan extruder_fan": {
+          "pin": "PL5"
+        },
+        "heater_fan stepstick_fan": {
+          "pin": "PH4"
+        }
+      },
+      "heaters": {
+        "extruder": "PB4"
+      }
+    },
+    "printer-anycubic-kobra-go-2022.cfg": {
+      "sha256": "7bd563fc811f30c22b4cf7b4cefbc748b2f0e93920758f133e603a9fe03438eb",
+      "sections": {
+        "controller_fan controller_fan": {
+          "pin": "PB12"
+        },
+        "heater_fan extruder_fan": {
+          "pin": "PB13"
+        }
+      },
+      "heaters": {
+        "extruder": "PB8"
+      }
+    },
+    "printer-anycubic-kobra-plus-2022.cfg": {
+      "sha256": "9cfed8a2699c5d12695b32ef5a19c4bae55230764a990c5b725c1998684dfc9a",
+      "sections": {
+        "controller_fan controller_fan": {
+          "pin": "PA14",
+          "heater": "heater_bed"
+        }
+      },
+      "heaters": {
+        "heater_bed": "PA0"
+      }
+    },
+    "printer-anycubic-vyper-2021.cfg": {
+      "sha256": "e96364e54483e79ce9689e1545274f395d1612bef088de5f43c8330777864bc9",
+      "sections": {
+        "controller_fan controller_fan": {
+          "pin": "PA14",
+          "stepper": "stepper_x,stepper_y,stepper_z,stepper_z1"
+        },
+        "heater_fan extruder_fan": {
+          "pin": "PB1"
+        }
+      },
+      "heaters": {
+        "extruder": "PA1"
+      }
+    },
+    "printer-artillery-genius-pro-2022.cfg": {
+      "sha256": "5093d28f6c12131a8ea925a0c24df17f65953434c5d964cea09cd60231d81dca",
+      "sections": {
+        "controller_fan stepper_fan": {
+          "pin": "PC6",
+          "idle_timeout": "300"
+        }
+      },
+      "heaters": {
+        "extruder": "PC9"
+      }
+    },
+    "printer-artillery-sidewinder-x2-2022.cfg": {
+      "sha256": "a80aa706e5bffe87419facb6080d5ba6d0d33129802ab1a1aea4ebe29cbd29a2",
+      "sections": {
+        "controller_fan case": {
+          "pin": "PC6",
+          "off_below": "0.3",
+          "idle_speed": "0.0"
+        },
+        "heater_fan extruder": {
+          "pin": "PC7",
+          "off_below": "0.2"
+        }
+      },
+      "heaters": {
+        "extruder": "PC9"
+      }
+    },
+    "printer-artillery-sidewinder-x3-plus-2024.cfg": {
+      "sha256": "6d24dbf9c3e0cf96ec74fece24900de8a0b87bed89482193ae3caffebb0ff986",
+      "sections": {
+        "temperature_fan Artillery_MCU": {
+          "sensor_type": "temperature_mcu",
+          "pin": "PA5",
+          "max_temp": "60.0",
+          "target_temp": "40.0",
+          "min_temp": "0",
+          "shutdown_speed": "0.0",
+          "kick_start_time": "0.5",
+          "off_below": "0.19",
+          "max_speed": "1.0",
+          "min_speed": "0.0",
+          "control": "watermark"
+        }
+      },
+      "heaters": {}
+    },
+    "printer-biqu-b1-se-plus-2022.cfg": {
+      "sha256": "16f27f1968af5b3456fd53b6528ea3f33793479a35d25b640926eb7814eb8d6e",
+      "sections": {
+        "heater_fan Board_fan": {
+          "pin": "PB5",
+          "max_power": "1.0",
+          "kick_start_time": "0.100",
+          "heater": "extruder"
+        },
+        "heater_fan Cooling_fan": {
+          "pin": "PB6",
+          "max_power": "1.0",
+          "kick_start_time": "0.100",
+          "heater": "heater_bed"
+        }
+      },
+      "heaters": {
+        "extruder": "PB3",
+        "heater_bed": "PD7"
+      }
+    },
+    "printer-creality-ender5-s1-2023.cfg": {
+      "sha256": "7d4641bec70ed2dcd3ec77a21e8d86e4955813c9edf58a62abe8e97d4bf095d7",
+      "sections": {
+        "heater_fan heatbreak_fan": {
+          "pin": "PC0",
+          "heater": "extruder",
+          "heater_temp": "60",
+          "fan_speed": "0.8"
+        }
+      },
+      "heaters": {
+        "extruder": "PA1"
+      }
+    },
+    "printer-creality-sermoonV1-2022.cfg": {
+      "sha256": "bb075df91052ec737a765469edfad9ee990d32da0283239eb6de56a820b329e8",
+      "sections": {
+        "fan_generic side_fan": {
+          "pin": "PC15"
+        }
+      },
+      "heaters": {}
+    },
+    "printer-eryone-er20-2021.cfg": {
+      "sha256": "b05d7492779b4d001133e2248f327c1098827c7c728f4ddac22e6844befbd59d",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PB4"
+        }
+      },
+      "heaters": {
+        "extruder": "PD11"
+      }
+    },
+    "printer-eryone-thinker-series-v2-2020.cfg": {
+      "sha256": "8af603a9f05ea43fd84cc65de94ec180a0002be125792c33de69f7dcf658e41d",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PH3"
+        }
+      },
+      "heaters": {
+        "extruder": "PH6"
+      }
+    },
+    "printer-flashforge-creator-pro-2018.cfg": {
+      "sha256": "bcbf4913ae13a161e978873e7972cabc6c2b6717b614846ab345fd309fc1e153",
+      "sections": {
+        "heater_fan extruder_fan": {
+          "pin": "PH4"
+        }
+      },
+      "heaters": {
+        "extruder": "PH3"
+      }
+    },
+    "printer-hiprecy-leo-2019.cfg": {
+      "sha256": "828729d411c4ab7c7bd675a967253801d4add5ebacc1461ed0732b06f0b29a72",
+      "sections": {
+        "heater_fan board_fan": {
+          "pin": "PL3"
+        },
+        "heater_fan e0_fan": {
+          "pin": "PL4",
+          "heater": "extruder",
+          "max_power": "1.0",
+          "shutdown_speed": "0",
+          "cycle_time": "0.010",
+          "kick_start_time": "0.100",
+          "heater_temp": "50.0",
+          "fan_speed": "1.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PE3"
+      }
+    },
+    "printer-lulzbot-mini1-2016.cfg": {
+      "sha256": "7f0ccf7d103ba32c0e87d9aa81a48379e915b72031671dbe9fe3380c31cf0cd4",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PH3"
+        }
+      },
+      "heaters": {
+        "extruder": "PE5"
+      }
+    },
+    "printer-lulzbot-mini2-2018.cfg": {
+      "sha256": "43b27b0a68af35ce7da0842407d06610c80a9763acf925952ce3fe38c10c1eb1",
+      "sections": {
+        "heater_fan nozzle_cooling_fan": {
+          "pin": "PH3"
+        }
+      },
+      "heaters": {
+        "extruder": "PE5"
+      }
+    },
+    "printer-lulzbot-taz6-2017.cfg": {
+      "sha256": "cac39c56ef9ff8b7d174575f3956255057c8724d9f6e29b708e6840cdb42eceb",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PH3"
+        }
+      },
+      "heaters": {
+        "extruder": "PH6"
+      }
+    },
+    "printer-lulzbot-taz6-dual-v3-2017.cfg": {
+      "sha256": "cb459f3d4a888e8aae5d95812aeda3e8260d135ad5736844dfd0f4b3c142e708",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PH5"
+        }
+      },
+      "heaters": {
+        "extruder": "PH4"
+      }
+    },
+    "printer-makergear-m2-2012.cfg": {
+      "sha256": "ddfb9f4b2fb4ac1676b91b85cc37319231936cd9950e6efa0e90e2ce908f7d2b",
+      "sections": {
+        "heater_fan nozzle_fan": {
+          "pin": "PH3",
+          "max_power": "0.61",
+          "cycle_time": ".000030",
+          "hardware_pwm": "True"
+        }
+      },
+      "heaters": {
+        "extruder": "PH6"
+      }
+    },
+    "printer-makergear-m2-2016.cfg": {
+      "sha256": "ba675297022e8d2fd92da86cc739ccbe041d706a8f14e7ac9adc2a987805d4f4",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PH3"
+        }
+      },
+      "heaters": {
+        "extruder": "PH6"
+      }
+    },
+    "printer-monoprice-select-mini-v1-2016.cfg": {
+      "sha256": "7dea5bb2d72bca80a8e90f8929271e916858569ad110671ffd730166cb282d62",
+      "sections": {
+        "heater_fan hotend_fan": {
+          "pin": "PB8",
+          "heater": "extruder",
+          "heater_temp": "45.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PB6"
+      }
+    },
+    "printer-monoprice-select-mini-v2-2018.cfg": {
+      "sha256": "25baf1ac3425a37dd27958fc0b809f72648c0afb46ff325c9db001178b776b0e",
+      "sections": {
+        "controller_fan chassis_fan": {
+          "pin": "PB3",
+          "off_below": "0.25"
+        },
+        "heater_fan fan": {
+          "pin": "PB8"
+        }
+      },
+      "heaters": {
+        "extruder": "PB6"
+      }
+    },
+    "printer-mtw-create-2015.cfg": {
+      "sha256": "ef3bc9fd33304d1207a34e9114382894b231109346a0a8cb38a5c2da6ed8272c",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PH3"
+        }
+      },
+      "heaters": {
+        "extruder": "PH6"
+      }
+    },
+    "printer-prusa-mini-plus-2020.cfg": {
+      "sha256": "8892f2286e1a8560281d053360d86837fe03b81acbf7c79a0ca1e1665d915cc4",
+      "sections": {
+        "heater_fan hotend_fan": {
+          "pin": "PE9",
+          "tachometer_pin": "PE14",
+          "fan_speed": "0.5"
+        }
+      },
+      "heaters": {
+        "extruder": "PB1"
+      }
+    },
+    "printer-ratrig-v-minion-2021.cfg": {
+      "sha256": "205ab4b07f1adfaf707c4f8fe15636fba4db578c82343915f66f6e047615ceaa",
+      "sections": {
+        "controller_fan controller_fan": {
+          "pin": "PD12",
+          "fan_speed": "1.0",
+          "stepper": "stepper_x, stepper_y, stepper_z"
+        },
+        "heater_fan hotend_cooling_fan": {
+          "pin": "PE5",
+          "fan_speed": "1.0",
+          "heater": "extruder",
+          "heater_temp": "50.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PA2"
+      }
+    },
+    "printer-robo3d-r2-2017.cfg": {
+      "sha256": "64a55854af3388173d5731b02d006e83498e7fb36622559a207adf90c82a3478",
+      "sections": {
+        "controller_fan board": {
+          "pin": "PE3"
+        }
+      },
+      "heaters": {
+        "extruder": "PB4"
+      }
+    },
+    "printer-sunlu-s8-2020.cfg": {
+      "sha256": "c5c1c25082797c973da9395e0245168614cd2b5695aef65705b24b0bea6bd675",
+      "sections": {
+        "heater_fan fan1": {
+          "pin": "PH4"
+        }
+      },
+      "heaters": {
+        "extruder": "PB4"
+      }
+    },
+    "printer-sunlu-t3-2022.cfg": {
+      "sha256": "05b057ece3a21b9919ba9956066c77380dbc058d57ee4b1c5347006864fc67bb",
+      "sections": {
+        "heater_fan Hotend": {
+          "pin": "PC7",
+          "heater": "extruder",
+          "heater_temp": "50.0"
+        }
+      },
+      "heaters": {
+        "extruder": "PC8"
+      }
+    },
+    "printer-tevo-flash-2018.cfg": {
+      "sha256": "5e5850fc6f640d466bcfc3fd6fb4ed15720355ceecf5f68d8c102dfafb981f81",
+      "sections": {
+        "heater_fan heatbreak_cooling_fan": {
+          "pin": "PH4"
+        }
+      },
+      "heaters": {
+        "extruder": "PB4"
+      }
+    },
+    "printer-tevo-tarantula-pro-2020.cfg": {
+      "sha256": "c1fdaa1a42f235ce31b0575f242deeedaa796dc94accd189b0d984177e0db659",
+      "sections": {
+        "heater_fan nozzle_fan": {
+          "pin": "PH4"
+        }
+      },
+      "heaters": {
+        "extruder": "PB4"
+      }
+    },
+    "printer-tronxy-crux1-2022.cfg": {
+      "sha256": "e5840823c95f55beaa262f6d7287059e7b6f0667e44b81118341d81e0af035f1",
+      "sections": {
+        "controller_fan drivers_fan": {
+          "pin": "PD7"
+        }
+      },
+      "heaters": {
+        "extruder": "PG7"
+      }
+    },
+    "printer-tronxy-x5sa-pro-2020.cfg": {
+      "sha256": "110b6bc12e3f653f81d4a10ee64c7d8973c8326674e29ca9b033df97095c5771",
+      "sections": {
+        "controller_fan drivers_fan": {
+          "pin": "PD6"
+        }
+      },
+      "heaters": {
+        "extruder": "PG12"
+      }
+    },
+    "printer-tronxy-x5sa-v6-2019.cfg": {
+      "sha256": "d82fbc9ec7560afa35046cefbb83100aed299a7a39913f2a2d1fc94ddb641047",
+      "sections": {
+        "controller_fan drivers_fan": {
+          "pin": "PD6"
+        }
+      },
+      "heaters": {
+        "extruder": "PG12"
+      }
+    },
+    "printer-tronxy-xy-2-Pro-2020.cfg": {
+      "sha256": "f85e94df3eec4811d2601773919cbbb266ef8abeca1e02f3242efba0a2c93eba",
+      "sections": {
+        "controller_fan drivers_fan": {
+          "pin": "PD6"
+        },
+        "heater_fan hotend_fan": {
+          "pin": "PG14",
+          "fan_speed": "1"
+        }
+      },
+      "heaters": {
+        "extruder": "PG12"
+      }
+    },
+    "printer-twotrees-sapphire-plus-sp-5-v1-2020.cfg": {
+      "sha256": "86d2584bbe354d087a1f3b4f1f5b43b7baac0bd39ba37cc879fd52dd10dec7a4",
+      "sections": {
+        "heater_fan extruder": {
+          "pin": "PB0"
+        }
+      },
+      "heaters": {
+        "extruder": "PC3"
+      }
+    },
+    "printer-twotrees-sapphire-plus-sp-5-v1.1-2021.cfg": {
+      "sha256": "1386636f939da9348381247191876f4836e11a0970080067a3cdaca0f855833a",
+      "sections": {
+        "heater_fan extruder": {
+          "pin": "PB0"
+        }
+      },
+      "heaters": {
+        "extruder": "PC3"
+      }
+    },
+    "printer-twotrees-sapphire-pro-sp-3-2020.cfg": {
+      "sha256": "f3798a40505edf867dcc90ece626d892ef46b70646445bdbef40f1c9f7a2eb9e",
+      "sections": {
+        "heater_fan extruder": {
+          "pin": "PB0"
+        }
+      },
+      "heaters": {
+        "extruder": "PC3"
+      }
+    }
+  }
+}

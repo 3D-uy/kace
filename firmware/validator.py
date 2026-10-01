@@ -1,11 +1,14 @@
 import os
 
-def validate_config(klipper_path="~/klipper", *, requested=None, processor=None):
+def validate_config(klipper_path="~/klipper", *, requested=None, processor=None, board=None):
     """
     Validates the generated Kconfig (.config) file to ensure it's ready for compilation.
     Runs after `make olddefconfig` to check final state.
     Returns (True, "Success") or (False, "Error msg").
     """
+    from .startup_gpio import required_startup_pins
+    if required_startup_pins(board) and (requested is None or processor is None):
+        return False, "Selected-board startup GPIO requires requested configuration and processor"
     config_path = os.path.expanduser(os.path.join(klipper_path, ".config"))
     
     if not os.path.exists(config_path):
@@ -17,7 +20,7 @@ def validate_config(klipper_path="~/klipper", *, requested=None, processor=None)
     if requested is not None:
         from .configuration import klipper_config
         try:
-            expected = klipper_config(requested, processor)
+            expected = klipper_config(requested, processor, board=board)
             resolved = dict(line.split("=", 1) for line in content.splitlines()
                             if line.startswith("CONFIG_") and "=" in line)
             for key, value in expected.items():

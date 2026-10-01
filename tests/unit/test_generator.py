@@ -266,7 +266,7 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
 
     def test_bltouch_includes_bed_mesh(self):
         """probe='BLTouch' must emit a [bed_mesh] section."""
-        parsed = _parsed(bltouch={"sensor_pin": "^PB1", "control_pin": "PB0"})
+        parsed = _parsed(bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"})
         output = _generate(
             parsed,
             _user(
@@ -280,7 +280,7 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
 
     def test_bltouch_uses_virtual_z_endstop(self):
         """With BLTouch, [stepper_z] endstop must be probe:z_virtual_endstop."""
-        parsed = _parsed(bltouch={"sensor_pin": "^PB1", "control_pin": "PB0"})
+        parsed = _parsed(bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"})
         output = _generate(
             parsed,
             _user(probe="BLTouch", probe_x_offset="-38", probe_y_offset="0"),
@@ -301,7 +301,7 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
 
     def test_bltouch_includes_safe_z_home(self):
         """BLTouch must emit a [safe_z_home] section."""
-        parsed = _parsed(bltouch={"sensor_pin": "^PB1", "control_pin": "PB0"})
+        parsed = _parsed(bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"})
         output = _generate(
             parsed,
             _user(probe="BLTouch", probe_x_offset="-38", probe_y_offset="0"),
@@ -310,7 +310,7 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
 
     def test_probe_x_offset_appears_in_output(self):
         """The probe x_offset value must be correctly written into the probe section."""
-        parsed = _parsed(bltouch={"sensor_pin": "^PB1", "control_pin": "PB0"})
+        parsed = _parsed(bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"})
         output = _generate(
             parsed,
             _user(probe="BLTouch", probe_x_offset="-38", probe_y_offset="2"),
@@ -320,7 +320,7 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
 
     def test_cr_touch_keeps_predefined_probe_rendering(self):
         """CR-Touch remains on the existing structured BLTouch-compatible path."""
-        parsed = _parsed(bltouch={"sensor_pin": "^PB1", "control_pin": "PB0"})
+        parsed = _parsed(bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"})
         output = _generate(
             parsed,
             _user(probe="CR-Touch", probe_x_offset="-10", probe_y_offset="4"),
@@ -333,7 +333,7 @@ class TestGenerateConfigProbeBranch(unittest.TestCase):
     def test_custom_probe_inserts_block_without_standard_probe_section(self):
         custom = parse_custom_probe_config("""# keep custom comment
 [probe]
-pin: ^PA1
+pin: ^PB8
 x_offset: -12
 y_offset: 6
 z_offset: -0.8
@@ -352,14 +352,14 @@ samples: 4
 
     def test_guided_custom_probe_renders_collected_klipper_values(self):
         custom = GuidedCustomProbeSettings(
-            pin="^PA1", x_offset=-12, y_offset=6,
+            pin="^PB8", x_offset=-12, y_offset=6,
             samples=2, samples_tolerance=0.5, samples_tolerance_retries=3,
             speed=10.0, samples_result="median", sample_retract_dist=5.0,
         ).to_config()
         output = _generate(_parsed(), _user(probe_kind="custom", custom_probe=custom))
 
         self.assertEqual(output.count("[probe]"), 1)
-        self.assertIn("pin: ^PA1", output)
+        self.assertIn("pin: ^PB8", output)
         self.assertIn("samples_tolerance: 0.5", output)
         self.assertIn("samples_tolerance_retries: 3", output)
         self.assertIn("sample_retract_dist: 5", output)
@@ -367,7 +367,7 @@ samples: 4
     def test_custom_probe_block_is_verbatim_and_has_one_generated_boundary_newline(self):
         block = """# Do not translate this comment
 [probe]
-pin: ^PA1
+pin: ^PB8
 x_offset: -12
 y_offset: 6
 z_offset: 0
@@ -520,10 +520,8 @@ class TestGenerateConfigTMCBranch(unittest.TestCase):
 
     def _uart_parsed(self):
         d = _parsed()
-        d["tmc2209 stepper_x"] = {"uart_pin": "PC11", "tx_pin": "PC10"}
-        d["tmc2209 stepper_y"] = {"uart_pin": "PC11", "tx_pin": "PC10"}
-        d["tmc2209 stepper_z"] = {"uart_pin": "PC11", "tx_pin": "PC10"}
-        d["tmc2209 extruder"]  = {"uart_pin": "PC11", "tx_pin": "PC10"}
+        for address, target in enumerate(("stepper_x", "stepper_y", "stepper_z", "extruder")):
+            d[f"tmc2209 {target}"] = {"run_current": "0.580", "uart_pin": "PC11", "tx_pin": "PC10", "uart_address": str(address)}
         return d
 
     def test_standard_driver_no_tmc_section(self):
@@ -757,7 +755,7 @@ class TestGenerateConfigSideEffects(unittest.TestCase):
 
     def test_user_data_receives_bed_mesh_key_with_probe(self):
         """After generate_config() with a probe, user_data must contain 'bed_mesh'."""
-        parsed = _parsed(bltouch={"sensor_pin": "^PB1", "control_pin": "PB0"})
+        parsed = _parsed(bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"})
         user = _user(probe="BLTouch", probe_x_offset="-38", probe_y_offset="0")
         self.assertNotIn("bed_mesh", user)
         _generate(parsed, user)
@@ -803,9 +801,9 @@ class TestGenerateConfigThermistors(unittest.TestCase):
 
     def test_bed_thermistor_in_output(self):
         output = _generate(
-            _parsed(), _user(bed_thermistor="NTC 100K beta 3950")
+            _parsed(), _user(bed_thermistor="Generic 3950")
         )
-        self.assertIn("sensor_type: NTC 100K beta 3950", output)
+        self.assertIn("sensor_type: Generic 3950", output)
 
 
 @_skip_no_jinja2
@@ -934,43 +932,48 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
         self.assertIn("DANGER: THIS COMBINATION IS UNSAFE / HIGH RISK", output)
         self.assertIn("# [t5uid1]", output)
 
-    def test_display_choice_recommended_adapter(self):
-        # Choose compatible_with_adapter display in wizard
+    def test_display_adapter_renderer_keeps_fields_inactive(self):
+        # Exercise rendering in isolation; real unreviewed DWIN/UART selection
+        # is rejected before rendering (test_display_bus_evidence.py).
+        from core.generator import _render_display_blocks
         parsed = _parsed()
-        user = _user(display_choice="manual:dwin_set", board="generic-creality-v4.2.2.cfg")
-        output = _generate(parsed, user)
+        user = _user(display_choice="manual:dwin_set", board="generic-ramps.cfg", mcu_type="atmega2560")
+        with patch("core.display_checker.classify_hardware_combination", return_value={
+                "compatibility_class": "compatible_with_adapter"}):
+            output = _render_display_blocks(user, {}, parsed)
         self.assertIn("# DISPLAY: DWIN_SET", output)
         self.assertIn("# Compatibility: COMPATIBLE_WITH_ADAPTER", output)
         self.assertIn("WARNING: ADAPTER OR WIRING MODIFICATION REQUIRED", output)
         self.assertIn("# [dwin_set]", output)
+        self.assertNotIn("\n[dwin_set]", output)
 
     def test_display_choice_experimental(self):
         # An unknown display cannot render an active, incomplete Klipper section.
         parsed = _parsed()
         user = _user(display_choice="manual:some_unknown_display")
-        with self.assertRaisesRegex(GenerationError, "no complete profile section"):
+        with self.assertRaisesRegex(GenerationError, "Unknown display hardware compatibility"):
             _generate(parsed, user)
 
-    def test_display_choice_fully_compatible_with_existing_fields(self):
-        # Choose fully compatible display in wizard with existing fields in parsed
+    def test_existing_fields_do_not_qualify_display_hardware(self):
+        # Controller settings and known EXP connectors do not identify a module.
         parsed = _parsed(display={"lcd_type": "st7920", "contrast": "40"})
-        user = _user(display_choice="manual:display")
-        output = _generate(parsed, user)
-        self.assertIn("[display]", output)
-        self.assertIn("lcd_type: st7920", output)
-        self.assertIn("contrast: 40", output)
+        user = _user(display_choice="manual:display", board="generic-bigtreetech-skr-v1.4.cfg", mcu_type="lpc1768")
+        with self.assertRaisesRegex(GenerationError, "Unknown display hardware"):
+            _generate(parsed, user)
 
-    def test_auto_mode_detected_displays(self):
-        # Auto mode: no display_choice, detect from parsed config
-        parsed = _parsed(t5uid1={"data_pin": "PC0"}, display={"lcd_type": "st7920"})
-        user = _user() # display_choice is None (auto mode)
+    def test_auto_mode_unsafe_display_remains_commented(self):
+        parsed = _parsed(t5uid1={"data_pin": "PC0"})
+        user = _user(board="generic-bigtreetech-skr-v1.4.cfg", mcu_type="lpc1768") # display_choice is None (auto mode)
         output = _generate(parsed, user)
         # Should render t5uid1 as commented (since t5uid1 is unsafe/unsupported)
         self.assertIn("# [t5uid1]", output)
         self.assertIn("# data_pin: TODO # WAS: PC0", output)
-        # Should render display as active (fully compatible)
-        self.assertIn("[display]", output)
-        self.assertIn("lcd_type: st7920", output)
+
+    def test_auto_mode_mixed_unsafe_and_unknown_display_is_rejected(self):
+        parsed = _parsed(t5uid1={"data_pin": "PC0"}, display={"lcd_type": "st7920"})
+        user = _user(board="generic-bigtreetech-skr-v1.4.cfg", mcu_type="lpc1768")
+        with self.assertRaisesRegex(GenerationError, "Unknown display hardware"):
+            _generate(parsed, user)
 
     def test_comment_translation_replaced(self):
         # Test line 97: translation replacement
@@ -1034,13 +1037,42 @@ class TestGenerateConfigFanBranch(unittest.TestCase):
         self.assertIn("pin: PE5", output)
 
     def test_fan_disabled(self):
-        # Setting part cooling fan to 'none' disables it / leaves it commented out
+        # Klipper requires pin for an active [fan]; disabling omits the section.
         parsed = _parsed(fan={"pin": "PA8"})
         user = _user(fan_part_cooling_pin="none")
         output = _generate(parsed, user)
-        self.assertIn("[fan]", output)
-        self.assertIn("# pin: TODO", output)
+        self.assertNotIn("[fan]", output)
+        self.assertNotIn("# pin: TODO", output)
         self.assertNotIn("pin: PA8", output)
+
+    def test_absent_fan_is_not_emitted(self):
+        parsed = _parsed()
+        del parsed["fan"]
+        self.assertNotIn("[fan]", _generate(parsed, _user()))
+
+    def test_configured_fan_requires_nonempty_pin(self):
+        for fields in ({}, {"pin": ""}, {"pin": "   "}, {"pin": None}):
+            with self.subTest(fields=fields):
+                with self.assertRaisesRegex(GenerationError, "fan.*pin"):
+                    _generate(_parsed(fan=fields), _user())
+
+    def test_missing_fan_pin_does_not_publish_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = os.path.join(directory, "printer.cfg")
+            with self.assertRaises(GenerationError):
+                generate_config(_parsed(fan={}), _user(), output_path=target, verbose=False)
+            self.assertFalse(os.path.exists(target))
+
+    def test_explicitly_disabled_incomplete_fan_is_omitted(self):
+        output = _generate(_parsed(fan={}), _user(fan_part_cooling_pin="none"))
+        self.assertNotIn("[fan]", output)
+
+    def test_custom_fan_without_board_fan(self):
+        parsed = _parsed()
+        del parsed["fan"]
+        output = _generate(parsed, _user(fan_part_cooling_pin="PA8"))
+        self.assertIn("[fan]", output)
+        self.assertIn("pin: PA8", output)
 
 
 @_skip_no_jinja2

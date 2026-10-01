@@ -72,34 +72,27 @@ class TestPinCollisionValidation(unittest.TestCase):
 class TestDisplayVoltageSafety(unittest.TestCase):
 
     def test_rp2040_voltage_safety_checks(self):
-        """Ensure RP2040 3.3V-only limits generate mandatory warnings for 5V display logic."""
-        from core.display_checker import classify_hardware_combination, run_manual_selection_analysis
-        
-        parsed_cfg = {}
-        board_file = "generic-skr-pico-rp2040.cfg" # Inferred as rp2040 (3.3V_only tolerance)
-        
-        # 1. DWIN display requires 5V logic feedback (WS2812/5V rules)
-        # Verify custom voltage checks flag danger
-        res_dwin = run_manual_selection_analysis("dwin_set", board_file, "rp2040", parsed_cfg)
-        self.assertEqual(res_dwin["voltage_validation"]["result"], "danger")
-        self.assertIn("RP2040 GPIO pins", res_dwin["voltage_validation"]["detail"])
-        
-        # 2. NeopixelWS2812 expected level shifter mods
-        res_neo = run_manual_selection_analysis("neopixel", board_file, "rp2040", parsed_cfg)
-        self.assertEqual(res_neo["voltage_validation"]["result"], "danger")
-        self.assertTrue(any("level shifter" in m.lower() for m in res_neo["required_modifications"]))
+        """Known board voltage conflicts remain unsafe without generic wiring advice."""
+        from core.display_checker import run_manual_selection_analysis
+
+        board_file = "generic-bigtreetech-skr-pico-v1.0.cfg"
+        for display in ("dwin_set", "neopixel"):
+            with self.subTest(display=display):
+                result = run_manual_selection_analysis(display, board_file, "rp2040", {})
+                self.assertEqual(result["voltage_validation"]["result"], "danger")
+                self.assertEqual(result["compatibility_class"], "unsafe")
+                self.assertNotEqual(result["confidence_level"], "High")
 
     def test_stm32_voltage_safety_checks(self):
-        """Verify STM32 3.3V-tolerant MCU triggers warnings rather than absolute blocks for 5V logic."""
+        """A family name does not establish selected GPIO tolerance or wiring."""
         from core.display_checker import run_manual_selection_analysis
-        
-        parsed_cfg = {}
-        board_file = "generic-creality-v4.2.2.cfg" # Inferred as stm32 (3.3V_tolerant tolerance)
-        
-        res_dwin = run_manual_selection_analysis("dwin_set", board_file, "stm32f103", parsed_cfg)
-        # Should be a warning/unsafe default, but let's check exact outcome
-        self.assertEqual(res_dwin["voltage_validation"]["result"], "warn")
-        self.assertIn("5V-tolerant", res_dwin["voltage_validation"]["detail"])
+
+        result = run_manual_selection_analysis(
+            "dwin_set", "generic-creality-v4.2.2.cfg", "stm32f103", {})
+        self.assertEqual(result["voltage_validation"]["result"], "unknown")
+        self.assertEqual(result["confidence_level"], "Unknown")
+        self.assertNotEqual(result["compatibility_class"], "fully_compatible")
+        self.assertNotIn("Board MCU is 5V-tolerant", str(result))
 
 
 class TestProbeOffsetVisualizerHardening(unittest.TestCase):
@@ -203,7 +196,8 @@ class TestDriverSelectionSafety(unittest.TestCase):
             mock_select.return_value = "TMC2209"
             
             # Beginner mode to force recommendation formatting
-            with patch("core.translations.get_mode", return_value="Beginner"):
+            with patch("core.translations.get_mode", return_value="Beginner"), \
+                    patch("core.translations._state._current_lang", "English"):
                 _step_driver_type({"board": "generic-skr.cfg"})
                 
                 # Check choices passed to questionary
@@ -211,26 +205,20 @@ class TestDriverSelectionSafety(unittest.TestCase):
                 names = [c.title if hasattr(c, 'title') else c.get('name', '') for c in choices]
                 
                 # Recommended matching choice TMC2209 should have recommended flag
-                self.assertTrue(any("TMC2209" in n and "Recommended" in n for n in names))
+                from core.terminal import WARNING, RESET
+                self.assertIn(f"TMC2209 {WARNING}(recommended){RESET}", names)
                 # Non-matching standard driver should show Warning/Not Recommended
-                self.assertTrue(any("None (Standard)" in n and "Not Recommended" in n for n in names))
+                standard = next(c for c in choices if getattr(c, "value", None) == "None (Standard)")
+                self.assertEqual(
+                    standard.title,
+                    "Other STEP/DIR driver (no UART/SPI)  (Not Recommended for integrated TMC)",
+                )
 
 
 class TestBackupRollbackIntegration(unittest.TestCase):
 
     def test_multi_mcu_pin_ownership_validation(self):
-        """Verify pin collision detection with MCU prefix stripping.
-
-        Because KACE strips MCU prefixes before collision checks, pins on ANY
-        MCU (toolhead:, mcu:, z:, etc.) that share the same physical identifier
-        are detected as collisions.  The full rule set is:
-
-        - gpio5 vs gpio5           -> collision (same bare pin)
-        - toolhead:gpio5 vs gpio5  -> collision (prefix stripped -> same pin)
-        - gpio5 vs toolhead:gpio5  -> collision (prefix stripped -> same pin)
-        - mcu:PB1 vs PB1           -> collision
-        - z:P1.27 vs P1.27         -> collision
-        """
+        """MCU ownership distinguishes GPIOs; mcu: names the primary MCU."""
         from core.wizard.steps.sensors import make_pin_validator_with_collision_check
 
         # ── RP2040 gpio collision tests ────────────────────────────
@@ -246,14 +234,14 @@ class TestBackupRollbackIntegration(unittest.TestCase):
         # gpio5 conflicts with gpio5 in stepper_x
         self.assertNotEqual(validator_rp("gpio5"), True)
 
-        # toolhead:gpio5 -> stripped to GPIO5 -> collides with gpio5 in stepper_x
-        self.assertNotEqual(validator_rp("toolhead:gpio5"), True,
-                            "toolhead:gpio5 should collide with gpio5")
+        # The same GPIO number on another MCU is a different physical line.
+        self.assertEqual(validator_rp("toolhead:gpio5"), True)
 
-        # modifier variants all collapse to GPIO5 -> collision
+        # Modifiers belong before the namespace, and do not change ownership.
         self.assertNotEqual(validator_rp("toolhead:!gpio5"), True)
-        self.assertNotEqual(validator_rp("!toolhead:gpio5"), True)
-        self.assertNotEqual(validator_rp("^toolhead:gpio5"), True)
+        self.assertEqual(validator_rp("!toolhead:gpio5"), True)
+        self.assertEqual(validator_rp("^toolhead:gpio5"), True)
+        self.assertNotEqual(validator_rp("^mcu:gpio5"), True)
 
         # gpio10 is unused -> no collision
         self.assertEqual(validator_rp("gpio10"), True)
@@ -271,7 +259,7 @@ class TestBackupRollbackIntegration(unittest.TestCase):
         # Direct bare pin collision
         self.assertNotEqual(validator_stm("PB1"), True)
 
-        # mcu:PB1 -> stripped to PB1 -> collides
+        # mcu:PB1 explicitly names the primary MCU and still collides.
         self.assertNotEqual(validator_stm("mcu:PB1"), True,
                             "mcu:PB1 should collide with PB1")
 
@@ -291,9 +279,8 @@ class TestBackupRollbackIntegration(unittest.TestCase):
         # Bare pin collision
         self.assertNotEqual(validator_lpc("P1.27"), True)
 
-        # z:P1.27 -> stripped to P1.27 -> collides
-        self.assertNotEqual(validator_lpc("z:P1.27"), True,
-                            "z:P1.27 should collide with P1.27")
+        # z:P1.27 belongs to a different MCU.
+        self.assertEqual(validator_lpc("z:P1.27"), True)
 
         # P1.28 is unused -> no collision
         self.assertEqual(validator_lpc("P1.28"), True)

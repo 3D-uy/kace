@@ -113,6 +113,28 @@ class LocalInstallationTests(unittest.TestCase):
             with self.assertRaises(ConfigConflictError):
                 transport.verify_active_configuration(plan)
 
+    def test_loaded_macro_comparison_uses_klipper_comment_rules(self):
+        from core.config_transaction import MoonrakerConfigTransport, ConfigConflictError
+        generated = b'''[mcu]
+serial: test
+[gcode_macro RESUME]
+gcode:
+    {% set ready = True # inline Jinja comment
+        if params.OK|default(1)|int else False %} ; trailing comment
+    RESPOND MSG="a;b"
+    G28 X # home X
+'''
+        plan = build_managed_config_plan(generated, None, {})
+        loaded = '\n{% set ready = True\nif params.OK|default(1)|int else False %}\nRESPOND MSG="a;b"\nG28 X'
+        active = {'mcu': {'serial': 'test'}, 'gcode_macro RESUME': {'gcode': loaded}}
+        body = {'result': {'status': {'configfile': {'config': active}}}}
+        transport = MoonrakerConfigTransport('localhost', 7125)
+        with patch('core.moonraker._get', return_value=(True, '', body)):
+            transport.verify_active_configuration(plan)
+            active['gcode_macro RESUME']['gcode'] = loaded.replace('G28 X', 'G28 Y')
+            with self.assertRaises(ConfigConflictError):
+                transport.verify_active_configuration(plan)
+
     def test_root_layout_keeps_user_sections_and_calibrated_extrusion(self):
         from core.managed_config import MANAGED_END
         generated = GENERATED + b'[extruder]\nrotation_distance: 22\n'
@@ -151,6 +173,9 @@ class LocalInstallationTests(unittest.TestCase):
         from core.translations import set_lang, get_lang
         self.addCleanup(set_lang, get_lang())
         set_lang('Español')
+        saved_config = self.root / 'saved-printer.cfg'
+        saved_config.write_bytes(GENERATED)
+        expanduser = os.path.expanduser
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.dict(os.environ, {'KACE_AUTO': '1', 'KACE_FIRMWARE_WORKFLOW_PATH': checkpoint_path}))
             for name in ('print_kace_banner', 'print_summary', 'time.sleep'):
@@ -158,6 +183,8 @@ class LocalInstallationTests(unittest.TestCase):
             stack.enter_context(patch('kace.check_display_compatibility', return_value=[]))
             stack.enter_context(patch('kace.extract_mcu_serial', return_value=user['mcu_path']))
             stack.enter_context(patch('kace.os.path.isfile', return_value=True))
+            stack.enter_context(patch('kace.os.path.expanduser', side_effect=lambda p:
+                str(saved_config) if p == '~/kace/printer.cfg' else expanduser(p)))
             stack.enter_context(patch('kace.numbered_select', return_value='moonraker'))
             stack.enter_context(patch('kace.deploy_moonraker', side_effect=lambda _: _config_result_to_workflow(self.transaction())))
             wizard = stack.enter_context(patch('kace.run_wizard', side_effect=AssertionError('must resume')))

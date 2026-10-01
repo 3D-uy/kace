@@ -23,11 +23,31 @@
 # --------------------------------------------------
 # MCU
 # --------------------------------------------------
+{%- for name, options in pins['_custom_thermistors'].items() %}
+[{{ name }}]
+{% for option, value in options.items() %}{{ option }}: {{ value }}
+{% endfor %}
+{% endfor %}
+{%- for name, options in pins['_adc_scaled'].items() %}
+[{{ name }}]
+{% for option, value in options.items() %}{{ option }}: {{ value }}
+{% endfor %}
+{% endfor %}
 [mcu]
-{%- if user.mcu_path and ('lpc1769' in user.mcu_path | lower or 'lpc1768' in user.mcu_path | lower) %}
+{%- if user.mcu_restart_method %}
+{%- if user.mcu_restart_method == 'command' and user.mcu_path and ('lpc1769' in user.mcu_path | lower or 'lpc1768' in user.mcu_path | lower) %}
 restart_method: command # Required for LPC176x boards (SKR 1.4/1.4 Turbo) to prevent USB hang on FIRMWARE_RESTART
+{%- else %}
+restart_method: {{ user.mcu_restart_method }}
+{%- endif %}
 {%- endif %}
 serial: {{ user.mcu_path | default('/dev/serial/by-id/TODO') }} # Serial connection to the printer controller board. Auto-detected by KACE. Verify in /dev/serial/by-id/ if connection fails.
+{%- for name, options in pins['_host_adc_mcus'].items() %}
+
+[{{ name }}]
+{% for option, value in options.items() %}{{ option }}: {{ value }}
+{% endfor %}
+{% endfor %}
 
 # --------------------------------------------------
 # Printer
@@ -37,6 +57,9 @@ serial: {{ user.mcu_path | default('/dev/serial/by-id/TODO') }} # Serial connect
 kinematics: {{ user.kinematics }} # Printer kinematics type (cartesian, corexy)
 max_velocity: {{ user.max_velocity }} # Maximum velocity (in mm/s) of the toolhead
 max_accel: {{ user.max_accel }} # Maximum acceleration (in mm/s^2) of the toolhead
+{%- if user.minimum_cruise_ratio is defined %}
+minimum_cruise_ratio: {{ user.minimum_cruise_ratio }}
+{%- endif %}
 max_z_velocity: {{ user.max_z_velocity }} # Maximum velocity (in mm/s) of movement along the z axis
 max_z_accel: {{ user.max_z_accel }} # Maximum acceleration (in mm/s^2) of movement along the z axis
 
@@ -61,7 +84,13 @@ step_pin: {{ pins['stepper_x'].get('step_pin', 'TODO') }} # Step pin for the X s
 dir_pin: {{ pins['stepper_x'].get('dir_pin', 'TODO') }} # Direction pin. Add or remove "!" to invert motor direction
 enable_pin: {{ pins['stepper_x'].get('enable_pin', 'TODO') }} # Enable pin for the stepper driver
 {%- endif %}
+{%- if 'step_pulse_duration' in pins.get('stepper_x', {}) %}
+step_pulse_duration: {{ pins['stepper_x']['step_pulse_duration'] }}
+{%- endif %}
 microsteps: {{ user.microsteps_x }} # Number of microsteps per full step
+{%- if user.value_provenance.get('full_steps_per_rotation_x') != 'SAFE_DEFAULT' %}
+full_steps_per_rotation: {{ user.full_steps_per_rotation_x }}
+{%- endif %}
 rotation_distance: {{ user.rotation_distance_x | default(40, true) }} # Distance in mm the axis travels per full rotation of the motor
 {%- if user.gear_ratio_x %}
 gear_ratio: {{ user.gear_ratio_x }} # Gear ratio of the axis
@@ -71,6 +100,14 @@ position_endstop: {{ user.x_position_endstop | default(0) }} # Location of the e
 position_min: {{ user.x_position_min | default(0) }} # Minimum valid X position
 position_max: {{ user.x_position_max | default(user.x_size) }} # Maximum valid X position
 homing_speed: {{ user.homing_speed_x }} # Maximum velocity (in mm/s) of the stepper when homing
+{%- for option in ('second_homing_speed', 'homing_retract_speed') %}
+{%- if user[option ~ '_x'] is defined %}
+{{ option }}: {{ user[option ~ '_x'] }}
+{%- endif %}
+{%- endfor %}
+{%- if user.homing_retract_dist_x is defined %}
+homing_retract_dist: {{ user.homing_retract_dist_x }}
+{%- endif %}
 {%- if user.homing_positive_dir_x and user.value_provenance.get('homing_positive_dir_x') != 'INFERRED' %}
 homing_positive_dir: {{ user.homing_positive_dir_x }} # Preserve profile homing direction
 {%- endif %}
@@ -81,7 +118,13 @@ step_pin: {{ pins['stepper_y'].get('step_pin', 'TODO') }} # Step pin for the Y s
 dir_pin: {{ pins['stepper_y'].get('dir_pin', 'TODO') }} # Direction pin. Add or remove "!" to invert motor direction
 enable_pin: {{ pins['stepper_y'].get('enable_pin', 'TODO') }} # Enable pin for the stepper driver
 {%- endif %}
+{%- if 'step_pulse_duration' in pins.get('stepper_y', {}) %}
+step_pulse_duration: {{ pins['stepper_y']['step_pulse_duration'] }}
+{%- endif %}
 microsteps: {{ user.microsteps_y }} # Number of microsteps per full step
+{%- if user.value_provenance.get('full_steps_per_rotation_y') != 'SAFE_DEFAULT' %}
+full_steps_per_rotation: {{ user.full_steps_per_rotation_y }}
+{%- endif %}
 rotation_distance: {{ user.rotation_distance_y | default(40, true) }} # Distance in mm the axis travels per full rotation of the motor
 {%- if user.gear_ratio_y %}
 gear_ratio: {{ user.gear_ratio_y }} # Gear ratio of the axis
@@ -91,6 +134,14 @@ position_endstop: {{ user.y_position_endstop | default(0) }} # Location of the e
 position_min: {{ user.y_position_min | default(0) }} # Minimum valid Y position
 position_max: {{ user.y_position_max | default(user.y_size) }} # Maximum valid Y position
 homing_speed: {{ user.homing_speed_y }} # Maximum velocity (in mm/s) of the stepper when homing
+{%- for option in ('second_homing_speed', 'homing_retract_speed') %}
+{%- if user[option ~ '_y'] is defined %}
+{{ option }}: {{ user[option ~ '_y'] }}
+{%- endif %}
+{%- endfor %}
+{%- if user.homing_retract_dist_y is defined %}
+homing_retract_dist: {{ user.homing_retract_dist_y }}
+{%- endif %}
 {%- if user.homing_positive_dir_y and user.value_provenance.get('homing_positive_dir_y') != 'INFERRED' %}
 homing_positive_dir: {{ user.homing_positive_dir_y }} # Preserve profile homing direction
 {%- endif %}
@@ -101,9 +152,15 @@ step_pin: {{ pins['stepper_z'].get('step_pin', 'TODO') }} # Step pin for the Z s
 dir_pin: {{ pins['stepper_z'].get('dir_pin', 'TODO') }} # Direction pin. Add or remove "!" to invert motor direction
 enable_pin: {{ pins['stepper_z'].get('enable_pin', 'TODO') }} # Enable pin for the stepper driver
 {%- endif %}
+{%- if 'step_pulse_duration' in pins.get('stepper_z', {}) %}
+step_pulse_duration: {{ pins['stepper_z']['step_pulse_duration'] }}
+{%- endif %}
 microsteps: {{ user.microsteps_z }} # Number of microsteps per full step
+{%- if user.value_provenance.get('full_steps_per_rotation_z') != 'SAFE_DEFAULT' %}
+full_steps_per_rotation: {{ user.full_steps_per_rotation_z }}
+{%- endif %}
 rotation_distance: {{ user.rotation_distance_z | default(8, true) }} # Distance in mm the axis travels per full rotation of the motor
-{%- if user.gear_ratio_z %}
+{%- if user.gear_ratio_z and user.value_provenance.get('gear_ratio_z') != 'SAFE_DEFAULT' %}
 gear_ratio: {{ user.gear_ratio_z }} # Gear ratio of the axis
 {%- endif %}
 {%- if user.probe_configuration.uses_virtual_z_endstop %}
@@ -114,6 +171,14 @@ position_endstop: {{ user.z_position_endstop | default(0) }} # Location of the e
 {%- endif %}
 position_min: {{ user.z_position_min | default(0) }} # Minimum valid Z position
 position_max: {{ user.z_position_max | default(user.z_size) }} # Maximum valid Z position
+{%- for option in ('homing_speed', 'second_homing_speed', 'homing_retract_speed') %}
+{%- if user[option ~ '_z'] is defined %}
+{{ option }}: {{ user[option ~ '_z'] }}
+{%- endif %}
+{%- endfor %}
+{%- if user.homing_retract_dist_z is defined %}
+homing_retract_dist: {{ user.homing_retract_dist_z }}
+{%- endif %}
 {%- if user.homing_positive_dir_z and user.value_provenance.get('homing_positive_dir_z') != 'INFERRED' %}
 homing_positive_dir: {{ user.homing_positive_dir_z }} # Preserve profile homing direction
 {%- endif %}
@@ -131,8 +196,20 @@ step_pin: TODO # Step pin for the Z1 stepper driver
 dir_pin: TODO # Direction pin. Add or remove "!" to invert motor direction
 enable_pin: TODO # Enable pin for the stepper driver
 {%- endif %}
-microsteps: {{ user.microsteps_z }} # Number of microsteps per full step
-rotation_distance: {{ user.rotation_distance_z }} # Distance in mm the axis travels per full rotation of the motor
+{%- if 'stepper_z1' in pins._additional_z_endstops %}
+endstop_pin: {{ pins._additional_z_endstops['stepper_z1'] }}
+{%- endif %}
+{%- if 'step_pulse_duration' in pins.get('stepper_z1', {}) %}
+step_pulse_duration: {{ pins['stepper_z1']['step_pulse_duration'] }}
+{%- endif %}
+microsteps: {{ user.microsteps_z1 }} # Number of microsteps per full step
+{%- if user.value_provenance.get('full_steps_per_rotation_z1') != 'SAFE_DEFAULT' %}
+full_steps_per_rotation: {{ user.full_steps_per_rotation_z1 }}
+{%- endif %}
+rotation_distance: {{ user.rotation_distance_z1 }} # Distance in mm the axis travels per full rotation of the motor
+{%- if user.gear_ratio_z1 and user.value_provenance.get('gear_ratio_z1') != 'SAFE_DEFAULT' %}
+gear_ratio: {{ user.gear_ratio_z1 }} # Gear ratio of this Z motor
+{%- endif %}
 {%- endif %}
 
 {%- if user.z_motors | int >= 3 %}
@@ -148,8 +225,20 @@ step_pin: TODO # Step pin for the Z2 stepper driver
 dir_pin: TODO # Direction pin. Add or remove "!" to invert motor direction
 enable_pin: TODO # Enable pin for the stepper driver
 {%- endif %}
-microsteps: {{ user.microsteps_z }} # Number of microsteps per full step
-rotation_distance: {{ user.rotation_distance_z }} # Distance in mm the axis travels per full rotation of the motor
+{%- if 'stepper_z2' in pins._additional_z_endstops %}
+endstop_pin: {{ pins._additional_z_endstops['stepper_z2'] }}
+{%- endif %}
+{%- if 'step_pulse_duration' in pins.get('stepper_z2', {}) %}
+step_pulse_duration: {{ pins['stepper_z2']['step_pulse_duration'] }}
+{%- endif %}
+microsteps: {{ user.microsteps_z2 }} # Number of microsteps per full step
+{%- if user.value_provenance.get('full_steps_per_rotation_z2') != 'SAFE_DEFAULT' %}
+full_steps_per_rotation: {{ user.full_steps_per_rotation_z2 }}
+{%- endif %}
+rotation_distance: {{ user.rotation_distance_z2 }} # Distance in mm the axis travels per full rotation of the motor
+{%- if user.gear_ratio_z2 and user.value_provenance.get('gear_ratio_z2') != 'SAFE_DEFAULT' %}
+gear_ratio: {{ user.gear_ratio_z2 }} # Gear ratio of this Z motor
+{%- endif %}
 {%- endif %}
 
 {%- if user.z_motors | int >= 4 %}
@@ -165,8 +254,20 @@ step_pin: TODO # Step pin for the Z3 stepper driver
 dir_pin: TODO # Direction pin. Add or remove "!" to invert motor direction
 enable_pin: TODO # Enable pin for the stepper driver
 {%- endif %}
-microsteps: {{ user.microsteps_z }} # Number of microsteps per full step
-rotation_distance: {{ user.rotation_distance_z }} # Distance in mm the axis travels per full rotation of the motor
+{%- if 'stepper_z3' in pins._additional_z_endstops %}
+endstop_pin: {{ pins._additional_z_endstops['stepper_z3'] }}
+{%- endif %}
+{%- if 'step_pulse_duration' in pins.get('stepper_z3', {}) %}
+step_pulse_duration: {{ pins['stepper_z3']['step_pulse_duration'] }}
+{%- endif %}
+microsteps: {{ user.microsteps_z3 }} # Number of microsteps per full step
+{%- if user.value_provenance.get('full_steps_per_rotation_z3') != 'SAFE_DEFAULT' %}
+full_steps_per_rotation: {{ user.full_steps_per_rotation_z3 }}
+{%- endif %}
+rotation_distance: {{ user.rotation_distance_z3 }} # Distance in mm the axis travels per full rotation of the motor
+{%- if user.gear_ratio_z3 and user.value_provenance.get('gear_ratio_z3') != 'SAFE_DEFAULT' %}
+gear_ratio: {{ user.gear_ratio_z3 }} # Gear ratio of this Z motor
+{%- endif %}
 {%- endif %}
 
 [extruder]
@@ -177,7 +278,13 @@ enable_pin: {{ pins['extruder'].get('enable_pin', 'TODO') }} # Enable pin for th
 heater_pin: {{ pins['extruder'].get('heater_pin', 'TODO') }} # Pin connected to the hotend heater cartridge
 sensor_pin: {{ pins['extruder'].get('sensor_pin', 'TODO') }} # Pin connected to the hotend thermistor
 {%- endif %}
+{%- if 'step_pulse_duration' in pins.get('extruder', {}) %}
+step_pulse_duration: {{ pins['extruder']['step_pulse_duration'] }}
+{%- endif %}
 microsteps: {{ user.microsteps_e }} # Number of microsteps per full step
+{%- if user.value_provenance.get('full_steps_per_rotation_e') != 'SAFE_DEFAULT' %}
+full_steps_per_rotation: {{ user.full_steps_per_rotation_e }}
+{%- endif %}
 rotation_distance: {{ user.rotation_distance_e | default(33.5, true) }} # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
 {%- if user.gear_ratio_e %}
 gear_ratio: {{ user.gear_ratio_e }} # Gear ratio of the extruder
@@ -185,6 +292,11 @@ gear_ratio: {{ user.gear_ratio_e }} # Gear ratio of the extruder
 nozzle_diameter: {{ user.nozzle_diameter }} # Diameter of the installed nozzle in mm
 filament_diameter: {{ user.filament_diameter }} # Diameter of the filament being used
 sensor_type: {{ user.hotend_thermistor | default('EPCOS 100K B57560G104F') }} # Type of thermistor used for the hotend
+{%- for option in ('pullup_resistor', 'inline_resistor', 'adc_voltage', 'voltage_offset') %}
+{%- if option in pins.get('extruder', {}) %}
+{{ option }}: {{ pins['extruder'][option] }}
+{%- endif %}
+{%- endfor %}
 control: {{ user.hotend_control }} # Temperature control algorithm
 {%- if user.hotend_control | lower == 'pid' %}
 pid_Kp: {{ user.hotend_pid_kp }} # PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=extruder TARGET=200)
@@ -193,6 +305,9 @@ pid_Kd: {{ user.hotend_pid_kd }} # PID derivative --- manual configuration --- (
 {%- endif %}
 min_temp: {{ user.hotend_min_temp }} # Minimum safe temperature
 max_temp: {{ user.hotend_max_temp }} # Maximum safe temperature
+{%- for option, value in user['_extruder_options'].items() %}
+{{ option }}: {{ value }}
+{%- endfor %}
 
 
 {%- if user.probe_configuration.generates_safe_z_home or user.probe_configuration.generates_bed_mesh or user.probe_configuration.render_block() %}
@@ -206,8 +321,15 @@ __KACE_VERBATIM_CUSTOM_PROBE_END__
 {%- elif user.probe_configuration.renders_structured_section %}
 [{{ user.probe_configuration.structured_section_name }}]
 {%- if user.probe_configuration.kind in ('bltouch', 'cr_touch') %}
-pin_up_touch_mode_reports_triggered: False # Prevents startup probe verification loop on BLTouch V3/V3.1 and clones
-probe_with_touch_mode: True # Use touch mode for more reliable probing
+{%- for option, entry in pins['_bltouch_sampling'].items() %}
+{{ option }}: {{ entry['value'] }}
+{%- endfor %}
+{%- for option, entry in pins['_bltouch_hardware'].items() %}
+{{ option }}: {{ entry['value'] }}
+{%- endfor %}
+{%- for option, entry in pins['_bltouch_flags'].items() %}
+{{ option }}: {{ entry['value'] }}
+{%- endfor %}
 {%- endif %}
 {%- if user.probe_configuration.kind == 'inductive' %}
 {%- set probe_sec = pins.get('probe', pins.get('bltouch', {})) %}
@@ -236,9 +358,11 @@ mesh_min: {{ user.bed_mesh.mesh_min }} # Probing area minimum (derived from phys
 mesh_max: {{ user.bed_mesh.mesh_max }} # Probing area maximum (derived from physical limits)
 probe_count: {{ user.bed_mesh.probe_count }} # Probe grid size (NxN derived from bed size)
 algorithm: {{ user.bed_mesh.algorithm }} # Interpolation algorithm
-{%- if user.bed_mesh.algorithm == 'bicubic' %}
-bicubic_tension: {{ user.bed_mesh.bicubic_tension | default(0.2) }} # Tension of the bicubic curve
-mesh_pps: {{ user.bed_mesh.mesh_pps | default('2, 2') }} # Number of points to interpolate per segment
+{%- if user.bed_mesh.bicubic_tension is defined %}
+bicubic_tension: {{ user.bed_mesh.bicubic_tension }} # Tension of the bicubic curve
+{%- endif %}
+{%- if user.bed_mesh.mesh_pps is defined %}
+mesh_pps: {{ user.bed_mesh.mesh_pps }} # Number of points to interpolate per segment
 {%- endif %}
 {%- if user.bed_mesh.adaptive_margin is defined %}
 adaptive_margin: {{ user.bed_mesh.adaptive_margin }} # Adaptive margin for mesh
@@ -313,25 +437,41 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 # max_adjust: 4                                 # Maximum safety adjustment limit (mm). Stops if exceeded.
 {%- endif %}
 
+{%- if 'fan' in pins %}
 # --------------------------------------------------
 # Part Cooling Fan
 # --------------------------------------------------
 [fan]
-{%- if 'fan' in pins %}
 pin: {{ pins['fan'].get('pin', 'TODO') }} # Pin connected to the part cooling fan
-{%- else %}
-# pin: TODO # Pin connected to the part cooling fan (uncomment and set if available)
+{%- for option in pins['_part_fan_scalar_options'] if option in pins['fan'] %}
+{{ option }}: {{ pins['fan'][option] }}
+{%- endfor %}
 {%- endif %}
 
-{%- if 'heater_fan hotend_fan' in pins %}
+{%- for name, fields in pins['_selected_hotend_fans'].items() %}
 # --------------------------------------------------
 # Hotend Heatsink Fan
 # --------------------------------------------------
-[heater_fan hotend_fan]
-pin: {{ pins['heater_fan hotend_fan'].get('pin', 'TODO') }} # Pin connected to the hotend heatsink fan
-heater: extruder                                # Heater associated with this fan
-heater_temp: 50.0                               # Temperature above which the fan is enabled
+[{{ name }}]
+pin: {{ fields.get('pin', 'TODO') }} # Pin connected to the hotend heatsink fan
+{%- if 'heater' in fields %}
+heater: {{ fields['heater'] }}{% if '\n' not in fields['heater'] %} # Heater associated with this fan{% endif %}
 {%- endif %}
+{%- if 'heater_temp' in fields %}
+heater_temp: {{ fields['heater_temp'] }} # Temperature above which the fan is enabled
+{%- endif %}
+{%- for option in pins['_part_fan_scalar_options'] + ('fan_speed',) if option in fields %}
+{{ option }}: {{ fields[option] }}
+{%- endfor %}
+{%- endfor %}
+{%- for name, fields in pins['_selected_controller_fans'].items() %}
+
+# Controller Cooling Fan
+[{{ name }}]
+{%- for option, value in fields.items() %}
+{{ option }}: {{ value }}
+{%- endfor %}
+{%- endfor %}
 
 # --------------------------------------------------
 # Heated Bed
@@ -343,6 +483,11 @@ heater_pin: {{ pins['heater_bed'].get('heater_pin', 'TODO') }} # Pin connected t
 sensor_pin: {{ pins['heater_bed'].get('sensor_pin', 'TODO') }} # Pin connected to the heated bed thermistor
 {%- endif %}
 sensor_type: {{ user.bed_thermistor | default('EPCOS 100K B57560G104F') }} # Type of thermistor used for the heated bed
+{%- for option in ('pullup_resistor', 'inline_resistor', 'adc_voltage', 'voltage_offset') %}
+{%- if option in pins.get('heater_bed', {}) %}
+{{ option }}: {{ pins['heater_bed'][option] }}
+{%- endif %}
+{%- endfor %}
 control: {{ user.bed_control }} # Temperature control algorithm
 {%- if user.bed_control | lower == 'pid' %}
 pid_Kp: {{ user.bed_pid_kp }} # bed PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=heater_bed TARGET=60)
@@ -359,7 +504,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 
 {%- set d_type = 'tmc2208' if user.driver_type == 'TMC2225' else user.driver_type | lower %}
 
-{% set tmc_x = pins.get('tmc2209 stepper_x', pins.get('tmc2208 stepper_x', pins.get('tmc2130 stepper_x', pins.get('tmc5160 stepper_x', {})))) -%}
+{% set tmc_x = pins._tmc_sections.get(d_type + ' stepper_x', {}) -%}
 {% set has_pins_x = (user.driver_mode == 'UART' and 'uart_pin' in tmc_x) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_x) -%}
 {% set prefix_x = '' if has_pins_x else '# ' -%}
 {{ prefix_x }}[{{ d_type }} stepper_x]
@@ -383,11 +528,18 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {{ prefix_x }}spi_bus: {{ tmc_x.get('spi_bus') }} # SPI bus name
 {%- endif %}
 {%- endif %}
+{%- for key, value in tmc_x.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
+{{ prefix_x }}{{ key }}: {{ value }}
+{%- endfor %}
 {{ prefix_x }}run_current: {{ user.run_current_x }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if user.value_provenance.get('hold_current_x') != 'KLIPPER_DEFAULT' %}
 {{ prefix_x }}hold_current: {{ user.hold_current_x }} # Motor hold current in amps
+{%- endif %}
+{%- if user.value_provenance.get('stealthchop_threshold_x') != 'KLIPPER_DEFAULT' %}
 {{ prefix_x }}stealthchop_threshold: {{ user.stealthchop_threshold_x }} # Set to 0 to use spreadCycle mode
+{%- endif %}
 
-{% set tmc_y = pins.get('tmc2209 stepper_y', pins.get('tmc2208 stepper_y', pins.get('tmc2130 stepper_y', pins.get('tmc5160 stepper_y', {})))) -%}
+{% set tmc_y = pins._tmc_sections.get(d_type + ' stepper_y', {}) -%}
 {% set has_pins_y = (user.driver_mode == 'UART' and 'uart_pin' in tmc_y) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_y) -%}
 {% set prefix_y = '' if has_pins_y else '# ' -%}
 {{ prefix_y }}[{{ d_type }} stepper_y]
@@ -411,11 +563,18 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {{ prefix_y }}spi_bus: {{ tmc_y.get('spi_bus') }} # SPI bus name
 {%- endif %}
 {%- endif %}
+{%- for key, value in tmc_y.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
+{{ prefix_y }}{{ key }}: {{ value }}
+{%- endfor %}
 {{ prefix_y }}run_current: {{ user.run_current_y }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if user.value_provenance.get('hold_current_y') != 'KLIPPER_DEFAULT' %}
 {{ prefix_y }}hold_current: {{ user.hold_current_y }} # Motor hold current in amps
+{%- endif %}
+{%- if user.value_provenance.get('stealthchop_threshold_y') != 'KLIPPER_DEFAULT' %}
 {{ prefix_y }}stealthchop_threshold: {{ user.stealthchop_threshold_y }} # Set to 0 to use spreadCycle mode
+{%- endif %}
 
-{% set tmc_z = pins.get('tmc2209 stepper_z', pins.get('tmc2208 stepper_z', pins.get('tmc2130 stepper_z', pins.get('tmc5160 stepper_z', {})))) -%}
+{% set tmc_z = pins._tmc_sections.get(d_type + ' stepper_z', {}) -%}
 {% set has_pins_z = (user.driver_mode == 'UART' and 'uart_pin' in tmc_z) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_z) -%}
 {% set prefix_z = '' if has_pins_z else '# ' -%}
 {{ prefix_z }}[{{ d_type }} stepper_z]
@@ -439,13 +598,20 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {{ prefix_z }}spi_bus: {{ tmc_z.get('spi_bus') }} # SPI bus name
 {%- endif %}
 {%- endif %}
+{%- for key, value in tmc_z.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
+{{ prefix_z }}{{ key }}: {{ value }}
+{%- endfor %}
 {{ prefix_z }}run_current: {{ user.run_current_z }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if user.value_provenance.get('hold_current_z') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z }}hold_current: {{ user.hold_current_z }} # Motor hold current in amps
+{%- endif %}
+{%- if user.value_provenance.get('stealthchop_threshold_z') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z }}stealthchop_threshold: {{ user.stealthchop_threshold_z }} # Set to 0 to use spreadCycle mode
+{%- endif %}
 
 {%- if user.z_motors | int >= 2 %}
 
-{% set tmc_z1 = pins.get('tmc2209 stepper_z1', pins.get('tmc2208 stepper_z1', pins.get('tmc2130 stepper_z1', pins.get('tmc5160 stepper_z1', {})))) -%}
+{% set tmc_z1 = pins._tmc_sections.get(d_type + ' stepper_z1', {}) -%}
 {% set has_pins_z1 = (user.driver_mode == 'UART' and 'uart_pin' in tmc_z1) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_z1) -%}
 {% set prefix_z1 = '' if has_pins_z1 else '# ' -%}
 {{ prefix_z1 }}[{{ d_type }} stepper_z1]
@@ -469,14 +635,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {{ prefix_z1 }}spi_bus: {{ tmc_z1.get('spi_bus') }} # SPI bus name
 {%- endif %}
 {%- endif %}
+{%- for key, value in tmc_z1.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
+{{ prefix_z1 }}{{ key }}: {{ value }}
+{%- endfor %}
 {{ prefix_z1 }}run_current: {{ user.run_current_z1 }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if user.value_provenance.get('hold_current_z1') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z1 }}hold_current: {{ user.hold_current_z1 }} # Motor hold current in amps
+{%- endif %}
+{%- if user.value_provenance.get('stealthchop_threshold_z1') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z1 }}stealthchop_threshold: {{ user.stealthchop_threshold_z1 }} # Set to 0 to use spreadCycle mode
+{%- endif %}
 {%- endif %}
 
 {%- if user.z_motors | int >= 3 %}
 
-{% set tmc_z2 = pins.get('tmc2209 stepper_z2', pins.get('tmc2208 stepper_z2', pins.get('tmc2130 stepper_z2', pins.get('tmc5160 stepper_z2', {})))) -%}
+{% set tmc_z2 = pins._tmc_sections.get(d_type + ' stepper_z2', {}) -%}
 {% set has_pins_z2 = (user.driver_mode == 'UART' and 'uart_pin' in tmc_z2) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_z2) -%}
 {% set prefix_z2 = '' if has_pins_z2 else '# ' -%}
 {{ prefix_z2 }}[{{ d_type }} stepper_z2]
@@ -500,14 +673,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {{ prefix_z2 }}spi_bus: {{ tmc_z2.get('spi_bus') }} # SPI bus name
 {%- endif %}
 {%- endif %}
+{%- for key, value in tmc_z2.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
+{{ prefix_z2 }}{{ key }}: {{ value }}
+{%- endfor %}
 {{ prefix_z2 }}run_current: {{ user.run_current_z2 }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if user.value_provenance.get('hold_current_z2') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z2 }}hold_current: {{ user.hold_current_z2 }} # Motor hold current in amps
+{%- endif %}
+{%- if user.value_provenance.get('stealthchop_threshold_z2') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z2 }}stealthchop_threshold: {{ user.stealthchop_threshold_z2 }} # Set to 0 to use spreadCycle mode
+{%- endif %}
 {%- endif %}
 
 {%- if user.z_motors | int >= 4 %}
 
-{% set tmc_z3 = pins.get('tmc2209 stepper_z3', pins.get('tmc2208 stepper_z3', pins.get('tmc2130 stepper_z3', pins.get('tmc5160 stepper_z3', {})))) -%}
+{% set tmc_z3 = pins._tmc_sections.get(d_type + ' stepper_z3', {}) -%}
 {% set has_pins_z3 = (user.driver_mode == 'UART' and 'uart_pin' in tmc_z3) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_z3) -%}
 {% set prefix_z3 = '' if has_pins_z3 else '# ' -%}
 {{ prefix_z3 }}[{{ d_type }} stepper_z3]
@@ -531,12 +711,19 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {{ prefix_z3 }}spi_bus: {{ tmc_z3.get('spi_bus') }} # SPI bus name
 {%- endif %}
 {%- endif %}
+{%- for key, value in tmc_z3.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
+{{ prefix_z3 }}{{ key }}: {{ value }}
+{%- endfor %}
 {{ prefix_z3 }}run_current: {{ user.run_current_z3 }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if user.value_provenance.get('hold_current_z3') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z3 }}hold_current: {{ user.hold_current_z3 }} # Motor hold current in amps
+{%- endif %}
+{%- if user.value_provenance.get('stealthchop_threshold_z3') != 'KLIPPER_DEFAULT' %}
 {{ prefix_z3 }}stealthchop_threshold: {{ user.stealthchop_threshold_z3 }} # Set to 0 to use spreadCycle mode
 {%- endif %}
+{%- endif %}
 
-{% set tmc_e = pins.get('tmc2209 extruder', pins.get('tmc2208 extruder', pins.get('tmc2130 extruder', pins.get('tmc5160 extruder', {})))) -%}
+{% set tmc_e = pins._tmc_sections.get(d_type + ' extruder', {}) -%}
 {% set has_pins_e = (user.driver_mode == 'UART' and 'uart_pin' in tmc_e) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_e) -%}
 {% set prefix_e = '' if has_pins_e else '# ' -%}
 {{ prefix_e }}[{{ d_type }} extruder]
@@ -560,18 +747,30 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {{ prefix_e }}spi_bus: {{ tmc_e.get('spi_bus') }} # SPI bus name
 {%- endif %}
 {%- endif %}
+{%- for key, value in tmc_e.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
+{{ prefix_e }}{{ key }}: {{ value }}
+{%- endfor %}
 {{ prefix_e }}run_current: {{ user.run_current_e }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if user.value_provenance.get('hold_current_e') != 'KLIPPER_DEFAULT' %}
 {{ prefix_e }}hold_current: {{ user.hold_current_e }} # Motor hold current in amps
+{%- endif %}
+{%- if user.value_provenance.get('stealthchop_threshold_e') != 'KLIPPER_DEFAULT' %}
 {{ prefix_e }}stealthchop_threshold: {{ user.stealthchop_threshold_e }} # Set to 0 to use spreadCycle mode
+{%- endif %}
 
 {%- endif %}
 
 # --------------------------------------------------
 # EXP1 / EXP2 Pinout
 # --------------------------------------------------
-{%- if 'board_pins' in pins %}
-[board_pins]
-aliases: {{ pins['board_pins'].get('aliases', '\\n    EXP1_1=TODO, EXP1_2=TODO') }} # Define aliases for board pins (e.g., EXP1 and EXP2 headers)
+{%- if pins._board_pin_sections %}
+{%- for section, options in pins._board_pin_sections.items() %}
+[{{ section }}]
+aliases: {{ options.get('aliases', '\\n    EXP1_1=TODO, EXP1_2=TODO') }} # Define aliases for board pins (e.g., EXP1 and EXP2 headers)
+{%- for key, value in options.items() if key == 'mcu' or key.startswith('aliases_') %}
+{{ key }}: {{ value }}
+{%- endfor %}
+{%- endfor %}
 {%- else %}
 # [board_pins]
 # aliases:

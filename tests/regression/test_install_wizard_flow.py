@@ -78,16 +78,21 @@ class TestInstallWizardFlow(unittest.TestCase):
         self._write_executable(fake_bin / "getent", "#!/bin/sh\nexit 0\n")
         self._write_executable(
             fake_bin / "sudo",
+            "#!/bin/sh\nexec \"$@\"\n",
+        )
+        # Intercept the operation itself: root legitimately bypasses sudo.
+        self._write_executable(
+            fake_bin / "mv",
             """
             #!/bin/sh
-            if [ "$KACE_TEST_WRAPPER_FAIL" = "1" ] && [ "$1" = "mv" ]; then
+            if [ "$KACE_TEST_WRAPPER_FAIL" = "1" ]; then
                 for argument in "$@"; do
                     if [ "$argument" = "$KACE_INSTALL_BIN" ]; then
                         exit 42
                     fi
                 done
             fi
-            exec "$@"
+            command -p mv "$@"
             """,
         )
         self._write_executable(fake_bin / "flock", "#!/bin/sh\nexit 0\n")

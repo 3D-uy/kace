@@ -588,7 +588,7 @@ class TestWizardFanAssignment(unittest.TestCase):
 
 
 class TestWizardProfileMerging(unittest.TestCase):
-    def test_run_wizard_merges_profile_pins(self):
+    def test_run_wizard_preserves_hardware_when_identity_is_missing(self):
         from core.wizard import run_wizard
         # We mock WizardRunner.run to return our mocked user_data
         mock_user_data = {
@@ -618,10 +618,10 @@ class TestWizardProfileMerging(unittest.TestCase):
             res = run_wizard()
             
         board_parsed = res.get("board_parsed", {})
-        self.assertEqual(board_parsed["heater_bed"]["heater_pin"], "PD4")
+        self.assertEqual(board_parsed["heater_bed"]["heater_pin"], "PD2")
         self.assertEqual(board_parsed["heater_bed"]["sensor_pin"], "PA6")
-        self.assertEqual(board_parsed["heater_bed"]["sensor_type"], "Generic 3950")
-        self.assertEqual(board_parsed["stepper_x"]["dir_pin"], "!PC5")
+        self.assertNotIn("sensor_type", board_parsed["heater_bed"])
+        self.assertEqual(board_parsed["stepper_x"]["dir_pin"], "PC5")
         self.assertEqual(board_parsed["stepper_x"]["step_pin"], "PD7")
 
     def test_run_wizard_does_not_merge_profile_pins_for_non_stock_board(self):
@@ -669,10 +669,14 @@ class TestWizardProfileMerging(unittest.TestCase):
             res = run_wizard()
 
         board_parsed = res.get("board_parsed", {})
-        # Non-pin properties are merged
-        self.assertEqual(board_parsed["stepper_x"]["rotation_distance"], "32")
-        self.assertEqual(board_parsed["stepper_x"]["position_max"], "300")
-        self.assertEqual(board_parsed["heater_bed"]["sensor_type"], "Generic 3950")
+        # Profile values use the existing resolver, without mutating hardware.
+        from core.profile_values import resolve_generation_values
+        values, provenance = resolve_generation_values(board_parsed, res)
+        self.assertEqual(values["rotation_distance_x"], "32")
+        self.assertEqual(values["x_position_max"], "300")
+        self.assertEqual(values["bed_thermistor"], "Generic 3950")
+        self.assertEqual(provenance["rotation_distance_x"], "PROFILE")
+        self.assertNotIn("rotation_distance", board_parsed["stepper_x"])
 
         # Pin properties are NOT merged/overwritten from profile
         self.assertEqual(board_parsed["stepper_x"]["step_pin"], "P2.2")

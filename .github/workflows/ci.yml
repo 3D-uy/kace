@@ -13,6 +13,9 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+
 # Cancel older runs on the same branch/PR when new commits are pushed.
 # Keeps CI queues clean and saves runner minutes.
 concurrency:
@@ -89,26 +92,38 @@ jobs:
       - name: Install dependencies
         run: python3 -m pip install --require-hashes -r requirements-dev.txt
 
-      - name: Run unit tests
-        run: python3 tests/run_tests.py --verbose
-
-      # The unittest runner does not collect pytest function/fixture regressions.
-      # Exercise them explicitly, including real pinned Kconfig/parser behavior.
-      - name: Run stabilization regressions against pinned Klipper
+      - name: Prepare pinned Klipper before both suites
+        id: klipper
         run: |
+          mkdir -p tests/results/ci-source
           readarray -t klipper_source < <(python3 -c "from tests.klipper_contract import KLIPPER_REPO_URL, KLIPPER_REF; print(KLIPPER_REPO_URL); print(KLIPPER_REF)")
           git init .klipper-contract-source
           git -C .klipper-contract-source remote add origin "${klipper_source[0]}"
           git -C .klipper-contract-source fetch --depth 1 origin "${klipper_source[1]}"
           git -C .klipper-contract-source checkout --detach FETCH_HEAD
           test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"
-          python3 -m pytest -q \
-            tests/unit/test_audit_followup.py \
-            tests/unit/test_audit_stabilization.py \
-            tests/unit/test_deployment_p1.py \
-            tests/unit/test_final_readiness_fixes.py \
-            tests/unit/test_hardware_readiness.py \
-            tests/unit/test_stabilization_p2.py
+          test -z "$(git -C .klipper-contract-source status --porcelain)"
+          git rev-parse HEAD > tests/results/ci-source/tested-commit.txt
+          git -C .klipper-contract-source rev-parse HEAD > tests/results/ci-source/klipper-commit.txt
+
+      - name: Run unit tests
+        shell: bash
+        run: python3 tests/run_tests.py --verbose 2>&1 | tee tests/results/ci-source/unittest.log
+
+      # Run both collectors after successful preparation, even if unittest fails.
+      # Neither suite uses continue-on-error: failures remain job failures.
+      - name: Run complete pytest suite against pinned Klipper
+        if: ${{ !cancelled() && steps.klipper.outcome == 'success' }}
+        shell: bash
+        run: python3 -m pytest tests --ignore=tests/results -q -rs --junitxml=tests/results/ci-source/pytest.xml 2>&1 | tee tests/results/ci-source/pytest.log
+
+      - name: Upload both source suite results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kace-source-suites-${{ github.sha }}
+          path: tests/results/ci-source/
+          if-no-files-found: error
 
   # Stateful loopback lab: real Moonraker HTTP adapter, Power API, udev MCU
   # monitor, firmware strategies, verification, upload, and rollback. It never
@@ -185,6 +200,16 @@ jobs:
         env:
           KACE_UPDATE_SNAPSHOTS: ""
 
+      - name: Validate golden configs with pinned Klipper
+        run: python3 tests/regression/validate_snapshots.py
+
+      - name: Upload snapshot validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kace-snapshot-klipper-validation
+          path: tests/results/snapshot-validation/
+
   # Reduced deterministic KACE -> pinned Klipper loader matrix for PRs.
   config-matrix-quick:
     name: KACE / Klipper Config Matrix (quick)
@@ -213,7 +238,8 @@ jobs:
           name: kace-klipper-matrix-quick
           path: tests/matrix/artifacts/
 
-  # Full sweep is required before merging as well as on main.
+  # Keep the existing required-check identity and triggers. The reviewed contract
+  # retains raw observations and proves every supported scenario or concrete boundary.
   full-klipper-sweep:
     name: Full Klipper Config Sweep (192+ configs)
     runs-on: ubuntu-24.04
@@ -235,13 +261,25 @@ jobs:
       - name: Install dependencies
         run: python3 -m pip install --require-hashes -r requirements.txt
 
-      - name: Configure git identity (required for sparse clone)
+      - name: Prepare pinned Klipper scenario sources
         run: |
-          git config --global user.email "ci@kace"
-          git config --global user.name "KACE CI"
+          readarray -t klipper_source < <(python3 -c "from tests.klipper_contract import KLIPPER_REPO_URL, KLIPPER_REF; print(KLIPPER_REPO_URL); print(KLIPPER_REF)")
+          git init .klipper-contract-source
+          git -C .klipper-contract-source remote add origin "${klipper_source[0]}"
+          git -C .klipper-contract-source fetch --depth 1 origin "${klipper_source[1]}"
+          git -C .klipper-contract-source checkout --detach FETCH_HEAD
+          test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"
 
-      - name: Run full Klipper config sweep
-        run: python3 tests/run_tests.py --full-klipper-sweep --verbose
+      - name: Run complete reviewed Klipper scenario contract
+        run: python3 -m tests.sweep.scenario_contract --artifacts tests/results/reviewed-scenarios
+
+      - name: Upload full sweep evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kace-klipper-full-sweep
+          path: tests/results/reviewed-scenarios/
+          if-no-files-found: error
 
   # Full pairwise matrix: manual/pre-release, every boards.yaml board contract.
   config-matrix-full:
@@ -276,7 +314,7 @@ jobs:
   docker-firmware-build:
     name: Docker MCU Firmware Builds (LPC1769, STM32, RP2040, AVR)
     runs-on: ubuntu-24.04
-    needs: regression-tests
+    needs: lint
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -287,6 +325,23 @@ jobs:
         run: |
           docker build -f docker/ci/Dockerfile -t kace-dev .
 
-      - name: Run MCU firmware build tests in Docker
+      # Independent of the candidate/snapshot gate; both remain required checks.
+      - name: Run all seven real-build tests and require zero skips
+        shell: bash
+        env:
+          KACE_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace kace-dev python3 -m unittest tests/regression/test_mcu_builds.py -v
+          mkdir -p tests/results/ci-real-builds
+          docker image inspect kace-dev > tests/results/ci-real-builds/container-image.json
+          docker run --rm -e KACE_CI_HEAD_SHA -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "${{ github.workspace }}:/workspace" kace-dev \
+            python3 docker/ci/run_real_builds.py --artifacts tests/results/ci-real-builds \
+            2>&1 | tee tests/results/ci-real-builds/builds.log
+
+      - name: Upload real firmware and build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kace-real-firmware-builds-${{ github.sha }}
+          path: tests/results/ci-real-builds/
+          if-no-files-found: error

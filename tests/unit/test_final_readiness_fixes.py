@@ -156,11 +156,13 @@ def test_atomic_creation_preserves_edit_after_final_read(tmp_path):
 def test_existing_local_update_is_rejected_before_partial_publication(tmp_path):
     root = tmp_path / "config"
     root.mkdir()
-    (root / "printer.cfg").write_bytes(b"user data")
+    # Keep the input parseable so this exercises the local replacement guard,
+    # not the earlier configuration-syntax guard.
+    (root / "printer.cfg").write_bytes(b"# user data\n")
     result = transaction(LocalConfigTransport(str(root)), tmp_path, activation="none")
     assert result.state is Result.PRECONDITION_FAILED
     assert list(root.iterdir()) == [root / "printer.cfg"]
-    assert (root / "printer.cfg").read_bytes() == b"user data"
+    assert (root / "printer.cfg").read_bytes() == b"# user data\n"
     assert "proposal" in result.detail
 
 

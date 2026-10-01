@@ -185,7 +185,10 @@ def test_resume_regenerates_missing_config_without_recompiling(tmp_path, monkeyp
     monkeypatch.setattr(kace, "_resume_firmware_workflow", lambda: (cp, "continue"))
     monkeypatch.setattr(kace, "_persist_workflow", lambda *_a, **_k: None)
     monkeypatch.setattr(kace.os.path, "expanduser", lambda p: str(cfg) if p == "~/kace/printer.cfg" else expand(p))
-    generator = Mock(side_effect=lambda *_a, **_k: cfg.write_text(f"[mcu]\nserial: {serial}\n"))
+    # This LPC endpoint uses KACE's existing command-restart fallback; a
+    # serial-only stub fails the real check before the resume assertions.
+    generator = Mock(side_effect=lambda *_a, **_k: cfg.write_text(
+        f"[mcu]\nserial: {serial}\nrestart_method: command\n"))
     monkeypatch.setattr(kace, "generate_config", generator)
     with patch("kace.yes_no", return_value=True), patch("kace.numbered_select", return_value="none"), \
          patch("kace.print_summary"), patch("kace.time.sleep"), patch("builtins.print"), \

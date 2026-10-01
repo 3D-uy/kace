@@ -35,10 +35,11 @@ def _get_schemas() -> list:
 
 
 def _schema_for(section_name: str) -> dict | None:
-    """Return the first schema whose section_prefix appears in section_name."""
-    section_lower = section_name.lower()
+    """Match the exact section type, never a module name inside a macro name."""
+    parts = section_name.lower().split()
+    section_type = parts[0] if parts else ""
     for schema in _get_schemas():
-        if schema["section_prefix"] in section_lower:
+        if schema["section_prefix"] == section_type:
             return schema
     return None
 
@@ -69,7 +70,8 @@ def _render_block(section_name: str, fields: dict, schema: dict) -> str:
         value = fields.get(key, "")
         if value is None or str(value).strip() == "":
             continue
-        lines.append(f"# {key}: {value}")
+        # Parsed values may span lines. Every emitted line must remain inert.
+        lines.extend(f"# {line}" for line in f"{key}: {value}".splitlines())
 
     lines.append("")
     return "\n".join(lines)
@@ -89,6 +91,8 @@ def get_advanced_sections(parsed_data: dict) -> list:
 
 
 def is_unsupported_section(section_name: str) -> bool:
-    """Return whether section_name maps to a passthrough-disabled schema."""
+    """Unsupported modules may retain an inert reference without passing sweep."""
     schema = _schema_for(section_name)
-    return schema is not None and not schema.get("passthrough", False)
+    return schema is not None and (
+        schema.get("upstream_section") is False or not schema.get("passthrough", False)
+    )

@@ -16,12 +16,12 @@ class TestScraper(unittest.TestCase):
 
     def test_bltouch_injection(self):
         """Ensure BLTouch pins are correctly injected based on filename matching."""
-        # Pass empty config data and SKR v1.4 filename
-        result = parse_config('', 'generic-bigtreetech-skr-v1.4.cfg')
+        # Only an exact reviewed filename may supply a complete fallback pair.
+        result = parse_config('', 'generic-bigtreetech-octopus-max-ez.cfg')
         
         self.assertIn('bltouch', result)
-        self.assertEqual(result['bltouch'].get('sensor_pin'), '^P0.10')
-        self.assertEqual(result['bltouch'].get('control_pin'), 'P2.0')
+        self.assertEqual(result['bltouch'].get('sensor_pin'), '^PB15')
+        self.assertEqual(result['bltouch'].get('control_pin'), 'PB14')
 
     def test_parse_config_ignores_comments_by_default(self):
         """Verify commented keys AND commented section headers are ignored in default mode (keep_comments=False).
@@ -171,7 +171,7 @@ class TestScraperEdgeCases(unittest.TestCase):
 
     def test_empty_string_with_known_board_injects_bltouch_pins(self):
         """When a known board filename IS given, bltouch must have actual pin values."""
-        result = parse_config("", "generic-bigtreetech-skr-v1.4.cfg")
+        result = parse_config("", "generic-bigtreetech-octopus-max-ez.cfg")
         self.assertIn('bltouch', result)
         self.assertIn('sensor_pin', result['bltouch'])
         self.assertIn('control_pin', result['bltouch'])
@@ -238,8 +238,8 @@ class TestScraperEdgeCases(unittest.TestCase):
         self.assertEqual(get_bltouch_pins_for_board(None), {})
         self.assertEqual(get_bltouch_pins_for_board(""), {})
         # Known board should still work
-        pins = get_bltouch_pins_for_board("generic-bigtreetech-skr-v1.4.cfg")
-        self.assertEqual(pins.get("sensor_pin"), "^P0.10")
+        pins = get_bltouch_pins_for_board("generic-bigtreetech-octopus-max-ez.cfg")
+        self.assertEqual(pins.get("sensor_pin"), "^PB15")
 
 
 if __name__ == '__main__':

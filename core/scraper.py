@@ -5,6 +5,7 @@ import os
 import time
 
 from firmware.boards.upstream import load_klipper_source_contract
+from core.config_sections import section_identity
 
 KLIPPER_REF = load_klipper_source_contract().validated_commit
 
@@ -23,7 +24,7 @@ CACHE_EXPIRY_SECONDS = 3 * 24 * 3600  # 3 days cache duration
 def _load_bltouch_db() -> dict:
     """Load BLTouch pin overrides from data/boards.yaml.
 
-    Returns a flat dict mapping board-filename-fragment → {sensor_pin, control_pin}.
+    Returns a flat dict mapping exact filename → {sensor_pin, control_pin}.
     Missing or invalid authoritative data is a hard error.
     """
     try:
@@ -54,11 +55,8 @@ def _get_bltouch_db() -> dict:
 def get_bltouch_pins_for_board(board_name: str) -> dict:
     """Return known BLTouch pin overrides for *board_name*, or an empty dict.
 
-    Searches ``_BLTOUCH_DB`` (populated from ``data/boards.yaml``) for the
-    first key that is a substring of *board_name* (case-insensitive).
-    Keys are matched longest-first so that specific names like
-    ``"octopus-pro"`` always win over shorter substrings like ``"octopus"``,
-    regardless of the order they appear in boards.yaml.
+    Matches an exact config filename in ``data/boards.yaml`` (case-insensitive).
+    A similar name or MCU family is not evidence for another board revision.
     Returns a dict with ``sensor_pin`` and ``control_pin`` keys, or ``{}``
     when no entry matches.
 
@@ -68,12 +66,44 @@ def get_bltouch_pins_for_board(board_name: str) -> dict:
     """
     if not board_name:
         return {}
-    fname = board_name.lower()
-    # Sort longest key first — ensures "octopus-pro" matches before "octopus"
-    for board_key, pins in sorted(_get_bltouch_db().items(), key=lambda x: -len(x[0])):
-        if board_key in fname:
-            return dict(pins)
-    return {}
+    return dict(_get_bltouch_db().get(board_name.lower(), {}))
+
+
+def _bltouch_fallback_is_available(sections, pins):
+    """Check known allocations before suggesting a complete wiring example.
+
+    Structured BLTouch generation replaces the primary Z endstop with the probe
+    virtual endstop, so only the sensor may reuse that input. This is not proof
+    of connector availability or firmware transport reservations.
+    """
+    from core.pin_validator import PinAliases, PinAliasError
+
+    try:
+        resolver = PinAliases(sections)
+        identities = {role: resolver.resolve(pin) for role, pin in pins.items()}
+        if len(set(identities.values())) != 2:
+            return False
+        for section, options in sections.items():
+            if (section == "bltouch" or section == "board_pins"
+                    or section.startswith("board_pins ") or section == "duplicate_pin_override"):
+                continue
+            for key, value in options.items():
+                if not (key == "pin" or key.endswith("_pin")
+                        or key in ("pins", "select_pins", "encoder_pins")):
+                    continue
+                for token in re.split(r"[,\s]+", value.strip()):
+                    if not token:
+                        continue
+                    identity = resolver.resolve(token)
+                    for role, candidate in identities.items():
+                        if identity != candidate:
+                            continue
+                        if role == "sensor_pin" and section == "stepper_z" and key == "endstop_pin":
+                            continue
+                        return False
+    except PinAliasError:
+        return False
+    return True
 
 
 def fetch_config_list():
@@ -211,9 +241,11 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
     """
     data = {}
     active_keys = {}
+    active_sections = set()
     current_section = None
     section_commented = False
     last_key = None
+    last_key_indent = 0
     for raw_line in raw_cfg.split('\n'):
         line = raw_line.strip()
         if not line: continue
@@ -235,8 +267,10 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
                 last_key = None
                 continue
 
-            current_section = section_match.group(1).strip().lower()
+            current_section = section_identity(section_match.group(1))
             section_commented = is_header_commented
+            if not section_commented:
+                active_sections.add(current_section)
             if current_section not in data:
                 data[current_section] = {}
             active_keys.setdefault(current_section, set())
@@ -250,6 +284,15 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
             continue
         
         if current_section:
+            # A namespaced pin on a continuation line contains ':' but is not
+            # a new option. Match ConfigParser's indentation rule for this list.
+            indent = len(raw_line) - len(raw_line.lstrip())
+            if (((last_key == 'pins' and current_section.startswith('static_digital_output '))
+                    or (last_key == 'heater' and current_section.startswith('heater_fan ')))
+                    and indent > last_key_indent and not line.startswith('#')
+                    and not section_commented):
+                data[current_section][last_key] += '\n    ' + line.split('#', 1)[0].strip()
+                continue
             # Match key-value pairs like step_pin: P2.2 or #uart_pin: P1.10
             kv_match = re.match(r'^#?\s*([a-zA-Z0-9_]+)\s*:\s*(.*)', line)
             if kv_match:
@@ -261,13 +304,8 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
                 key = kv_match.group(1).strip().lower()
                 val = kv_match.group(2).strip()
                 
-                # Prevent [board_pins] parser leakage: 'aliases' uniquely belongs to board_pins
-                if key == 'aliases' and current_section != 'board_pins':
-                    current_section = 'board_pins'
-                    if current_section not in data:
-                        data[current_section] = {}
-                    active_keys.setdefault(current_section, set())
-                        
+                # Keep named board_pins sections and their MCU ownership.
+                # An option must never silently move into another section.
                 # Clean up inline comments
                 if '#' in val and key != 'aliases':
                     val = val.split('#')[0].strip()
@@ -280,9 +318,13 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
                     if key not in active_keys.get(current_section, set()):
                         data[current_section][key] = val
                 last_key = key
-            elif last_key == 'aliases':
+                if is_active_key:
+                    last_key_indent = indent
+            elif last_key and (last_key == 'aliases' or last_key.startswith('aliases_')):
                 clean_val = line
                 if clean_val.startswith('#'):
+                    if not keep_comments:
+                        continue
                     stripped = clean_val.lstrip('#').strip()
                     if '=' in stripped:
                         clean_val = stripped
@@ -306,18 +348,95 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
                 if clean_val:
                     data[current_section][last_key] += '\n    ' + clean_val
                 
-    # Inject known BLTouch pins for boards that don't define them in their cfg.
-    # Pin data is loaded from the authoritative data/boards.yaml database.
+    # Suggest a complete reviewed pair only when the source specifies neither
+    # pin. Never mix a partial custom wiring choice with another wiring example.
     if "bltouch" not in data:
         data["bltouch"] = {}
 
     pins = get_bltouch_pins_for_board(filename)
-    if pins:
-        if "sensor_pin" not in data["bltouch"]:
-            data["bltouch"]["sensor_pin"] = pins["sensor_pin"]
-        if "control_pin" not in data["bltouch"]:
-            data["bltouch"]["control_pin"] = pins["control_pin"]
+    if (pins and not any(key in data["bltouch"] for key in ("sensor_pin", "control_pin"))
+            and _bltouch_fallback_is_available(data, pins)):
+        data["bltouch"].update(pins)
 
+    from core.probe_configuration import BLTOUCH_HARDWARE_SOURCE, BLTOUCH_HARDWARE_OPTIONS
+    if any(key in data["bltouch"] for key in BLTOUCH_HARDWARE_OPTIONS):
+        data[BLTOUCH_HARDWARE_SOURCE] = {
+            key: data["bltouch"][key] for key in active_keys.get("bltouch", set())
+        } if "bltouch" in active_sections else {}
+
+    from core.probe_sampling import SOURCE as PROBE_SAMPLING_SOURCE, OPTIONS as PROBE_SAMPLING_OPTIONS
+    if any(key in data["bltouch"] for key in PROBE_SAMPLING_OPTIONS):
+        data[PROBE_SAMPLING_SOURCE] = {
+            key: data["bltouch"][key] for key in active_keys.get("bltouch", set())
+            if key in PROBE_SAMPLING_OPTIONS
+        } if "bltouch" in active_sections else {}
+
+    from core.homing_source import ADDITIONAL_Z_ENDSTOPS
+    extra_z = [f"stepper_z{i}" for i in range(1, 4) if f"stepper_z{i}" in data]
+    if extra_z:
+        data[ADDITIONAL_Z_ENDSTOPS] = {
+            name: data[name].get("endstop_pin")
+            if name in active_sections and "endstop_pin" in active_keys.get(name, set()) else None
+            for name in extra_z
+        }
+
+    # Fan discovery may include commented examples; generation must only retain
+    # active options from the source fan unless the user explicitly selects a pin.
+    if "fan" in data:
+        from core.part_fan import SOURCE_OPTIONS as FAN_SOURCE_OPTIONS
+        data[FAN_SOURCE_OPTIONS] = (
+            {key: data["fan"][key] for key in active_keys.get("fan", set())}
+            if "fan" in active_sections else None
+        )
+
+    if "mcu" in data:
+        from core.primary_mcu import SOURCE as MCU_SOURCE
+        data[MCU_SOURCE] = {
+            key: data['mcu'][key] for key in active_keys.get('mcu', set())
+        } if 'mcu' in active_sections else {}
+
+    from core.hotend_fan import SOURCE_OPTIONS as FAN_SECTIONS, is_fan_section
+    if any(is_fan_section(name) for name in data):
+        data[FAN_SECTIONS] = {
+            name: {key: data[name][key] for key in active_keys.get(name, set())}
+            for name in active_sections if is_fan_section(name)
+        }
+
+    if "homing_override" in data:
+        from core.homing_source import SOURCE as HOMING_SOURCE
+        data[HOMING_SOURCE] = "homing_override" in active_sections
+
+    from core.heater_verification import SOURCE as VERIFICATION_SOURCE, is_verifier
+    verification_sections = [name for name in data if is_verifier(name)]
+    if verification_sections:
+        data[VERIFICATION_SOURCE] = {
+            name: ({key: data[name][key] for key in active_keys.get(name, set())}
+                   if name in active_sections else None)
+            for name in verification_sections
+        }
+
+    from core.board_auxiliary import SOURCE_ACTIVITY, SOURCE_OPTIONS, is_electrical_dependency
+    electrical_sections = [name for name in data if is_electrical_dependency(name)]
+    if electrical_sections:
+        data[SOURCE_ACTIVITY] = {name: name in active_sections for name in electrical_sections}
+        data[SOURCE_OPTIONS] = {name: sorted(active_keys.get(name, set())) for name in electrical_sections}
+        from core.board_pwm import fixed_pwm_source, SOURCE_FIXED_PWM
+        reviewed = fixed_pwm_source(raw_cfg, filename)
+        if reviewed is not None:
+            data[SOURCE_FIXED_PWM] = reviewed
+        from core.board_probe_reset import RESET_OUTPUT, SOURCE_RESET, capture_probe_reset_source
+        if RESET_OUTPUT in data:
+            reset = capture_probe_reset_source(raw_cfg)
+            if reset is not None:
+                data[SOURCE_RESET] = reset
+    from core.board_bx_panel import capture_panel_source, SOURCE_PANEL
+    panel = capture_panel_source(raw_cfg, filename)
+    if panel is not None:
+        data[SOURCE_PANEL] = panel
+    from core.board_cooling import capture_required_cooling, SOURCE as COOLING_SOURCE
+    cooling = capture_required_cooling(raw_cfg, filename)
+    if cooling is not None:
+        data[COOLING_SOURCE] = cooling
     return data
 
 def sanitize_geometry_value(key, val):
@@ -603,7 +722,9 @@ def detect_fan_pins(raw_cfg: str) -> list:
     """
     # Find all section headers (active or commented out)
     # E.g. [fan], #[heater_fan fan1], # [fan]
-    matches = list(re.finditer(r'^#?\s*\[([a-zA-Z0-9_]+(?:\s+[^\]]+)?)\]', raw_cfg, re.MULTILINE))
+    from core.validators import questionary_fan_pin_validator
+
+    matches = list(re.finditer(r'^[ \t]*#?[ \t]*\[([a-zA-Z0-9_]+(?:\s+[^\]]+)?)\]', raw_cfg, re.MULTILINE))
     
     fan_pins = []
     seen_pins = set()
@@ -627,25 +748,30 @@ def detect_fan_pins(raw_cfg: str) -> list:
         section_body = raw_cfg[start_pos:end_pos]
         
         # Search for pin: or # pin: inside the section body
-        pin_match = re.search(r'^#?\s*pin:\s*([!^~a-zA-Z0-9_.]+)', section_body, re.MULTILINE)
-        if pin_match:
-            pin = pin_match.group(1).strip()
-            pin_clean = pin.lstrip('!^~')
+        pin_matches = list(re.finditer(
+            r'^[ \t]*(#?)[ \t]*pin[ \t]*[:=][ \t]*([^#;\r\n]*)',
+            section_body, re.MULTILINE | re.IGNORECASE))
+        active = [item for item in pin_matches if not item.group(1)]
+        if pin_matches:
+            pin_match = active[-1] if active else pin_matches[0]
+            pin = pin_match.group(2).strip()
+            if questionary_fan_pin_validator(pin) is not True:
+                continue  # Never offer a truncated or silently repaired token.
             
             # Format friendly label
             if lower_header == "fan":
-                label = f"Part Cooling Fan ({pin_clean})"
+                label = f"Part Cooling Fan ({pin})"
             else:
                 parts = header.split(maxsplit=1)
                 fan_name = parts[1] if len(parts) > 1 else header
-                label = f"{fan_name.replace('_', ' ').title()} ({pin_clean})"
+                label = f"{fan_name.replace('_', ' ').title()} ({pin})"
                 
-            if pin_clean not in seen_pins:
+            if pin not in seen_pins:
                 fan_pins.append({
-                    "pin": pin_clean,
+                    "pin": pin,
                     "label": label,
                     "section": header
                 })
-                seen_pins.add(pin_clean)
+                seen_pins.add(pin)
                 
     return fan_pins

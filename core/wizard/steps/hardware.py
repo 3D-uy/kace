@@ -1,9 +1,13 @@
+import copy
+import os
+
 from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
 from core.scraper import fetch_raw_config, parse_config, get_reusable_driver_sockets, detect_fan_pins, detect_driver_info
 from core.translations import t
-from core.terminal import ERROR, INFO, RESET, WARNING
-from core.exceptions import WizardExit
-from core.validators import questionary_pin_validator
+from core.terminal import ERROR, INFO, RESET, WARNING, SECTION
+from core.exceptions import GenerationError, WizardExit
+from core.profile_values import canonical_tmc_model, mark_user_override, resolve_generation_values, tmc_setting_value
+from core.validators import questionary_pin_validator, questionary_fan_pin_validator
 from core.wizard.runner import _BACK, _QUIT
 from core.wizard.ui import _back_choice, _quit_choice
 
@@ -132,6 +136,16 @@ def _step_board(user_data, suggested_configs, board_configs):
 
 def _step_fan_assignment(user_data: dict) -> str:
     raw_cfg = user_data.get("board_raw_config", "")
+    from core.board_cooling import REVIEWED, required_board_fans
+    required_cooling = {}
+    if user_data.get("board") in REVIEWED:
+        required_cooling = required_board_fans(parse_config(raw_cfg, user_data["board"]), user_data["board"])
+    from core.board_bx_panel import PROFILE as BX_PROFILE, selected_bx_cooling
+    if user_data.get("board") == BX_PROFILE:
+        required_cooling.update(selected_bx_cooling(parse_config(raw_cfg, BX_PROFILE)))
+    if required_cooling:
+        print(f"{INFO}{t('wizard.required_cooling').format(names=', '.join(required_cooling))}{RESET}")
+    required_pins = {fields["pin"] for fields in required_cooling.values()}
     detected_fans = detect_fan_pins(raw_cfg)
     if not detected_fans:
         return "success"
@@ -152,9 +166,18 @@ def _step_fan_assignment(user_data: dict) -> str:
         })
 
     # Add other detected pins
+    from core.part_fan import selected_part_fan
+    fan_source = parse_config(raw_cfg, keep_comments=False)
     for f in detected_fans:
         # Avoid duplicating the default fan choice
-        if f["pin"] == default_fan_pin:
+        if f["pin"] == default_fan_pin or f["pin"] in required_pins:
+            continue
+        try:
+            selected_part_fan(fan_source, f["pin"])
+        except GenerationError:
+            # Automatic/tuned resources cannot become a manual part fan merely
+            # because their connector is selectable. Custom input is rechecked
+            # against the same source contract during generation.
             continue
         part_choices.append({
             "name": f["label"],
@@ -183,8 +206,11 @@ def _step_fan_assignment(user_data: dict) -> str:
     if ans_part == "custom":
         custom_pin = simple_input(
             t("wizard.fan_enter_custom"),
-            validate=questionary_pin_validator
+            validate=questionary_fan_pin_validator,
+            back_value=_BACK,
         )
+        if custom_pin == _BACK:
+            return _BACK
         if custom_pin is None:
             raise WizardExit()
         if not custom_pin.strip():
@@ -196,13 +222,19 @@ def _step_fan_assignment(user_data: dict) -> str:
     # ── 2. Hotend Heatsink Fan ──
     # Filter choices to remove the selected part cooling pin
     used_part_pin = default_fan_pin if final_part_pin == "default" else final_part_pin
+    from core.pin_validator import PinAliases
+    used_part_identity = PinAliases.split_pin(used_part_pin or "")
 
     hotend_choices = [
-        {"name": t("wizard.fan_none"), "value": "none"}
+        {"name": t("wizard.fan_no_additional" if required_cooling else "wizard.fan_none"), "value": "none"}
     ]
 
     for f in detected_fans:
-        if f["pin"] == used_part_pin:
+        if PinAliases.split_pin(f["pin"]) == used_part_identity:
+            continue
+        if f["pin"] in required_pins and not f["section"].lower().startswith("heater_fan "):
+            # A mandatory controller fan already retains its motor/heater
+            # triggers; it cannot be reassigned as an optional thermal fan.
             continue
         hotend_choices.append({
             "name": f["label"],
@@ -230,8 +262,11 @@ def _step_fan_assignment(user_data: dict) -> str:
     if ans_hotend == "custom":
         custom_pin = simple_input(
             t("wizard.fan_enter_custom"),
-            validate=questionary_pin_validator
+            validate=questionary_fan_pin_validator,
+            back_value=_BACK,
         )
+        if custom_pin == _BACK:
+            return _BACK
         if custom_pin is None:
             raise WizardExit()
         if not custom_pin.strip():
@@ -306,7 +341,7 @@ def _step_z_socket_assignment(user_data):
         is_beginner = get_mode() == "Beginner"
         for idx_s, (sock_key, sock_label) in enumerate(available_driver_sockets):
             if idx_s == 0 and is_beginner:
-                display_label = f"{sock_label}  ✓ Recommended"
+                display_label = f"{sock_label} {WARNING}{t('choice.recommended')}{RESET}"
             else:
                 display_label = sock_label
             driver_choices.append({"name": display_label, "value": sock_key})
@@ -343,9 +378,15 @@ def _step_z_socket_assignment(user_data):
 
         if selected_driver == "custom":
             print(t("wizard.assign_custom_pins_header", motor=motor_name))
-            step_pin = simple_input(t("wizard.custom_step_pin"), validate=questionary_pin_validator)
-            dir_pin  = simple_input(t("wizard.custom_dir_pin"),  validate=questionary_pin_validator)
-            en_pin   = simple_input(t("wizard.custom_en_pin"),   validate=questionary_pin_validator)
+            step_pin = simple_input(t("wizard.custom_step_pin"), validate=questionary_pin_validator, back_value=_BACK)
+            if step_pin == _BACK:
+                return _BACK
+            dir_pin  = simple_input(t("wizard.custom_dir_pin"),  validate=questionary_pin_validator, back_value=_BACK)
+            if dir_pin == _BACK:
+                return _BACK
+            en_pin   = simple_input(t("wizard.custom_en_pin"),   validate=questionary_pin_validator, back_value=_BACK)
+            if en_pin == _BACK:
+                return _BACK
             if not step_pin or not dir_pin or not en_pin:
                 print(f"\n{ERROR}{t('kace.abort_valid_pins')}{RESET}")
                 raise WizardExit()
@@ -362,6 +403,9 @@ def _step_z_socket_assignment(user_data):
                 "dir_pin":    src_data.get("dir_pin",    ""),
                 "enable_pin": src_data.get("enable_pin", ""),
             }
+            if "step_pulse_duration" in src_data:
+                # Pulse timing belongs to the reused driver socket, not Z mechanics.
+                parsed_data[motor_name]["step_pulse_duration"] = src_data["step_pulse_duration"]
             parsed_data.pop(selected_driver, None)
             available_driver_sockets = [(k, l) for k, l in available_driver_sockets if k != selected_driver]
             assigned_drivers[motor_name] = selected_driver
@@ -385,15 +429,15 @@ def _step_driver_type(user_data):
     from core.translations import get_mode
     is_beginner = get_mode() == "Beginner"
     for idx, choice in enumerate(base_choices):
-        name = choice
+        name = t("wizard.driver_standard") if choice == "None (Standard)" else choice
         value = choice
         if is_integrated and choice == detected_type:
             if is_beginner:
-                name = f"{choice}  ✓ Recommended (Detected from board profile)"
+                name = f"{name} {WARNING}{t('choice.recommended')}{RESET}"
             preselected_index = idx
         elif is_integrated and choice == "None (Standard)":
             if is_beginner:
-                name = f"{choice}  (Not Recommended for integrated TMC)"
+                name = f"{name}  ({t('wizard.driver_not_recommended')})"
         formatted_choices.append(Choice(title=name, value=value))
         
     back_ch = _back_choice()
@@ -440,7 +484,7 @@ def _step_driver_mode(user_data):
         value = mode
         if is_integrated and mode == detected_mode:
             if is_beginner:
-                name = f"{mode}  ✓ Recommended (Detected from board profile)"
+                name = f"{mode} {WARNING}{t('choice.recommended')}{RESET}"
             preselected_mode_index = idx
         formatted_modes.append(Choice(title=name, value=value))
         
@@ -464,7 +508,74 @@ def _step_driver_mode(user_data):
 
 
 
-def _apply_z_tmc_mappings(user_data: dict) -> None:
+def _step_tmc_currents(user_data):
+    """Review unresolved TMC settings after mapping; commit only on acceptance."""
+    original = copy.deepcopy(user_data)
+    staged = copy.deepcopy(user_data)
+    if _apply_z_tmc_mappings(staged) == _BACK:
+        return _BACK
+    board = staged.get("board_parsed") or {}
+    _, provenance = resolve_generation_values(board, staged, validate_motors=False)
+    missing = [key for key, owner in provenance.items()
+               if key.startswith(("run_current_", "hold_current_", "stealthchop_threshold_")) and owner == "UNRESOLVED"]
+    if missing and os.environ.get("KACE_AUTO") == "1":
+        raise GenerationError("Explicit TMC settings required: " + ", ".join(missing))
+    if missing:
+        print(f"\n{SECTION}{t('wizard.tmc_current.title')}{RESET}")
+        print(t("wizard.tmc_current.help"))
+    for key in missing:
+        model = canonical_tmc_model(staged.get("driver_type", ""))
+        option, target = key.rsplit("_", 1)
+        optional = option != "run_current"
+        def validate(value):
+            if optional and not str(value).strip():
+                return True
+            try:
+                tmc_setting_value(model, option, value)
+                return True
+            except GenerationError:
+                return t("wizard.tmc_current.invalid")
+        label = "wizard.tmc_current.input" if not optional else "wizard.tmc_current." + option
+        value = simple_input(t(label, motor=target.upper()),
+                             default="", validate=validate, back_value=_BACK)
+        if value == _BACK:
+            return _BACK
+        if value in (None, _QUIT):
+            raise WizardExit()
+        if optional and not str(value).strip():
+            staged.pop(key, None)
+            staged.get("_value_provenance", {}).pop(key, None)
+            receipts = staged.get("_tmc_current_confirmations")
+            if isinstance(receipts, dict):
+                receipts.pop(key, None)
+            continue
+        try:
+            staged[key] = tmc_setting_value(model, option, value)
+        except GenerationError:
+            print(f"{ERROR}{t('wizard.tmc_current.invalid')}{RESET}")
+            return "__retry__"
+        mark_user_override(staged, key)
+    if missing:
+        reviewed, owners = resolve_generation_values(board, staged, validate_motors=False)
+        for key in missing:
+            option, target = key.rsplit("_", 1)
+            value = reviewed.get(key, t("wizard.tmc_current.omitted"))
+            unit = "mm/s" if option == "stealthchop_threshold" else "A RMS"
+            print(f"  {target.upper()} · {option}: {value}" + (f" {unit}" if key in reviewed else ""))
+            if owners.get(key) == "UNRESOLVED":
+                print(f"{ERROR}{t('wizard.tmc_current.invalid')}{RESET}")
+                return "__retry__"
+        if not yes_no(t("wizard.tmc_current.confirm"), default=False):
+            return "__retry__"
+    if user_data != original:
+        print(f"{WARNING}{t('wizard.tmc_current.changed')}{RESET}")
+        return "__retry__"
+    user_data.clear()
+    user_data.update(staged)
+    return "done"
+
+
+def _apply_z_tmc_mappings(user_data: dict) -> str | None:
     """Post-processing step: maps Z stepper TMC configurations."""
     z_motors = int(user_data.get('z_motors') or 1)
     if z_motors <= 1:
@@ -490,36 +601,37 @@ def _apply_z_tmc_mappings(user_data: dict) -> None:
 
     # Parse full config with comments to find source TMC configuration blocks
     _parsed_full = parse_config(raw_cfg, user_data.get('board', ''), keep_comments=True)
+    model = canonical_tmc_model(driver_type)
 
     for motor_name, selected_driver in assignments.items():
-        dest_tmc = f"{driver_type.lower()} {motor_name}"
+        dest_tmc = f"{model} {motor_name}"
 
         if selected_driver == "custom":
             if driver_mode in ["UART", "SPI"]:
                 # Prompt for custom pin
                 pin_key = "uart_pin" if driver_mode == "UART" else "cs_pin"
                 if dest_tmc not in parsed_data or pin_key not in parsed_data[dest_tmc]:
+                    if os.environ.get("KACE_AUTO") == "1":
+                        raise GenerationError(f"{dest_tmc}: explicit {pin_key} required.")
                     uart_pin = simple_input(
                         t("wizard.custom_uart_pin", mode=driver_mode.lower(), motor=motor_name),
-                        validate=questionary_pin_validator
+                        validate=questionary_pin_validator,
+                        back_value=_BACK,
                     )
+                    if uart_pin == _BACK:
+                        return _BACK
                     if not uart_pin:
                         print(f"\n{ERROR}{t('kace.abort_no_uart', mode=driver_mode)}{RESET}")
                         raise WizardExit()
-                    parsed_data[dest_tmc] = {pin_key: uart_pin, "run_current": "0.650"}
+                    parsed_data.setdefault(dest_tmc, {})[pin_key] = uart_pin
         else:
-            # Socketed driver: copy TMC details from board config
-            found_tmc = False
-            for possible_tmc in ["tmc2209", "tmc2208", "tmc2130", "tmc5160", "tmc2225", "tmc2240"]:
-                src_tmc = f"{possible_tmc} {selected_driver}"
-                tmc_src_data = parsed_data.get(src_tmc) or _parsed_full.get(src_tmc)
-                if tmc_src_data is not None:
-                    parsed_data[dest_tmc] = tmc_src_data.copy()
-                    parsed_data.pop(src_tmc, None)
-                    found_tmc = True
-                    break
-
-            if not found_tmc and driver_mode in ["UART", "SPI"]:
+            # Socket assignment does not authorize changing the driver model.
+            src_tmc = f"{model} {selected_driver}"
+            tmc_src_data = parsed_data.get(src_tmc) or _parsed_full.get(src_tmc)
+            if tmc_src_data is not None:
+                parsed_data[dest_tmc] = tmc_src_data.copy()
+                parsed_data.pop(src_tmc, None)
+            elif driver_mode in ["UART", "SPI"]:
                 print(f"\n{ERROR}{t('kace.abort_no_tmc_map', mode=driver_mode, driver=selected_driver)}{RESET}")
                 print(f"{WARNING}{t('kace.abort_generation')}{RESET}")
                 raise WizardExit()

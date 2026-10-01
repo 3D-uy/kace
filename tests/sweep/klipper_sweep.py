@@ -1,11 +1,11 @@
 """
-KACE Full Klipper Config Sweep
+KACE Parser-only Klipper Config Sweep
 ==============================
 Clones Klipper (shallow + sparse, config/ only), iterates every
 generic-*.cfg and printer-*.cfg, classifies each result, and reports.
 
-Usage:
-    python3 tests/run_tests.py --full-klipper-sweep
+This legacy helper checks parsing only. The --full-klipper-sweep CLI uses
+full_sweep_runner.py for generation and official Klipper validation.
 """
 
 import os
@@ -103,7 +103,7 @@ def run_full_sweep(verbose=False):
     summary = SweepSummary()
 
     print("\n" + "=" * 60)
-    print("  KACE — Full Klipper Config Sweep")
+    print("  KACE — Parser-only Klipper Config Sweep (no output validation)")
     print("=" * 60)
 
     with heavy_workspace("klipper-sweep-") as workspace:

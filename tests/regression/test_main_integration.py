@@ -45,6 +45,7 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
@@ -189,6 +190,17 @@ _WIZARD_USER_DATA_NO_PARSED = {
 
 # ── Context manager helpers ───────────────────────────────────────────────────
 
+def _write_mock_generated_config(parsed_data, user_data, **kwargs):
+    """Model the generator's file boundary without reading the developer's home."""
+    target = Path(os.path.expanduser('~/kace/printer.cfg'))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    serial = user_data.get('mcu_path', '/dev/serial/by-id/mock')
+    # This module's SKR 1.4/LPC fixture uses command restart, including resumes.
+    content = f'[mcu]\nserial: {serial}\nrestart_method: command\n\n' + _RAW_BOARD_CFG
+    target.write_text(content, encoding='utf-8')
+    return {'content': content}
+
+
 def _mock_questionary_for_main(macros_answer=True, deploy_answer="none"):
     """Return a dict of patches to suppress Phase 3/4 prompts
     inside main() (macros confirm + deployment select)."""
@@ -226,6 +238,11 @@ class _HeadlessMixin:
         # Bypass dashboard / prompt_toolkit import inside kace.main()
         os.environ["KACE_AUTO"] = "1"
         self._workflow_tmp = tempfile.TemporaryDirectory()
+        self._home_patch = patch.dict(os.environ, {
+            'HOME': self._workflow_tmp.name,
+            'USERPROFILE': self._workflow_tmp.name,
+        })
+        self._home_patch.start()
         os.environ["KACE_FIRMWARE_WORKFLOW_PATH"] = os.path.join(
             self._workflow_tmp.name, "firmware-workflow.json"
         )
@@ -237,6 +254,7 @@ class _HeadlessMixin:
 
     def tearDown(self):
         self._pt_patch.stop()
+        self._home_patch.stop()
         os.environ.pop("KACE_AUTO", None)
         os.environ.pop("KACE_FIRMWARE_WORKFLOW_PATH", None)
         self._workflow_tmp.cleanup()
@@ -251,6 +269,23 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
     All tests patch run_wizard to supply controlled user_data; only the
     variable under test changes between scenarios.
     """
+
+    def test_generator_without_artifact_cannot_succeed(self):
+        import kace
+        target = Path(os.path.expanduser('~/kace/printer.cfg'))
+        self.assertFalse(target.exists())
+        with patch('kace.print_kace_banner'), \
+             patch('kace.run_wizard', return_value=dict(_WIZARD_USER_DATA_WITH_PARSED)), \
+             patch('kace.check_display_compatibility', return_value=[]), \
+             patch('kace.generate_config', return_value={'content': '[printer]\n'}), \
+             patch('kace.has_todo_pins', return_value=[]), \
+             patch('kace.print_summary'), patch('kace.time.sleep'), \
+             patch('kace.yes_no', return_value=True), \
+             patch('kace.numbered_select', return_value='none'), patch('builtins.print'):
+            with self.assertRaises(SystemExit) as result:
+                kace.main()
+        self.assertEqual(result.exception.code, 10)
+        self.assertFalse(target.exists())
 
     # ── WizardExit ────────────────────────────────────────────────────────────
 
@@ -346,7 +381,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
     @patch('kace.run_wizard', return_value=dict(_WIZARD_USER_DATA_WITH_PARSED))
     @patch('kace.fetch_raw_config')
     @patch('kace.check_display_compatibility', return_value=[])
-    @patch('kace.generate_config', return_value={"content": "[printer]\n"})
+    @patch('kace.generate_config', side_effect=_write_mock_generated_config)
     @patch('kace.has_todo_pins', return_value=[])
     @patch('kace.print_summary')
     @patch('kace.time.sleep')
@@ -377,7 +412,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
     @patch('kace.fetch_raw_config', return_value=_RAW_BOARD_CFG)
     @patch('kace.check_display_compatibility', return_value=[])
     @patch('kace.has_todo_pins', return_value=[("bltouch", "sensor_pin")])  # TODO present
-    @patch('kace.generate_config', return_value={"content": "[printer]\n"})
+    @patch('kace.generate_config', side_effect=_write_mock_generated_config)
     @patch('kace.print_summary')
     @patch('kace.time.sleep')
     @patch('builtins.print')
@@ -441,7 +476,7 @@ class TestMainCLIPipelinePhases(_HeadlessMixin, unittest.TestCase):
     @patch('kace.print_kace_banner')
     @patch('kace.run_wizard', return_value=dict(_WIZARD_USER_DATA_WITH_PARSED))
     @patch('kace.check_display_compatibility', return_value=[])
-    @patch('kace.generate_config', return_value={"content": "[printer]\n"})
+    @patch('kace.generate_config', side_effect=_write_mock_generated_config)
     @patch('kace.has_todo_pins', return_value=[])
     @patch('kace.print_summary')
     @patch('kace.time.sleep')
@@ -522,7 +557,7 @@ class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
         q_patches = _mock_questionary_for_main()
         with patch('kace.yes_no', q_patches['kace.yes_no']), \
              patch('kace.numbered_select',  q_patches['kace.numbered_select']), \
-             patch('kace.generate_config', return_value={"content": "[printer]\n"}):
+             patch('kace.generate_config', side_effect=_write_mock_generated_config):
             import kace
             with self.assertRaises(SystemExit):
                 kace.main()
@@ -532,7 +567,7 @@ class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
     @patch('kace.print_kace_banner')
     @patch('kace.run_wizard', return_value=dict(_WIZARD_USER_DATA_WITH_PARSED))
     @patch('kace.check_display_compatibility', return_value=[])
-    @patch('kace.generate_config', return_value={"content": "[printer]\n"})
+    @patch('kace.generate_config', side_effect=_write_mock_generated_config)
     @patch('kace.has_todo_pins', return_value=[])
     @patch('kace.print_summary')
     @patch('kace.time.sleep')
@@ -575,7 +610,7 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
         with patch('kace.print_kace_banner'), \
              patch('kace.run_wizard', return_value=dict(_WIZARD_USER_DATA_WITH_PARSED)), \
              patch('kace.check_display_compatibility', return_value=[]), \
-             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.generate_config', side_effect=_write_mock_generated_config), \
              patch('kace.has_todo_pins', return_value=[]), \
              patch('kace.print_summary'), \
              patch('kace.extract_mcu_serial', return_value='/dev/serial/by-id/mock'), \
@@ -619,7 +654,7 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
         with patch('kace.print_kace_banner'), \
              patch('kace.run_wizard', return_value=dict(_WIZARD_USER_DATA_WITH_PARSED)), \
              patch('kace.check_display_compatibility', return_value=[]), \
-             patch('kace.generate_config', return_value={"content": "[printer]\n"}), \
+             patch('kace.generate_config', side_effect=_write_mock_generated_config), \
              patch('kace.has_todo_pins', return_value=[]), \
              patch('kace.print_summary'), \
              patch('kace.extract_mcu_serial', return_value='/dev/serial/by-id/mock'), \
@@ -910,7 +945,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         with patch("kace.print_kace_banner"), \
              patch("kace.run_wizard") as wizard, \
              patch("kace.check_display_compatibility", return_value=[]), \
-             patch("kace.generate_config", return_value={"content": "[mcu]\n"}), \
+             patch("kace.generate_config", side_effect=_write_mock_generated_config), \
              patch("kace.extract_mcu_serial", return_value=serial), \
              patch("kace.print_summary"), \
              patch("kace.time.sleep"), \
@@ -972,13 +1007,13 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.READY_TO_DEPLOY)
         checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.DEPLOYING)
         write_checkpoint(checkpoint, os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+        _write_mock_generated_config(user_data['board_parsed'], user_data)
 
         with patch("kace.print_kace_banner"), \
              patch("kace.run_wizard") as wizard, \
              patch("kace.check_display_compatibility", return_value=[]), \
              patch("kace.generate_config") as generate, \
              patch("kace.extract_mcu_serial", return_value=serial), \
-             patch("kace.os.path.isfile", return_value=True), \
              patch("kace.print_summary"), \
              patch("kace.numbered_select", return_value="none"), \
              patch("builtins.print"):
@@ -1123,7 +1158,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
                  patch("kace.artifact_evidence", return_value=evidence), \
                  patch("kace.execute_firmware_deployment", return_value=deployment_result), \
                  patch("kace.verify_reappeared_mcu", side_effect=verify_after_flash) as verify, \
-                 patch("kace.generate_config") as generate, \
+                 patch("kace.generate_config", side_effect=_write_mock_generated_config) as generate, \
                  patch("kace.extract_mcu_serial", return_value=serial), \
                  patch("kace.print_summary"), \
                  patch("kace.time.sleep"), \

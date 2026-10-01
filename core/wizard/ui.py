@@ -4,61 +4,6 @@ from core.wizard.runner import PHASE_MAP, PHASE_KEYS, _BACK, _QUIT
 from core.terminal import HINT, INPUT, QUESTION, RESET, SECTION
 
 
-def _get_active_phase_steps(phase: str, user_data: dict) -> list:
-    """Dynamically determine which steps in the given phase are active/visible."""
-    all_steps = [step_id for step_id, p in PHASE_MAP.items() if p == phase]
-    active = []
-    for step_id in all_steps:
-        if step_id == "fan_assignment":
-            from core.wizard.steps.hardware import _has_fan_options
-            if not _has_fan_options(user_data):
-                continue
-        elif step_id == "z_socket_assignment":
-            z_motors = user_data.get("z_motors")
-            if z_motors is None or int(z_motors) <= 1:
-                continue
-        elif step_id == "driver_mode":
-            d_type = user_data.get("driver_type")
-            if d_type in ["None (Standard)", "A4988", "DRV8825"]:
-                continue
-        elif step_id == "profile_review":
-            if not user_data.get("profile_loaded"):
-                continue
-        elif step_id == "kinematics":
-            if "kinematics" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "x_volume":
-            if "x_size" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "y_volume":
-            if "y_size" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "z_volume":
-            if "z_size" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "x_limits":
-            if "x_position_min" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "y_limits":
-            if "y_position_min" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "z_limits":
-            if "z_position_min" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "probe_offsets":
-            probe = user_data.get("probe")
-            if probe is None or probe == "None":
-                continue
-        elif step_id == "hotend_therm":
-            if "hotend_thermistor" in user_data.get("_authoritative", set()):
-                continue
-        elif step_id == "bed_therm":
-            if "bed_thermistor" in user_data.get("_authoritative", set()):
-                continue
-        active.append(step_id)
-    return active
-
-
 _SUPPRESS_HEADERS = False
 
 def set_suppress_headers(suppress: bool) -> None:
@@ -66,7 +11,7 @@ def set_suppress_headers(suppress: bool) -> None:
     global _SUPPRESS_HEADERS
     _SUPPRESS_HEADERS = suppress
 
-def _print_step_header(step_id: str, user_data: dict) -> None:
+def _print_step_header(step_id: str, user_data: dict, *, active_steps=None) -> None:
     """Print a visually rich step header box in stdout if quiet/auto mode is not enabled."""
     if get_mode() == "Advanced":
         return
@@ -86,16 +31,19 @@ def _print_step_header(step_id: str, user_data: dict) -> None:
     translated_phase = t(phase_key) if phase_key else phase
 
     # Get active steps in phase
-    active_steps = _get_active_phase_steps(phase, user_data)
+    active_steps = active_steps if active_steps is not None else [step_id]
     try:
         step_idx = active_steps.index(step_id) + 1
     except ValueError:
         step_idx = 1
-    total_steps = len(active_steps)
 
     # Get header and hint translations
     header_key = f"wizard.step.{step_id}.header"
     hint_key = f"wizard.step.{step_id}.hint"
+    if step_id.startswith("custom_probe"):
+        header_key = ("wizard.step.probe_offsets.header" if step_id in
+                      ("custom_probe_offset_preview", "custom_probe_offsets") else f"wizard.step.{step_id}.header")
+        hint_key = "wizard.step.probe_offsets.hint" if step_id.endswith(("preview", "offsets")) else "wizard.custom_probe_guided_hint"
     header_text = t(header_key)
     hint_text = t(hint_key)
 
@@ -109,18 +57,17 @@ def _print_step_header(step_id: str, user_data: dict) -> None:
 
     lbl_phase = t("wizard.phase_label") or "Phase"
     lbl_step = t("wizard.step_label") or "Step"
-    lbl_of = t("wizard.of_label") or "of"
 
     # Print the beautiful UI block
     box_width = 72
     print(f"\n{C_BORDER}┌" + "─" * (box_width - 2) + f"┐{C_RESET}")
     
     # Phase & Step progress line
-    content = f"{lbl_phase}: {translated_phase} | {lbl_step} {step_idx} {lbl_of} {total_steps}"
+    content = f"{lbl_phase}: {translated_phase} | {lbl_step} {step_idx}"
     padding_len = box_width - 4 - len(content)
     left_padding = padding_len // 2
     right_padding = padding_len - left_padding
-    print(f"{C_BORDER}│ {C_RESET}{' ' * left_padding}{C_PHASE}{lbl_phase}: {translated_phase}{C_RESET} | {C_STEP}{lbl_step} {step_idx} {lbl_of} {total_steps}{C_RESET}{' ' * right_padding} {C_BORDER}│{C_RESET}")
+    print(f"{C_BORDER}│ {C_RESET}{' ' * left_padding}{C_PHASE}{lbl_phase}: {translated_phase}{C_RESET} | {C_STEP}{lbl_step} {step_idx}{C_RESET}{' ' * right_padding} {C_BORDER}│{C_RESET}")
     
     print(f"{C_BORDER}├" + "─" * (box_width - 2) + f"┤{C_RESET}")
     

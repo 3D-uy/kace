@@ -88,16 +88,18 @@ class TestGetDisplayCompat(unittest.TestCase):
         self.assertEqual(result["status"], "unsupported")
         self.assertEqual(result["recommendation"], "disconnect")
 
-    def test_standard_display_is_supported(self):
+    def test_standard_display_requires_hardware_evidence(self):
         result = get_display_compat("display")
         self.assertIsNotNone(result)
-        self.assertEqual(result["status"], "supported")
+        self.assertEqual(result["status"], "untested")
+        self.assertEqual(result["hardware_evidence"], "unknown")
         self.assertEqual(result["recommendation"], "none")
 
-    def test_tft_serial_is_partial(self):
+    def test_tft_serial_requires_hardware_evidence(self):
         result = get_display_compat("tft_serial")
         self.assertIsNotNone(result)
-        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["status"], "untested")
+        self.assertEqual(result["hardware_evidence"], "unknown")
 
     def test_unknown_section_returns_none(self):
         result = get_display_compat("completely_unknown_display_type_xyz")
@@ -113,7 +115,8 @@ class TestGetDisplayCompat(unittest.TestCase):
     def test_artillery_sidewinder_matched_via_printer_filename(self):
         result = get_display_compat("display", printer_filename="printer-artillery-sidewinder-x1.cfg")
         self.assertIsNotNone(result)
-        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["status"], "untested")
+        self.assertEqual(result["hardware_evidence"], "unknown")
         self.assertEqual(result["source"], "printer_profile")
 
     def test_section_lookup_fallback_when_no_printer_match(self):
@@ -161,11 +164,11 @@ class TestCheckDisplayCompatibility(unittest.TestCase):
         self.assertEqual(result[0]["status"], "unsupported")
         self.assertEqual(result[0]["section"], "t5uid1")
 
-    def test_standard_display_is_found_but_supported(self):
+    def test_standard_display_without_board_is_found_but_untested(self):
         parsed = {"display": {"lcd_type": "st7920"}}
         result = check_display_compatibility(parsed)
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["status"], "supported")
+        self.assertEqual(result[0]["status"], "untested")
 
     def test_unknown_display_section_classifies_as_untested(self):
         parsed = {"future_display_type": {"pin": "PB0"}}
@@ -183,7 +186,8 @@ class TestCheckDisplayCompatibility(unittest.TestCase):
             printer_filename="printer-artillery-sidewinder-x1.cfg"
         )
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["status"], "partial")
+        self.assertEqual(result[0]["status"], "untested")
+        self.assertEqual(result[0]["hardware_evidence"], "unknown")
         self.assertEqual(result[0]["source"], "printer_profile")
 
     def test_no_duplicate_findings_when_printer_profile_and_section_overlap(self):

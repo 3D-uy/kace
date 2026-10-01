@@ -2,6 +2,7 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock
 from core.menu import Choice
+from core.terminal import WARNING, RESET
 
 from core.translations import get_mode, set_mode, t
 from core.wizard.ui import _print_step_header
@@ -74,7 +75,7 @@ class TestWizardModes(unittest.TestCase):
         titles = [c.title if hasattr(c, 'title') else (c.get('name', '') if isinstance(c, dict) else str(c)) for c in choices]
 
         # Verify recommended suffixes exist
-        self.assertTrue(any("✓ Recommended" in t for t in titles))
+        self.assertTrue(any(title == f"TMC2209 {WARNING}{t('choice.recommended')}{RESET}" for title in titles))
         self.assertTrue(any("Not Recommended" in t for t in titles))
 
     @patch("core.wizard.steps.hardware.numbered_select")
@@ -101,7 +102,7 @@ class TestWizardModes(unittest.TestCase):
 
         # Verify recommended suffixes do not exist
         for title in titles:
-            self.assertNotIn("✓ Recommended", title)
+            self.assertNotIn(t("choice.recommended"), title)
             self.assertNotIn("Not Recommended", title)
 
     @patch("core.wizard.steps.hardware.numbered_select")
@@ -124,7 +125,7 @@ class TestWizardModes(unittest.TestCase):
         choices = args[1] if len(args) > 1 else kwargs.get("choices", [])
         names = [c.get("name", "") if isinstance(c, dict) else str(c) for c in choices]
 
-        self.assertTrue(any("✓ Recommended" in n for n in names))
+        self.assertTrue(any(n == f"E1 {WARNING}{t('choice.recommended')}{RESET}" for n in names))
 
     @patch("core.wizard.steps.hardware.numbered_select")
     @patch("core.wizard.steps.hardware.get_reusable_driver_sockets")
@@ -147,7 +148,7 @@ class TestWizardModes(unittest.TestCase):
         names = [c.get("name", "") if isinstance(c, dict) else str(c) for c in choices]
 
         for name in names:
-            self.assertNotIn("✓ Recommended", name)
+            self.assertNotIn(t("choice.recommended"), name)
 
     @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
     def test_phase_complete_banner_beginner(self, mock_stdout):

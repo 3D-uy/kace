@@ -319,7 +319,7 @@ def check_klipper_ready(host: str, port: int, api_key: str = None) -> tuple[bool
     url = f"{_base_url(host, port)}/printer/info"
     ok, msg, body = _get(url, api_key=api_key)
     if not ok:
-        return False, f"unreachable: {msg}"
+        return False, f"Moonraker /printer/info request failed: {msg}"
     
     result = body.get("result", {})
     state = result.get("state", "unknown")
@@ -346,11 +346,12 @@ def get_klipper_state(host: str, port: int = DEFAULT_PORT, api_key: str = None) 
         "startup"      - Klipper is initialising (MCUs not yet connected)
         "shutdown"     - Klipper entered a shutdown state (MCU error etc.)
         "error"        - Klipper encountered a fatal error
-        "disconnected" - Moonraker cannot reach klippy
+        "disconnected" - Reported Klippy disconnect, or /printer/info request failed
         "unknown"      - Unexpected or unparseable response
 
     Prefer this over check_klipper_ready() when you need to branch on
     specific states rather than a simple ready/not-ready boolean.
+    A failed request does not establish the Linux host's state or its cause.
     """
     url = f"{_base_url(host, port)}/printer/info"
     ok, msg, body = _get(url, api_key=api_key)

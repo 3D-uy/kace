@@ -36,7 +36,8 @@ class TestMacroGenerator(unittest.TestCase):
         with open(macros_path, "r", encoding="utf-8") as macros_file:
             content = macros_file.read()
         self.assertIn("G1 X30 Y35 Z6 F3000", content)
-        self.assertIn("G1 X6 Y7 Z6 F3000", content)
+        self.assertIn("G1 X{ 6 - p.x } Y{ 7 - p.y } F3000", content)
+        self.assertIn("G1 Z5 F3000", content)
         self.assertNotIn("X110 Y110 Z50", content)
 
     def test_macro_z_positions_respect_positive_minimum(self):

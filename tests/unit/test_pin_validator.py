@@ -2,15 +2,14 @@
 tests/unit/test_pin_validator.py
 ================================
 Tests for the pre-flight config validation that prevents a malformed
-printer.cfg from being pushed to a low-RAM Pi.
+printer.cfg from being published.
 
 Background
 ----------
-The bug that motivated this: a generated printer.cfg containing only the
-Mainsail client macro body (no [mcu], no [printer], no steppers) was
-uploaded to a Raspberry Pi 3. Klipper fatal'd with
-"Option 'serial' in section 'mcu' must be specified", systemd restart-
-looped it, and the 1 GB Pi OOM-killed sshd/networking — total lockout.
+A macro-only printer.cfg (no [mcu], no [printer], no steppers) is a structural
+defect. These fixtures reproduce that defect, not a Linux outage. They provide
+no evidence of a systemd restart loop or OOM and do not determine the cause of
+the historical loss of access to the Pi.
 
 validate_required_sections() catches that class of defect before upload.
 validate_pins_for_mcu() catches cross-family pin-namespace mixes

@@ -3,6 +3,156 @@
 # Each entry maps language name -> display string.
 
 UI_STRINGS: dict = {
+    "menu.yes_no_default_yes": {
+        "English": "[y/n] (Enter: yes)",
+        "Español": "[s/n] (Enter: sí)",
+        "Português": "[s/n] (Enter: sim)",
+    },
+    "menu.yes_no_default_no": {
+        "English": "[y/n] (Enter: no)",
+        "Español": "[s/n] (Enter: no)",
+        "Português": "[s/n] (Enter: não)",
+    },
+    "menu.search_help": {"English": "This list has {count} options. Type text to filter.", "Español": "Esta lista tiene {count} opciones. Escriba texto para filtrar.", "Português": "Esta lista tem {count} opções. Digite texto para filtrar."},
+    "menu.search_prompt": {"English": "Search (Enter accepts {value}):", "Español": "Buscar (Enter acepta {value}):", "Português": "Buscar (Enter aceita {value}):"},
+    "menu.search_no_matches": {"English": "No matches found for '{query}'. Please try again.", "Español": "No hay coincidencias para '{query}'. Intente de nuevo.", "Português": "Nenhum resultado para '{query}'. Tente novamente."},
+    "menu.search_matches": {"English": "Matches for '{query}':", "Español": "Coincidencias para '{query}':", "Português": "Resultados para '{query}':"},
+    "menu.search_select": {"English": "Select [1-{count}] or type a new query:", "Español": "Seleccione [1-{count}] o escriba otra búsqueda:", "Português": "Selecione [1-{count}] ou digite outra busca:"},
+    "menu.search_retry": {"English": "No matches found for '{query}'. Returning to search.", "Español": "No hay coincidencias para '{query}'. Volviendo a la búsqueda.", "Português": "Nenhum resultado para '{query}'. Voltando à busca."},
+    "menu.invalid_choice": {"English": "Invalid choice. Please select a number between 1 and {count}.", "Español": "Opción inválida. Seleccione un número entre 1 y {count}.", "Português": "Opção inválida. Selecione um número entre 1 e {count}."},
+    "menu.invalid_input": {"English": "Invalid input. Please try again.", "Español": "Entrada inválida. Intente de nuevo.", "Português": "Entrada inválida. Tente novamente."},
+    "menu.yes_no_expected": {"English": "Please enter 'y' or 'n'.", "Español": "Ingrese 's' o 'n'.", "Português": "Digite 's' ou 'n'."},
+    "mcu.auto_detected": {"English": "Connected MCU auto-detected:", "Español": "MCU conectada detectada automáticamente:", "Português": "MCU conectada detectada automaticamente:"},
+    "wizard.driver_standard": {"English": "Other STEP/DIR driver (no UART/SPI)", "Español": "Otro driver STEP/DIR (sin UART/SPI)", "Português": "Outro driver STEP/DIR (sem UART/SPI)"},
+    "choice.recommended": {"English": "(recommended)", "Español": "(recomendado)", "Português": "(recomendado)"},
+    "wizard.driver_not_recommended": {"English": "Not Recommended for integrated TMC", "Español": "No recomendado para TMC integrado", "Português": "Não recomendado para TMC integrado"},
+    "wizard.probe_none": {"English": "None", "Español": "Ninguna", "Português": "Nenhuma"},
+    "wizard.probe_inductive": {"English": "Inductive", "Español": "Inductiva", "Português": "Indutiva"},
+    "wizard.step.homing_directions.header": {"English": "Homing directions", "Español": "Sentidos de búsqueda de origen", "Português": "Sentidos de busca da origem"},
+    "wizard.step.homing_directions.hint": {"English": "The endstop position determines the homing direction. Confirm the direction when it cannot be inferred from the travel limits.", "Español": "La posición del final de carrera determina el sentido de búsqueda de origen. Confirme el sentido cuando no se pueda deducir de los límites de recorrido.", "Português": "A posição do fim de curso determina o sentido da busca da origem. Confirme o sentido quando não for possível deduzi-lo dos limites de movimento."},
+    "wizard.custom_probe_guided_hint": {"English": "Configure the probe one field at a time. KACE assembles the [probe] block for review before continuing.", "Español": "Configure la sonda campo por campo. KACE prepara el bloque [probe] para revisarlo antes de continuar.", "Português": "Configure a sonda campo por campo. O KACE prepara o bloco [probe] para revisão antes de continuar."},
+    "wizard.step.custom_probe_pin.header": {"English": "Probe input pin", "Español": "Pin de entrada de la sonda", "Português": "Pino de entrada da sonda"},
+    "wizard.step.custom_probe_pullup.header": {"English": "Internal pull-up", "Español": "Resistencia pull-up interna", "Português": "Resistor pull-up interno"},
+    "wizard.step.custom_probe_inverted.header": {"English": "Probe signal polarity", "Español": "Polaridad de la señal de la sonda", "Português": "Polaridade do sinal da sonda"},
+    "wizard.step.custom_probe_z_offset.header": {"English": "Probe Z offset", "Español": "Desplazamiento Z de la sonda", "Português": "Deslocamento Z da sonda"},
+    "wizard.step.custom_probe_speed.header": {"English": "Probe speed", "Español": "Velocidad de sondeo", "Português": "Velocidade de sondagem"},
+    "wizard.step.custom_probe_samples.header": {"English": "Readings per point", "Español": "Lecturas por punto", "Português": "Leituras por ponto"},
+    "wizard.step.custom_probe_samples_result.header": {"English": "Combining probe readings", "Español": "Combinación de lecturas", "Português": "Combinação das leituras"},
+    "wizard.step.custom_probe_samples_tolerance.header": {"English": "Tolerance between readings", "Español": "Tolerancia entre lecturas", "Português": "Tolerância entre leituras"},
+    "wizard.step.custom_probe_samples_tolerance_retries.header": {"English": "Retries outside tolerance", "Español": "Reintentos fuera de tolerancia", "Português": "Novas tentativas fora da tolerância"},
+    "wizard.step.custom_probe_sample_retract_dist.header": {"English": "Lift between readings", "Español": "Elevación entre lecturas", "Português": "Elevação entre leituras"},
+    "wizard.step.custom_probe_review.header": {"English": "Review custom probe", "Español": "Revisión de la sonda personalizada", "Português": "Revisão da sonda personalizada"},
+    "deployment.robin.direct_uart_choice": {
+        "English": "Direct UART (USART1 PA10/PA9; firmware preparation only)",
+        "Español": "UART directo (USART1 PA10/PA9; solo preparación de firmware)",
+        "Português": "UART direto (USART1 PA10/PA9; somente preparação de firmware)",
+    },
+    "deployment.robin.direct_uart_limit": {
+        "English": "KACE can prepare this USART1 firmware. Host UART provisioning and complete installation/recovery over direct UART are not supported. A USB device cannot verify this connection.",
+        "Español": "KACE puede preparar este firmware USART1. No admite la provisión del UART del host ni la instalación/recuperación completa por UART directo. Un dispositivo USB no puede verificar esta conexión.",
+        "Português": "O KACE pode preparar este firmware USART1. Não oferece provisionamento da UART do host nem instalação/recuperação completa por UART direto. Um dispositivo USB não pode verificar esta conexão.",
+    },
+    "wizard.thermal.title": {
+        "English": "🌡️ Heater protection review", "Español": "🌡️ Revisión de protección térmica", "Português": "🌡️ Revisão da proteção térmica",
+    },
+    "wizard.thermal.help": {
+        "English": "These source settings change heater fault detection. Confirm only if they apply to the installed heater and sensor. Longer check_gain_time allows more time to heat. This review does not replace hardware checks or calibration.",
+        "Español": "Estos ajustes de la fuente cambian la detección de fallos térmicos. Confirmá solo si corresponden al heater y sensor instalados. Un check_gain_time mayor permite más tiempo de calentamiento. Esta revisión no reemplaza las comprobaciones del hardware ni la calibración.",
+        "Português": "Estes ajustes da fonte alteram a detecção de falhas térmicas. Confirme somente se correspondem ao aquecedor e sensor instalados. Um check_gain_time maior permite mais tempo de aquecimento. Esta revisão não substitui as verificações de hardware nem a calibração.",
+    },
+    "wizard.thermal.confirm": {
+        "English": "Keep these protection settings for the displayed hardware?",
+        "Español": "¿Conservar estos ajustes de protección para el hardware mostrado?",
+        "Português": "Manter estes ajustes de proteção para o hardware mostrado?",
+    },
+    "wizard.thermal.declined": {
+        "English": "Thermal policy was not confirmed. Review the selected hardware and profile before generating.",
+        "Español": "No se confirmó la política térmica. Revisá el hardware y el perfil seleccionados antes de generar.",
+        "Português": "A política térmica não foi confirmada. Revise o hardware e o perfil selecionados antes de gerar.",
+    },
+    "wizard.step.tmc_currents.header": {
+        "English": "⚡ TMC motor settings", "Español": "⚡ Ajustes TMC de los motores", "Português": "⚡ Ajustes TMC dos motores",
+    },
+    "wizard.step.tmc_currents.hint": {
+        "English": "Review current and chopper mode for the selected motors.",
+        "Español": "Revisá la corriente y el modo de los motores seleccionados.",
+        "Português": "Revise a corrente e o modo dos motores selecionados.",
+    },
+    "wizard.tmc_current.title": {
+        "English": "⚡ TMC motor settings", "Español": "⚡ Ajustes TMC de los motores", "Português": "⚡ Ajustes TMC dos motores",
+    },
+    "wizard.tmc_current.help": {
+        "English": "These settings are missing, invalid or need review after a configuration change. Choose currents using the motor specifications and board/driver limits. For optional settings, a blank answer restores the board value or Klipper's default when absent.",
+        "Español": "Faltan ajustes, son inválidos o requieren revisión tras un cambio de configuración. Elegí las corrientes según las especificaciones del motor y los límites de la placa y el driver. En ajustes opcionales, dejar en blanco restaura el valor de la placa o el predeterminado de Klipper si no está declarado.",
+        "Português": "Os ajustes estão ausentes, inválidos ou precisam de revisão após uma mudança de configuração. Escolha as correntes conforme as especificações do motor e os limites da placa e do driver. Nos ajustes opcionais, deixar em branco restaura o valor da placa ou o padrão do Klipper quando ausente.",
+    },
+    "wizard.tmc_current.input": {
+        "English": "Motor {motor} — RMS current (A)", "Español": "Motor {motor} — corriente RMS (A)", "Português": "Motor {motor} — corrente RMS (A)",
+    },
+    "wizard.tmc_current.invalid": {
+        "English": "Enter a finite value: positive current within the driver's range, or a threshold of zero or more.",
+        "Español": "Ingresá un valor finito: corriente positiva dentro del rango del driver, o un umbral igual o mayor que cero.",
+        "Português": "Informe um valor finito: corrente positiva dentro da faixa do driver, ou um limite igual ou maior que zero.",
+    },
+    "wizard.tmc_current.confirm": {
+        "English": "Apply these TMC settings?", "Español": "¿Aplicar estos ajustes TMC?", "Português": "Aplicar estes ajustes TMC?",
+    },
+    "wizard.tmc_current.changed": {
+        "English": "The configuration changed. Review the TMC settings again.",
+        "Español": "Cambió la configuración. Revisá los ajustes TMC nuevamente.",
+        "Português": "A configuração mudou. Revise os ajustes TMC novamente.",
+    },
+    "wizard.tmc_current.hold_current": {
+        "English": "Motor {motor} — hold current (A RMS, optional)", "Español": "Motor {motor} — corriente de retención (A RMS, opcional)", "Português": "Motor {motor} — corrente de retenção (A RMS, opcional)",
+    },
+    "wizard.tmc_current.stealthchop_threshold": {
+        "English": "Motor {motor} — stealthChop threshold (mm/s, optional)", "Español": "Motor {motor} — umbral de stealthChop (mm/s, opcional)", "Português": "Motor {motor} — limite de stealthChop (mm/s, opcional)",
+    },
+    "wizard.tmc_current.omitted": {
+        "English": "Omitted — Klipper default", "Español": "Omitido — predeterminado de Klipper", "Português": "Omitido — padrão do Klipper",
+    },
+    "wizard.z_mechanics.title": {
+        "English": "⚙️ Mechanics of {motor}", "Español": "⚙️ Mecánica de {motor}", "Português": "⚙️ Mecânica de {motor}",
+    },
+    "wizard.z_mechanics.choose": {
+        "English": "How is this Z motor configured?", "Español": "¿Cómo está configurado este motor Z?", "Português": "Como está configurado este motor Z?",
+    },
+    "wizard.z_mechanics.keep": {
+        "English": "Keep this motor's existing values", "Español": "Conservar los valores propios de este motor", "Português": "Manter os valores próprios deste motor",
+    },
+    "wizard.z_mechanics.individual": {
+        "English": "Configure this motor individually", "Español": "Configurar este motor individualmente", "Português": "Configurar este motor individualmente",
+    },
+    "wizard.z_mechanics.same": {
+        "English": "Same motor, transmission and microsteps as primary Z", "Español": "Mismo motor, transmisión y microsteps que el Z principal", "Português": "Mesmo motor, transmissão e microsteps do Z principal",
+    },
+    "wizard.z_mechanics.rotation_distance": {
+        "English": "Travel per output revolution (mm)", "Español": "Recorrido por vuelta de salida (mm)", "Português": "Deslocamento por volta de saída (mm)",
+    },
+    "wizard.z_mechanics.microsteps": {
+        "English": "Microsteps per full step", "Español": "Microsteps por paso completo", "Português": "Microsteps por passo completo",
+    },
+    "wizard.z_mechanics.gear_ratio": {
+        "English": "Gear ratio (e.g. 80:16; 1:1 without reduction)", "Español": "Reducción (ej. 80:16; 1:1 sin reducción)", "Português": "Redução (ex. 80:16; 1:1 sem redução)",
+    },
+    "wizard.z_mechanics.full_steps_per_rotation": {
+        "English": "Motor full steps per revolution (e.g. 200 or 400)", "Español": "Pasos completos por vuelta del motor (ej. 200 o 400)", "Português": "Passos completos por volta do motor (ex. 200 ou 400)",
+    },
+    "wizard.z_mechanics.review": {
+        "English": "⚙️ Review Z motor mechanics", "Español": "⚙️ Revisar la mecánica de los motores Z", "Português": "⚙️ Revisar a mecânica dos motores Z",
+    },
+    "wizard.z_mechanics.confirm": {
+        "English": "Apply these values to the Z motors?", "Español": "¿Aplicar estos valores a los motores Z?", "Português": "Aplicar estes valores aos motores Z?",
+    },
+    "wizard.z_mechanics.changed": {
+        "English": "The mechanics context changed. Review the values again.", "Español": "Cambió el contexto de la mecánica. Revisá los valores nuevamente.", "Português": "O contexto da mecânica mudou. Revise os valores novamente.",
+    },
+    "wizard.z_mechanics.invalid": {
+        "English": "Enter a valid positive motor value; full steps must be a multiple of four.", "Español": "Ingresá un valor de motor positivo válido; los pasos completos deben ser múltiplos de cuatro.", "Português": "Informe um valor de motor positivo válido; os passos completos devem ser múltiplos de quatro.",
+    },
+    "wizard.z_mechanics.invalid_primary": {
+        "English": "Review primary Z mechanics first: {detail}", "Español": "Revisá primero la mecánica del Z principal: {detail}", "Português": "Revise primeiro a mecânica do Z principal: {detail}",
+    },
     # ── Wizard prompts ─────────────────────────────────────────
     "wizard.select_mode": {
         "English":   "Select Configuration Mode:",
@@ -69,6 +219,16 @@ UI_STRINGS: dict = {
         "Español":   "Pin personalizado...",
         "Português": "Pin personalizado...",
     },
+    "wizard.required_cooling": {
+        "English": "Required board cooling is retained: {names}. The following choice does not disable it.",
+        "Español": "Se conserva la refrigeración requerida de la placa: {names}. La siguiente selección no la desactiva.",
+        "Português": "A refrigeração necessária da placa será mantida: {names}. A próxima escolha não a desativa.",
+    },
+    "wizard.fan_no_additional": {
+        "English": "No additional fan (retain required board cooling)",
+        "Español": "Sin ventilador adicional (conservar refrigeración de la placa)",
+        "Português": "Sem ventilador adicional (manter refrigeração da placa)",
+    },
     "wizard.fan_none": {
         "English":   "None / Disable",
         "Español":   "Ninguno / Desactivar",
@@ -85,19 +245,19 @@ UI_STRINGS: dict = {
         "Português": "Selecione a Cinemática:",
     },
     "wizard.x_volume": {
-        "English":   "Enter X build volume (mm) [Ctrl+C to go back]:",
-        "Español":   "Ingrese el volumen de construcción X (mm) [Ctrl+C para volver]:",
-        "Português": "Digite o volume de impressão X (mm) [Ctrl+C para voltar]:",
+        "English":   "Enter X build volume (mm):",
+        "Español":   "Ingrese el volumen de construcción X (mm):",
+        "Português": "Digite o volume de impressão X (mm):",
     },
     "wizard.y_volume": {
-        "English":   "Enter Y build volume (mm) [Ctrl+C to go back]:",
-        "Español":   "Ingrese el volumen de construcción Y (mm) [Ctrl+C para volver]:",
-        "Português": "Digite o volume de impressão Y (mm) [Ctrl+C para voltar]:",
+        "English":   "Enter Y build volume (mm):",
+        "Español":   "Ingrese el volumen de construcción Y (mm):",
+        "Português": "Digite o volume de impressão Y (mm):",
     },
     "wizard.z_volume": {
-        "English":   "Enter Z build volume (mm) [Ctrl+C to go back]:",
-        "Español":   "Ingrese el volumen de construcción Z (mm) [Ctrl+C para volver]:",
-        "Português": "Digite o volume de impressão Z (mm) [Ctrl+C para voltar]:",
+        "English":   "Enter Z build volume (mm):",
+        "Español":   "Ingrese el volumen de construcción Z (mm):",
+        "Português": "Digite o volume de impressão Z (mm):",
     },
     "wizard.select_probe": {
         "English":   "Select Probe Type:",
@@ -110,14 +270,14 @@ UI_STRINGS: dict = {
         "Português": "Sonda personalizada",
     },
     "wizard.custom_probe_pin": {
-        "English":   "Select the probe input pin. KACE lists currently unused pins for this board:",
-        "Español":   "Seleccione el pin de entrada de la sonda. KACE muestra los pines sin usar de esta placa:",
-        "Português": "Selecione o pino de entrada da sonda. KACE lista os pinos não usados desta placa:",
+        "English":   "Select a probe input from the board configuration. Check the connector, wiring and firmware reservations:",
+        "Español":   "Seleccione una entrada de sonda de la configuración de la placa. Verificá el conector, el cableado y las reservas del firmware:",
+        "Português": "Selecione uma entrada de sonda da configuração da placa. Verifique o conector, a fiação e as reservas do firmware:",
     },
     "wizard.custom_probe_dedicated_pin": {
-        "English":   "Recommended: board PROBE connector",
-        "Español":   "Recomendado: conector PROBE de la placa",
-        "Português": "Recomendado: conector PROBE da placa",
+        "English":   "Sensor pin declared in the board's BLTouch configuration",
+        "Español":   "Pin de sensor declarado en la configuración BLTouch de la placa",
+        "Português": "Pino de sensor declarado na configuração BLTouch da placa",
     },
     "wizard.custom_probe_pullup": {
         "English":   "Enable the internal pull-up (^)? Recommended when the probe output is an open switch to ground.",
@@ -130,9 +290,9 @@ UI_STRINGS: dict = {
         "Português": "Inverter o sinal da sonda (!)? Ative apenas se o Klipper informar acionada quando ela estiver aberta.",
     },
     "wizard.custom_probe_pin_manual": {
-        "English":   "Enter a pin manually (validated against the board)",
-        "Español":   "Ingresar un pin manualmente (validado contra la placa)",
-        "Português": "Inserir um pino manualmente (validado para a placa)",
+        "English":   "Enter a pin manually from your wiring diagram",
+        "Español":   "Ingresar un pin manualmente según tu diagrama de cableado",
+        "Português": "Inserir um pino manualmente conforme seu diagrama de fiação",
     },
     "wizard.custom_probe_pin_manual_prompt": {
         "English":   "Probe input pin (for example ^PB7). This pin senses contact:",
@@ -861,6 +1021,61 @@ UI_STRINGS: dict = {
         "English":   "No exact flash strategy exists for {board}. KACE only prepared {filename}; follow the controller manufacturer's procedure.",
         "Español":   "No existe una estrategia exacta de flasheo para {board}. KACE solo preparó {filename}; siga el procedimiento del fabricante.",
         "Português": "Não existe uma estratégia exata de gravação para {board}. O KACE apenas preparou {filename}; siga o procedimento do fabricante.",
+    },
+    "deployment.robin.native_only": {
+        "English":   "KACE prepared only the native {filename}. Before SD installation, this board requires scripts/update_mks_robin.py from the Klipper revision used for the build. Renaming the native file is insufficient; KACE has not transformed it. Do not use make flash for this board.",
+        "Español":   "KACE preparó únicamente el archivo nativo {filename}. Antes de instalar por SD, esta placa requiere scripts/update_mks_robin.py de la revisión de Klipper usada para compilar. Renombrar el archivo nativo no alcanza; KACE no lo ha transformado. No use make flash para esta placa.",
+        "Português": "O KACE preparou apenas o arquivo nativo {filename}. Antes da instalação por SD, esta placa requer scripts/update_mks_robin.py da revisão do Klipper usada na compilação. Renomear o arquivo nativo não basta; o KACE não o transformou. Não use make flash para esta placa.",
+    },
+    "deployment.robin.transformed": {
+        "English": "{filename} contains the verified Robin transformation. Preserve its native klipper.bin and transformation evidence for recovery. KACE has not copied it to an SD card or verified installation.",
+        "Español": "{filename} contiene la transformación Robin verificada. Conserve su klipper.bin nativo y la evidencia de transformación para retomar el flujo. KACE no lo ha copiado a una SD ni verificado su instalación.",
+        "Português": "{filename} contém a transformação Robin verificada. Preserve seu klipper.bin nativo e a evidência de transformação para retomar o fluxo. O KACE não o copiou para um SD nem verificou a instalação.",
+    },
+    "deployment.robin.lcd_prompt": {
+        "English": "Is the original Sapphire LCD physically connected? This determines the SD filename, independently of printer.cfg.",
+        "Español": "¿La pantalla LCD original de Sapphire sigue conectada físicamente? Esto determina el nombre para SD, independientemente de printer.cfg.",
+        "Português": "O LCD original da Sapphire continua fisicamente conectado? Isso determina o nome para SD, independentemente de printer.cfg.",
+    },
+    "deployment.robin.manual_sd": {
+        "English": "Manual procedure: copy the already transformed {filename} to the controller's SD card, safely eject it, and restart only the printer with that card inserted. Do not run update_mks_robin.py again or use make flash. KACE does not perform these actions.",
+        "Español": "Procedimiento manual: copie {filename}, ya transformado, a la SD de la controladora, expúlsela de forma segura y reinicie sólo la impresora con esa tarjeta insertada. No vuelva a ejecutar update_mks_robin.py ni use make flash. KACE no realiza estas acciones.",
+        "Português": "Procedimento manual: copie {filename}, já transformado, para o SD da controladora, ejete-o com segurança e reinicie apenas a impressora com esse cartão inserido. Não execute update_mks_robin.py novamente nem use make flash. O KACE não realiza essas ações.",
+    },
+    "deployment.robin.manual_verify": {
+        "English": "After completing the manual installation, reconnect the original controller through the chosen connection and select Verify MCU in KACE. A downloaded file or a visible USB adapter alone does not verify the installed Klipper build.",
+        "Español": "Tras completar la instalación manual, reconecte la controladora original mediante la conexión elegida y seleccione Verificar MCU en KACE. Descargar el archivo o ver un adaptador USB no verifica por sí solo el build de Klipper instalado.",
+        "Português": "Após concluir a instalação manual, reconecte a controladora original pela conexão escolhida e selecione Verificar MCU no KACE. Baixar o arquivo ou enxergar um adaptador USB não verifica por si só o build do Klipper instalado.",
+    },
+    "deployment.robin.lcd_present": {
+        "English": "Original LCD connected (Robin_nano35.bin)",
+        "Español": "LCD original conectado (Robin_nano35.bin)",
+        "Português": "LCD original conectado (Robin_nano35.bin)",
+    },
+    "deployment.robin.lcd_removed": {
+        "English": "Original LCD physically removed (Robin_nano43.bin)",
+        "Español": "LCD original retirado físicamente (Robin_nano43.bin)",
+        "Português": "LCD original removido fisicamente (Robin_nano43.bin)",
+    },
+    "deployment.robin.lcd_required": {
+        "English": "Choose the physical Sapphire LCD state before automatic preparation.",
+        "Español": "Elija el estado físico del LCD Sapphire antes de la preparación automática.",
+        "Português": "Escolha o estado físico do LCD Sapphire antes da preparação automática.",
+    },
+    "deployment.robin.lcd_invalid": {
+        "English": "Saved physical LCD choice is invalid; review the hardware selection.",
+        "Español": "La elección guardada del LCD físico no es válida; revise la selección de hardware.",
+        "Português": "A escolha salva do LCD físico é inválida; revise a seleção de hardware.",
+    },
+    "deployment.robin.kingroon_name": {
+        "English":   "The official Kingroon KP3S profile requires the transformed output named Robin_nano.bin. KACE has not copied firmware to an SD card or verified installation.",
+        "Español":   "El perfil oficial Kingroon KP3S requiere la salida transformada con el nombre Robin_nano.bin. KACE no ha copiado firmware a una SD ni verificado su instalación.",
+        "Português": "O perfil oficial Kingroon KP3S exige a saída transformada com o nome Robin_nano.bin. O KACE não copiou firmware para um SD nem verificou a instalação.",
+    },
+    "deployment.robin.sapphire_name": {
+        "English":   "The official Sapphire profile names the transformed output Robin_nano35.bin, or Robin_nano43.bin if the original LCD was physically removed. Disabling a display in printer.cfg does not determine this condition. KACE has not selected the final name, copied firmware to an SD card or verified installation.",
+        "Español":   "El perfil oficial Sapphire indica Robin_nano35.bin para la salida transformada, o Robin_nano43.bin si se retiró físicamente la pantalla LCD original. Desactivar una pantalla en printer.cfg no determina esa condición. KACE no ha elegido el nombre final, copiado firmware a una SD ni verificado su instalación.",
+        "Português": "O perfil oficial Sapphire indica Robin_nano35.bin para a saída transformada, ou Robin_nano43.bin se o LCD original foi removido fisicamente. Desativar uma tela em printer.cfg não determina essa condição. O KACE não escolheu o nome final, copiou firmware para um SD nem verificou a instalação.",
     },
     "deployment.ramps.prepare": {
         "English":   "The RAMPS/ATmega2560 artifact is {filename}; do not copy this IHEX file to removable media.",
@@ -1743,6 +1958,16 @@ UI_STRINGS: dict = {
         "Español":   "Experimental",
         "Português": "Experimental",
     },
+    "display.class_unknown": {
+        "English": "Unknown hardware compatibility",
+        "Español": "Compatibilidad de hardware desconocida",
+        "Português": "Compatibilidade de hardware desconhecida",
+    },
+    "display.hardware_evidence_required": {
+        "English": "Cannot configure this display: board identity, interface and electrical evidence are required.",
+        "Español": "No se puede configurar esta pantalla: faltan datos de identidad, interfaz o compatibilidad eléctrica de la placa.",
+        "Português": "Não é possível configurar este display: faltam dados de identidade, interface ou compatibilidade elétrica da placa.",
+    },
     "display.class_unsafe": {
         "English":   "UNSAFE / HIGH RISK",
         "Español":   "INSEGURO / ALTO RIESGO",
@@ -2303,7 +2528,11 @@ UI_STRINGS.update({
         "Español": "Moonraker remoto no puede reemplazar con seguridad la configuración revisada. Ejecutá KACE en la Raspberry para instalarla localmente.",
         "Português": "O Moonraker remoto não pode substituir com segurança a configuração revisada. Execute o KACE no Raspberry para instalar localmente.",
     },
-    "deploy.local_active": {"English": "Moonraker", "Español": "Moonraker", "Português": "Moonraker"},
+    "deploy.local_active": {
+        "English": "Moonraker (apply configuration on this Raspberry Pi)",
+        "Español": "Moonraker (aplicar configuración en esta Raspberry Pi)",
+        "Português": "Moonraker (aplicar configuração neste Raspberry Pi)",
+    },
     "firmware.resume.pending": {"English": "An installation is pending. Continue it or start over?", "Español": "Hay una instalación pendiente. ¿Continuar o empezar de cero?", "Português": "Há uma instalação pendente. Continuar ou começar do zero?"},
     "firmware.resume.discard": {"English": "Discard the pending workflow and start over?", "Español": "¿Descartar el flujo pendiente y empezar de cero?", "Português": "Descartar o fluxo pendente e começar do zero?"},
     "installation.complete": {

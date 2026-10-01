@@ -8,6 +8,7 @@ import hashlib
 import tempfile
 
 from core.translations import t
+from firmware.board_serial import KINGROON, SAPPHIRE
 
 from .models import (
     DeploymentArtifactError,
@@ -19,6 +20,7 @@ from .models import (
     DeploymentStrategyId,
     PreparedDeployment,
     require_deployable_artifact,
+    verify_prepared_artifact,
 )
 
 
@@ -38,6 +40,12 @@ class ManualDeploymentMethod:
             if profile.strategy is DeploymentStrategyId.PREPARE_ONLY
             else "board-specific SD-card deployment requires user action"
         )
+        instruction_keys = profile.instruction_keys
+        if profile.strategy is DeploymentStrategyId.PREPARE_ONLY and target.board in (KINGROON, *SAPPHIRE):
+            instruction_keys = (
+                "deployment.robin.native_only",
+                "deployment.robin.kingroon_name" if target.board == KINGROON else "deployment.robin.sapphire_name",
+            )
         instructions = tuple(
             DeploymentInstruction(
                 key,
@@ -48,7 +56,7 @@ class ManualDeploymentMethod:
                     device=target.device_path or "the board's verified serial device",
                 ),
             )
-            for key in profile.instruction_keys
+            for key in instruction_keys
         )
         return DeploymentPlan(
             deployment_id=deployment_id,
@@ -69,12 +77,7 @@ class ManualDeploymentMethod:
         context: DeploymentExecutionContext,
     ) -> DeploymentResult:
         try:
-            require_deployable_artifact(prepared.plan.artifact)
-            staged_digest = self._sha256(prepared.staged_path)
-            if staged_digest != prepared.sha256 or staged_digest != prepared.plan.artifact.sha256:
-                raise DeploymentArtifactError(
-                    "prepared firmware checksum no longer matches the immutable artifact"
-                )
+            verify_prepared_artifact(prepared)
         except (DeploymentArtifactError, OSError) as exc:
             return DeploymentResult(
                 DeploymentStatus.FAILED,

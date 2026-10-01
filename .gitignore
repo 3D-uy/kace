@@ -81,7 +81,6 @@ docker-compose.prod.yml
 
 # Personal files
 docs/PRD.md
-docs/en/ARCHITECTURE.md
 
 # Test results
 tests/results/

@@ -153,8 +153,11 @@ def validate_display_selection(user_data: Mapping[str, object], parsed_data: Map
         key,
         str(user_data.get("board") or ""),
         dict(parsed_data),
+        str(user_data.get("mcu_type") or ""),
     )
     compatibility = hardware.get("compatibility_class", "experimental")
+    if hardware.get("hardware_evidence") == "unknown":
+        raise GenerationError("Unknown display hardware compatibility: board identity, interface and electrical evidence are required.")
     if compatibility == "unsafe" and user_data.get("display_risk_accepted") is not True:
         raise GenerationError("Unsafe display selection requires explicit risk acceptance.")
     fields = parsed_data.get(key)

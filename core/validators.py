@@ -29,6 +29,19 @@ def questionary_pin_validator(value: str) -> Union[bool, str]:
     return "Invalid Klipper pin format. Use alphanumeric characters, dots, underscores, and optional prefixes (!, ^, ~)"
 
 
+def questionary_fan_pin_validator(value: str) -> Union[bool, str]:
+    """PWM outputs allow one leading inversion, never input pull-up/down.
+
+    Retain the existing pin-name vocabulary; chip existence and physical PWM
+    capability must still be checked by Klipper. Do not normalize away polarity.
+    """
+    token = value.strip()
+    if (validate_klipper_pin(token)
+            and not any(char in token.removeprefix("!") for char in "!^~")):
+        return True
+    return "Invalid fan pin. Use [!]pin or [!]chip:pin; PWM outputs do not support ^ or ~."
+
+
 def questionary_numeric_validator(value: str) -> Union[bool, str]:
     """Validator for questionary.text numeric/limits inputs."""
     val_strip = value.strip().lower()

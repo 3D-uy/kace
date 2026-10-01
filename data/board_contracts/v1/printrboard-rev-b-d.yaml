@@ -62,12 +62,12 @@ hardware_variants:
           provenance:
             - {source: klipper-kconfig, reference: src/avr/Kconfig:CONFIG_AVR_USB, detail: Native USB communication for at90usb1286}
         low_level:
-          enabled: false
+          enabled: true
           startup_gpio: []
           provenance:
-            - {source: klipper-kconfig, reference: src/Kconfig:CONFIG_LOW_LEVEL_OPTIONS, detail: No low-level option required by official header}
+            - {source: klipper-kconfig, reference: src/avr/Kconfig, detail: LOW_LEVEL_OPTIONS makes the explicit processor speed and USB choices selectable}
         requested_kconfig:
-          CONFIG_LOW_LEVEL_OPTIONS: false
+          CONFIG_LOW_LEVEL_OPTIONS: true
           CONFIG_MACH_AVR: true
           CONFIG_MACH_at90usb1286: true
           CONFIG_AVR_FREQ_16000000: true
@@ -103,4 +103,4 @@ warnings:
     incompatible_board_ids: []
     provenance:
       - {source: klipper-config-header, reference: config/generic-printrboard.cfg, detail: Explicit upstream warning}
-contract_digest: 9e028352c6c23164e269ad2fc0b57782bf781b7dc64af5475d80ea46558903fd
+contract_digest: 1539e4c817fdf6bcde715dd40608b2dc496639d7f3c01981fe7e74623368a176

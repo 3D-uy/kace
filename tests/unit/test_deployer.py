@@ -164,6 +164,68 @@ class MoonrakerBoundaryTests(unittest.TestCase):
         self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
         check.assert_not_called()
 
+    def test_effective_http_url_never_prompts_to_send_api_key(self):
+        for host, port in (
+            ("pi.local", "7125"),
+            ("http://pi.local", "7125"),
+            ("pi.local:443", "7125"),
+            ("http://pi.local", "443"),
+        ):
+            with self.subTest(host=host, port=port), \
+                    patch("core.menu.simple_input", side_effect=[host, port, "test-key"]), \
+                    patch("core.menu.yes_no") as confirm, \
+                    patch("urllib.request.urlopen") as request, \
+                    patch("core.config_transaction.configuration_transport") as transport, \
+                    patch("core.deployer._run_config_transaction") as run:
+                result = deploy_moonraker({})
+                self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
+                self.assertEqual(result.detail, "Moonraker API key requires an effective HTTPS URL.")
+                request.assert_not_called()
+                confirm.assert_not_called()
+                transport.assert_not_called()
+                run.assert_not_called()
+
+    def test_https_key_and_http_without_key_pass_only_the_credential_gate(self):
+        for host, port, key, expected_url in (
+            ("https://pi.local:8443", "7125", "test-key", "https://pi.local:8443/server/info"),
+            ("https://pi.local", "8443", "test-key", "https://pi.local:8443/server/info"),
+            ("127.0.0.1", "7125", "", "http://127.0.0.1:7125/server/info"),
+        ):
+            with self.subTest(host=host, port=port), \
+                    patch("core.menu.simple_input", side_effect=[host, port, key]), \
+                    patch("core.menu.yes_no") as confirm, \
+                    patch("urllib.request.urlopen") as request, \
+                    patch("core.config_transaction.configuration_transport") as transport, \
+                    patch("core.deployer._run_config_transaction") as run:
+                request.return_value.__enter__.return_value.read.return_value = (
+                    b'{"result": {"moonraker_version": "test"}}'
+                )
+                # Transport authority is independent of successful credential preflight.
+                transport.return_value.supports_conditional_write.return_value = False
+                result = deploy_moonraker({})
+                request.assert_called_once()
+                req = request.call_args.args[0]
+                self.assertEqual(req.full_url, expected_url)
+                self.assertEqual(req.get_header("X-api-key"), key or None)
+                transport.assert_called_once_with(host, int(port), key or None)
+                self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
+                self.assertNotIn("API key requires", result.detail)
+                confirm.assert_not_called()
+                run.assert_not_called()
+
+    def test_local_failed_anonymous_probe_does_not_send_entered_key(self):
+        self.local_available.return_value = True
+        with patch("core.menu.simple_input", side_effect=["7125", "test-key"]), \
+                patch("core.moonraker.check_moonraker", return_value=(False, "unauthorized")) as check, \
+                patch("core.menu.yes_no") as confirm, \
+                patch("core.config_transaction.configuration_transport") as transport:
+            result = deploy_moonraker({"moonraker_api_key": "saved-remote-key"})
+        check.assert_called_once_with("127.0.0.1", 7125, api_key="")
+        self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
+        self.assertEqual(result.detail, "Moonraker API key requires an effective HTTPS URL.")
+        confirm.assert_not_called()
+        transport.assert_not_called()
+
     @patch("core.deployer._run_config_transaction", return_value=success("done"))
     @patch("core.menu.numbered_select", return_value="firmware")
     @patch("core.moonraker.check_moonraker", return_value=(True, "OK"))

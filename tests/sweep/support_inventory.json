@@ -1,0 +1,1351 @@
+{
+  "schema_version": 1,
+  "klipper_ref": "fe4eb8650bd7de4c2100a14eaf09b0965c430e29",
+  "scope": "Reviewed source/scenario inventory only; no board certification or permission to accept generic failures.",
+  "profiles": [
+    {
+      "filename": "generic-alligator-r2.cfg",
+      "source_sha256_lf": "5abcbfa9352d2a8e2889299c6fa1f92ef5024b2143649cd5747520b7d0f81753",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-alligator-r3.cfg",
+      "source_sha256_lf": "2f035ce704aae04ec865aed3fd553c39a7964974c9b3d30a0dcc83219e6515a8",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-archim2.cfg",
+      "source_sha256_lf": "ffdd451cbb5cb55df55e9926a12b436c731102a1dd9cbeb91d0927175add162a",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-azteeg-x5-mini-v3.cfg",
+      "source_sha256_lf": "579ecaa65dd78cf8e618f889f221035401ba1bd5e942692e89e4ee14868c5ce5",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-bigtreetech-e3-rrf-v1.1.cfg",
+      "source_sha256_lf": "34fc88ae8017d6475887d1a2a2b63ecad19415a9b4169f53357bf82cf76ff570",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-gtr.cfg",
+      "source_sha256_lf": "465906f3aa5f7c8104a47e684a4ddc2ab19b735d9aef876330720407218640e4",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-manta-e3ez.cfg",
+      "source_sha256_lf": "249884c4eeaa51c6cc6a89516901bc56268917ca7f900086fb81d83d8f63cef6",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-manta-m4p.cfg",
+      "source_sha256_lf": "21397daab1bdb49fd751765964912a091a262134c6b88d4049e351d625400cbd",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-manta-m5p.cfg",
+      "source_sha256_lf": "7cffb0dc0ec6bd755b628bb7a244fd1c4367f76216864d2392a22873960896a3",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-manta-m8p-v1.0.cfg",
+      "source_sha256_lf": "ac7b91ff531a82aa47bc41146f76cbb1a821ce088f0b524ffdc8acc078818130",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-manta-m8p-v1.1.cfg",
+      "source_sha256_lf": "98bd0b4a7873225d7be950eb94e72ece996a55263f2edcb22ca1353006e0d4f2",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-octopus-max-ez.cfg",
+      "source_sha256_lf": "7a043ad092aafba54564f83322ea81f2c6affa7d03243ab71828c9bcc67782d1",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-octopus-pro-v1.0.cfg",
+      "source_sha256_lf": "059491cc40df909403b4a6bafb715d6b112c9d5e5e996468a1e20df76ef7c71d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-octopus-pro-v1.1.cfg",
+      "source_sha256_lf": "e4dd0423b842dbe5ef4ca54d07501296370e1665619bd91c327456d20507d213",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-octopus-v1.1.cfg",
+      "source_sha256_lf": "4a986df11c6e79c6ced396ed8b5dd9035e9820b074a12ed3a9bb6ae3898c0acb",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-2.cfg",
+      "source_sha256_lf": "47dba0d579476dde1774aef3d3ff3d5cc65cf439ac00e20446ae02dd945b747e",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-3.cfg",
+      "source_sha256_lf": "dac439f478b56596728bb275598ddd552c095e1a3e7e4db0eaedf0d487129e0d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-cr6-v1.0.cfg",
+      "source_sha256_lf": "2d8b214b56d73db304b3ed3f6f6a0eef47f49df1485f5bee46f8893bd36871cd",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-e3-dip.cfg",
+      "source_sha256_lf": "16d19c5d932bab3799b375bc605e8fcae0312e733b270dbe51137741b36d774e",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-e3-turbo.cfg",
+      "source_sha256_lf": "dbaa1b9c5202b166bc9f93b5fc03223d45d18cb9a4e0b2936f86b53f0254c2cd",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-mini-e3-v1.0.cfg",
+      "source_sha256_lf": "c632dabe4e22372fbf77884775fffd86e10516639aecb3ec8ca3fa88ac8a1a68",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-mini-e3-v1.2.cfg",
+      "source_sha256_lf": "d08565d1a55aa91945ab2cb07bec86f1755075ed663fb5f926832ba1078c5a6b",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-mini-e3-v2.0.cfg",
+      "source_sha256_lf": "ac8059db8951299e157b62d5d5c4b683754ae112336383d27a6ace71e9db02e0",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-mini-e3-v3.0.cfg",
+      "source_sha256_lf": "26a86aacfab3a03e9d59e576b3382e31ba988cff27bb2b584583785e70d6e2b5",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-mini-mz.cfg",
+      "source_sha256_lf": "d0d283ddd72f8e01075d479f319c097c0a3e18f2b0e24e2133ed2a44a2f9d510",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-mini.cfg",
+      "source_sha256_lf": "5265f21dcbdec48888d9f81cfc39f9bc3148cc509a6b23a3b0bb4e838d473d73",
+      "classification": "GENERATION_INPUT_INCOMPLETE",
+      "scenario": "baseline_without_display",
+      "headless_class": "bed_circuit_absent"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-pico-v1.0.cfg",
+      "source_sha256_lf": "1e428585029f05803e270ca5faef51ad351798b41413344aabffc3f622d37b1b",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-pro.cfg",
+      "source_sha256_lf": "a0118e14809db66917f48dd8a35c97e4c58448bba44bcd4e59a04c663ce8a121",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-v1.1.cfg",
+      "source_sha256_lf": "20ada8eaccfc83b888bdc8e51dd837bb03ba7a8b956f9ff81104e79b8f418626",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-v1.3.cfg",
+      "source_sha256_lf": "9f79a5e68ae938b1b50e67f5a3a52ae7059d330b027cb4ed1bf1f3bdbba03730",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-bigtreetech-skr-v1.4.cfg",
+      "source_sha256_lf": "79c1e9f86ad355e9264ba52332262ac319aa083fd6379d0c860d49ff34156165",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-cramps.cfg",
+      "source_sha256_lf": "b3bb2661510023037128b8baa404f6f951a676999e9d934864d351f00f8456ba",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-creality-v4.2.10.cfg",
+      "source_sha256_lf": "4b4fdae49e9ef7af080c454c46433069db22059409fcb33c72406cb31c5b644d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-creality-v4.2.7.cfg",
+      "source_sha256_lf": "62dcc6271b8e3f6846eceddffea8036097520536a6c4d819bcdd71621c22ba4c",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-duet2-duex.cfg",
+      "source_sha256_lf": "b50ae266b33cb58d656d6a09609ac2d5847344a31db8c441195d6bedfef95a33",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-duet2-maestro.cfg",
+      "source_sha256_lf": "4e210734752a946cf930da784b601bafc44ca0861eae5ccdb8c3922173a04f9d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-duet2.cfg",
+      "source_sha256_lf": "a041dc4939ed48bbd7549a53339b65a02e4a3f2fd50f369405f0916527602fb3",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-duet3-6hc.cfg",
+      "source_sha256_lf": "4a5dd2ca9ad7b477e7cc305f132f627df4c5b9aed89e663b841466bd53ff4bfa",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-duet3-6xd.cfg",
+      "source_sha256_lf": "a1e20094c8febf962744e365148bc54ab01fddf9c05bcd2f19bc63a4317df4bd",
+      "classification": "GENERATION_INPUT_INCOMPLETE",
+      "scenario": "baseline_without_display",
+      "headless_class": "bed_circuit_absent"
+    },
+    {
+      "filename": "generic-duet3-mini.cfg",
+      "source_sha256_lf": "2ab87ec3b6e49d28736ca8c17f1565439942b6bdb324aa0694b76db360dbe2d2",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-einsy-rambo.cfg",
+      "source_sha256_lf": "5c7e279e7e819c679dc4b0b2c932471932bc073e6bde46b2755412850ae6a0f4",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-flyboard.cfg",
+      "source_sha256_lf": "4d31bdf5c049e4d04b0cadb65e1faf5893b1231e8cd7bc00875dd90dc65387fa",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-fysetc-cheetah-v1.1.cfg",
+      "source_sha256_lf": "ba6d18279a02fde9ede56e657e3e2b77be2bbec30c3e32e245b4f078fc1faa84",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-fysetc-cheetah-v1.2.cfg",
+      "source_sha256_lf": "7215483f87c7b81d4a463712c5d601ec868664bf2cbb4d9f898e117cb10066bf",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-fysetc-cheetah-v2.0.cfg",
+      "source_sha256_lf": "59db8d8e3b4958d3b58b21db505ad515ff86a262b45307f173390f4ac405cd3b",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-fysetc-f6.cfg",
+      "source_sha256_lf": "6e1c5533c7c45557f798edb97e0d334e7e7b3aa02970054deda0367971817a5b",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-fysetc-s6-v2.cfg",
+      "source_sha256_lf": "83e3172e2568c0a06d242e59a47b76ef7d53830216f9c49a9aab372176478d0a",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-fysetc-s6.cfg",
+      "source_sha256_lf": "1dfdf87e875377586ec6cba0358e009a4038cbf06535431b3712caa33a2d204d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-fysetc-spider.cfg",
+      "source_sha256_lf": "7d68a9f73a32273bfced0ccfbb009d5745f218d4957f476fb2d5c01de7eb7bdf",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-gt2560.cfg",
+      "source_sha256_lf": "11989c428ee149373cc018a4a8c5356ba49981d27eb38ba843d109f2aff0ce1c",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-I3DBEEZ9.cfg",
+      "source_sha256_lf": "31479d3ad128375ffe50d3507882c3932586f07ef628f504adca97df20a2ded5",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-ldo-leviathan-v1.2.cfg",
+      "source_sha256_lf": "dee74a5e7238a62364a6a3f061956378265bf0c6cc37a5059c388eba8598bac5",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mellow-fly-cdy-v3.cfg",
+      "source_sha256_lf": "56e5169067a9fdbb3ebdf3d1c368a9270632d54fbf817caf6945ca0a03317073",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mellow-fly-e3-v2.cfg",
+      "source_sha256_lf": "d6771574fcc42989577bc468001a19070453ce631c9c298defea466bc5372704",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mellow-fly-gemini-v1.cfg",
+      "source_sha256_lf": "f6508521deefdabf5a3fd72c0a3276d3c735fb452f35dd8b841e06a650e12e64",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mellow-fly-gemini-v2.cfg",
+      "source_sha256_lf": "a27cff506682b26e0cce206aa1bd15f061e1b92357176051f95bb6863e9f2d40",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mellow-super-infinty-hv.cfg",
+      "source_sha256_lf": "04fb835367eabd6bc91e4a97024086cb52ee747920767719c7cbf3b36e5a4a94",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-melzi.cfg",
+      "source_sha256_lf": "2868c38d35257ac78e3f6fd95db5cb52c1a1b3d046d94ff1407041e5f0c051ef",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mightyboard.cfg",
+      "source_sha256_lf": "2f9f577e0c0ee9b0231003e02e1caaff3c317b44bef76eafaa87e1e1995364ae",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-mini-rambo.cfg",
+      "source_sha256_lf": "5094a83bebf000563e30b379358f8b12fdc8dce16878f2c09ed8d1bc68a97803",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-minitronics1.cfg",
+      "source_sha256_lf": "3e01a89b629688a4e0a70ead02ef19a61522c8a5d78befc281d294c28eb7701e",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mks-monster8.cfg",
+      "source_sha256_lf": "3161a3c2dd276ee9a9325a61abab09febb28d3e0839ceb46b8097953a133a8c4",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "motion_policy_limit"
+    },
+    {
+      "filename": "generic-mks-robin-e3.cfg",
+      "source_sha256_lf": "cb4f86244f899fe542338fb73fa8ae28570e86ce00ddb43a8ba8c7e7a244f369",
+      "classification": "GENERATION_INPUT_INCOMPLETE",
+      "scenario": "baseline_without_display",
+      "headless_class": "bed_circuit_absent"
+    },
+    {
+      "filename": "generic-mks-robin-nano-v1.cfg",
+      "source_sha256_lf": "615ee606b6a72db9c7d809075f63ea601e7c4afeaefea414c0587c3de82c753e",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mks-robin-nano-v2.cfg",
+      "source_sha256_lf": "3847d90378ccc9acdc34e0140733366de978ae2ad39a599cb2d8568a9edc4a32",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mks-robin-nano-v3.cfg",
+      "source_sha256_lf": "b0e32b9838ae416778ae6024e290544c2c33d33bb47649432f95faee711b270d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mks-rumba32-v1.0.cfg",
+      "source_sha256_lf": "61ab9d33e1d964962833acec4e3cb575c6fbcafb34889a13d83cded86a3b8788",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-mks-sgenl.cfg",
+      "source_sha256_lf": "b11415261dd9a0b9c1cf6651cb46fad428a097f9fca210417d1545d0212cefa2",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-printrboard-g2.cfg",
+      "source_sha256_lf": "83d3cd55a4281fcc49644ae1fd396aaa252220e60a355f0dec2d8122c1fb1419",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-printrboard.cfg",
+      "source_sha256_lf": "93edf301dd3f6f91a45cdcca9189864c7493750344346d677dd5477328d0ade5",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-prusa-buddy.cfg",
+      "source_sha256_lf": "d0c9d6b6c3dd7dd2bd6c5ea3350daef1d6725a6fb2be68d6cc482e214b1f3569",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "fan_options_unreviewed"
+    },
+    {
+      "filename": "generic-radds.cfg",
+      "source_sha256_lf": "61ea513c2dc3ee88339cc67e6b66e4365c49720e7d894c7f287590e832a8f4fb",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-rambo.cfg",
+      "source_sha256_lf": "7333ebadb1b79671bf148187b952c50771fb583bbb105eb17c7a006c91d864aa",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-ramps.cfg",
+      "source_sha256_lf": "d151d257dee2a05226e28fc1c53abf0ab92a28dea8f0613c897de51ccbed7b4b",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-re-arm.cfg",
+      "source_sha256_lf": "5fde2900daa23e225f6e87cc724f721b5ea4c54e59ac16e1b45391d9554423e9",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-remram.cfg",
+      "source_sha256_lf": "2596e2f3a5c79cddf66e9bfbb490798ef01a2ab00942833457323fb9f06452e2",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-replicape.cfg",
+      "source_sha256_lf": "048b4b13970153388590edd353592c80e423bd8475e8da6c39226f725a7bdb1b",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-rumba.cfg",
+      "source_sha256_lf": "88bc775fec2506ad11d6f82bf16d876a9c95b27865bb42cd75eb9f27fb15898f",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-ruramps-v1.3.cfg",
+      "source_sha256_lf": "dc1f364d52945a14cdbcd9523ed210c2929a916f9cb520143bf4ddd5738cbb7a",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-simulavr.cfg",
+      "source_sha256_lf": "1c2cbf97179a399f73ba2902d9cefc9b9610c8f108ccf98de6ea0e13517d75cc",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-smoothieboard.cfg",
+      "source_sha256_lf": "7036a728770363558dd7e2e1efa9d163e00571e1bffbbffc80836eac2d6ce1f8",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "generic-th3d-ezboard-lite-v1.2.cfg",
+      "source_sha256_lf": "c75929275b8ff6c7e0e6f074379360354f925898ef202643c87c84b7365538ff",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-th3d-ezboard-v2.0.cfg",
+      "source_sha256_lf": "6a2a3a2c680ef7d0b83d4f3480f8aae379b47519235e206ebee59389f25cb5bd",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "generic-ultimaker-ultimainboard-v2.cfg",
+      "source_sha256_lf": "818e8d93fd70fb6b5bea3a105498303ed3ffcca0badd9719d33616ff263494e3",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-adimlab-2018.cfg",
+      "source_sha256_lf": "2e5de07d3b3811b31795265e5d14a00e7a564a6023212f03938edd69aedeb83b",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-alfawise-u30-2018.cfg",
+      "source_sha256_lf": "ef720de0a94cf99427baf7a7313925fa035cec1bf501c809dedbca37dc8add4f",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anet-a4-2018.cfg",
+      "source_sha256_lf": "6e1cd3bcb03887763b1ab202e80eff02a7601fb7a9e93932e87013400160698c",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-anet-a8-2017.cfg",
+      "source_sha256_lf": "eb586f7a62b8d957fcc7fa27b8602ddf84302539e4a8a6e0277d78e19d11df92",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anet-a8-2019.cfg",
+      "source_sha256_lf": "24dbd97ef40f81c9ceb01f397f2533db61fa3dc5abfa87a5842dc8aa9ba872af",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anet-e10-2018.cfg",
+      "source_sha256_lf": "4c13b44abcc41254f7ba29e2ae61c39899f27a156ca2d9320dd3c43fdcfea393",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anet-e16-2019.cfg",
+      "source_sha256_lf": "5482bbe0365c38ac666179a7bf2b89b258289293007b33b67736e637b7dc4a14",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anycubic-4max-2018.cfg",
+      "source_sha256_lf": "02642dc6c675fd987cd8a8b7ba603e46f1293edec5ffd85f21437e4d50801025",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anycubic-4maxpro-2.0-2021.cfg",
+      "source_sha256_lf": "3c8cd4a24feb0c7215a343910ac04361cedb46f12adf6b1b728c762863795709",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-anycubic-i3-mega-2017.cfg",
+      "source_sha256_lf": "bea8db28662ff8073d0ac34107065e62727e71b9e9f0edf3a8a7c6dfa8e7ab63",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anycubic-kobra-go-2022.cfg",
+      "source_sha256_lf": "7bd563fc811f30c22b4cf7b4cefbc748b2f0e93920758f133e603a9fe03438eb",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anycubic-kobra-plus-2022.cfg",
+      "source_sha256_lf": "9cfed8a2699c5d12695b32ef5a19c4bae55230764a990c5b725c1998684dfc9a",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-anycubic-kossel-2016.cfg",
+      "source_sha256_lf": "f75230beb9fac035943fbf7ba741b33ba5176a71da0ef6e583b961b938cba8d9",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-anycubic-kossel-plus-2017.cfg",
+      "source_sha256_lf": "94014768fa4504df3ebc4c102a8fed4f7bc09d5c2836b48a99ba153a19c431c7",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-anycubic-vyper-2021.cfg",
+      "source_sha256_lf": "e96364e54483e79ce9689e1545274f395d1612bef088de5f43c8330777864bc9",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_motor_selection",
+      "headless_class": "cooling_consumer_missing"
+    },
+    {
+      "filename": "printer-artillery-genius-pro-2022.cfg",
+      "source_sha256_lf": "5093d28f6c12131a8ea925a0c24df17f65953434c5d964cea09cd60231d81dca",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-artillery-sidewinder-x2-2022.cfg",
+      "source_sha256_lf": "a80aa706e5bffe87419facb6080d5ba6d0d33129802ab1a1aea4ebe29cbd29a2",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-artillery-sidewinder-x3-plus-2024.cfg",
+      "source_sha256_lf": "6d24dbf9c3e0cf96ec74fece24900de8a0b87bed89482193ae3caffebb0ff986",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "cooling_class_blocked"
+    },
+    {
+      "filename": "printer-biqu-b1-se-plus-2022.cfg",
+      "source_sha256_lf": "16f27f1968af5b3456fd53b6528ea3f33793479a35d25b640926eb7814eb8d6e",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-biqu-bx-2021.cfg",
+      "source_sha256_lf": "de91577493f3b57f4b2641dcd434c36ad4a835a0ad9695910caab2c579ce7596",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_motor_selection",
+      "headless_class": "tmc_selection_missing"
+    },
+    {
+      "filename": "printer-bq-hephestos-2014.cfg",
+      "source_sha256_lf": "6537f0a11fe6c8ba60aead2fe1bb6bf6081f71426ec4f9dd57f21bcc79b97070",
+      "classification": "GENERATION_INPUT_INCOMPLETE",
+      "scenario": "baseline_without_display",
+      "headless_class": "bed_circuit_absent"
+    },
+    {
+      "filename": "printer-creality-cr10-2017.cfg",
+      "source_sha256_lf": "060e902dc2863e57d08684c0c01ce7d3d95318914ac2fcb8c69fb2d716c8f0f5",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-cr10-smart-pro-2022.cfg",
+      "source_sha256_lf": "32163fb9bad224e69dcba43b4605a2596f8febae942e560424d8611d0cca370b",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-cr10-v3-2020.cfg",
+      "source_sha256_lf": "f6cd44b820a6221f42ffab5c10aafe4c7ab9fc823fdfe04c4e4263d362fd2be1",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-cr10mini-2017.cfg",
+      "source_sha256_lf": "143fb14a369c96747b2ebd62dd441a21081f151d0f97fb444bc319cfab22a540",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-cr10s-2017.cfg",
+      "source_sha256_lf": "a7dfd747aee1c874d9d73519777a78f4c9b2fbc00f2c31850fc64f09d1368cf3",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-cr10s-pro-v2-2020.cfg",
+      "source_sha256_lf": "f947ec980d46a0bbbe204e9f9d292d248c75df8c2a64f0f0fb569399e250f045",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-cr20-2018.cfg",
+      "source_sha256_lf": "274a3e56af7a4acb30447045b7cad7b4a1311de5ef032a4c41e976ca4e225827",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-cr20-pro-2019.cfg",
+      "source_sha256_lf": "48858c31d212bad4092f64888892d9d2f60c1bfa0092e8ab1c9860043f2244e6",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-cr30-2021.cfg",
+      "source_sha256_lf": "c62e69383975e264d91b8916630efeacd3537a5c2aebd862906c83afb8f7b89b",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "homing_dependency_blocked"
+    },
+    {
+      "filename": "printer-creality-cr5pro-ht-2022.cfg",
+      "source_sha256_lf": "a3fd3f90352a657dfbed4416fe57a7bc72c9da13af8ed523f814a7d5620a583a",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-cr6se-2020.cfg",
+      "source_sha256_lf": "72a6ee55db64b4c1dd6828165866daccb2f033a1c86aecaf66cbff0a7470b4c8",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-cr6se-2021.cfg",
+      "source_sha256_lf": "907a5230a5e40e2576ad8e2e27ecd70a715a86c3e90973f17b206baa1c414f3d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-ender2-2017.cfg",
+      "source_sha256_lf": "bd2482aa8d1dacec2745ccc24c432ce72f56a3fa35c9fbf2e234fa1ed97e39af",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender2pro-2021.cfg",
+      "source_sha256_lf": "d63d2fc738ec5cb94e04e36e373d1736bdad8f82a6420ded071dd3faf0350a75",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender2pro-hc32-2022.cfg",
+      "source_sha256_lf": "c0ffd2037683ad22eea2fe0283f1911403209c144bd9a22908f621fb30acffa4",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender3-2018.cfg",
+      "source_sha256_lf": "bf2b7706add8043b6a09201b0bb0f0fd3f1db787aff08fcbd51577ca6b97defb",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender3-s1-2021.cfg",
+      "source_sha256_lf": "50577f3823ce0dac161f868cd7ae2490eae5f792045391197bffa2497fcc9a78",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-ender3-s1plus-2022.cfg",
+      "source_sha256_lf": "e50ca6b27ec51ef4378cdb2bf2f1b9a7a9af25ad5724d9d036fe599453666a0f",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-ender3-v2-2020.cfg",
+      "source_sha256_lf": "b8acc463953e731f530223343eac54e1c33bda8c927c9489b241e55e1aff8edb",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender3-v2-neo-2022.cfg",
+      "source_sha256_lf": "dc92996c4fd311454c1f96ac7d2070f66dd28dcc626fe2fa111406f5ea11e681",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-ender3max-2021.cfg",
+      "source_sha256_lf": "0047a67ec86eb5b154345bb392ffb89c187843408cfe243c3b0fb0a35f80584b",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender3pro-2020.cfg",
+      "source_sha256_lf": "3ec1011f3ede39283749e000e84067baf35201296e8a993ce0edf97fbc5afd72",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender5-2019.cfg",
+      "source_sha256_lf": "87134a1b72b39b941856eb52ccf076ed79cfa269189766ccad33fe5de2f2ede8",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender5-s1-2023.cfg",
+      "source_sha256_lf": "7d4641bec70ed2dcd3ec77a21e8d86e4955813c9edf58a62abe8e97d4bf095d7",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-ender5plus-2019.cfg",
+      "source_sha256_lf": "bf2382a118331257c0e9c4b93b22cad3d14e24bbf4dfd32ef8b5fecf02bf838c",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-creality-ender5pro-2020.cfg",
+      "source_sha256_lf": "c59deb3886dc2e8e2714afdb497ff7034bc3ba4a39906e6b772d56687a61bd2f",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-ender6-2020.cfg",
+      "source_sha256_lf": "abe859f4230255ac10c797302c147283d344d6e4bd36e6be79a7c28e70bc9459",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-sermoonD1-2021.cfg",
+      "source_sha256_lf": "dd43037f6fd7c0fa2d14abaf981a18e700a0f76c0dc08b6c36fc17af3131c009",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-creality-sermoonV1-2022.cfg",
+      "source_sha256_lf": "bb075df91052ec737a765469edfad9ee990d32da0283239eb6de56a820b329e8",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "cooling_class_blocked"
+    },
+    {
+      "filename": "printer-elegoo-neptune2-2021.cfg",
+      "source_sha256_lf": "0fff9ad711207d508b0df2a7d262d4930dcbb14d757a6985ff878461a8035d5c",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-elegoo-neptune3-pro-2023.cfg",
+      "source_sha256_lf": "6d89add772e8fce638e060f9d840cf75dc182575d172f4dee28fba5a1837ee6a",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-eryone-er20-2021.cfg",
+      "source_sha256_lf": "b05d7492779b4d001133e2248f327c1098827c7c728f4ddac22e6844befbd59d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_motor_selection",
+      "headless_class": "tmc_selection_missing"
+    },
+    {
+      "filename": "printer-eryone-thinker-series-v2-2020.cfg",
+      "source_sha256_lf": "8af603a9f05ea43fd84cc65de94ec180a0002be125792c33de69f7dcf658e41d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-flashforge-creator-pro-2018.cfg",
+      "source_sha256_lf": "bcbf4913ae13a161e978873e7972cabc6c2b6717b614846ab345fd309fc1e153",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-flsun-q5-2020.cfg",
+      "source_sha256_lf": "318545b96bf672bc1bf34ca8dd7ab1cc417d932d277a8b26743cb8917595c669",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-flsun-qqs-2020.cfg",
+      "source_sha256_lf": "668d0962e2ce01d59e5bf8b2d4371d2717d72d5bc3ab580aa9ee0051fbd73c53",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-fokoos-odin5-f3-2021.cfg",
+      "source_sha256_lf": "b3e8c77b189562b4ce94251d17f7c15e3af4e3e5dbf93801fc50b44e375e5423",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-geeetech-301-2019.cfg",
+      "source_sha256_lf": "bb3f3765cf99f2f806399b3cb1c5c545a2496e2741915462a0585d14631fa17c",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-geeetech-A10T-A20T-2021.cfg",
+      "source_sha256_lf": "b34ff2d9e686d5bb104ad218bba0d602f0178fde99c7393d2fa92026f63ce60f",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-hiprecy-leo-2019.cfg",
+      "source_sha256_lf": "828729d411c4ab7c7bd675a967253801d4add5ebacc1461ed0732b06f0b29a72",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "homing_dependency_blocked"
+    },
+    {
+      "filename": "printer-kingroon-kp3s-2020.cfg",
+      "source_sha256_lf": "73253a8411a056676a10a0f0f90956cc7b33cc1079df35792653157fb7230762",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-longer-lk4-pro-2019.cfg",
+      "source_sha256_lf": "c388d33eccc1e39c388a8435f62da320f6668c9565a2d66e28e8360977538882",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-longer-lk4x-2022.cfg",
+      "source_sha256_lf": "81c6e3b79c56c4d475e3deb570f93193a1d59724fc2b1149c8a823a21c82ffc7",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-lulzbot-mini1-2016.cfg",
+      "source_sha256_lf": "7f0ccf7d103ba32c0e87d9aa81a48379e915b72031671dbe9fe3380c31cf0cd4",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "homing_dependency_blocked"
+    },
+    {
+      "filename": "printer-lulzbot-mini2-2018.cfg",
+      "source_sha256_lf": "43b27b0a68af35ce7da0842407d06610c80a9763acf925952ce3fe38c10c1eb1",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_motor_selection",
+      "headless_class": "tmc_selection_missing"
+    },
+    {
+      "filename": "printer-lulzbot-taz6-2017.cfg",
+      "source_sha256_lf": "cac39c56ef9ff8b7d174575f3956255057c8724d9f6e29b708e6840cdb42eceb",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-lulzbot-taz6-dual-v3-2017.cfg",
+      "source_sha256_lf": "cb459f3d4a888e8aae5d95812aeda3e8260d135ad5736844dfd0f4b3c142e708",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-makergear-m2-2012.cfg",
+      "source_sha256_lf": "ddfb9f4b2fb4ac1676b91b85cc37319231936cd9950e6efa0e90e2ce908f7d2b",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-makergear-m2-2016.cfg",
+      "source_sha256_lf": "ba675297022e8d2fd92da86cc739ccbe041d706a8f14e7ac9adc2a987805d4f4",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-micromake-d1-2016.cfg",
+      "source_sha256_lf": "1868920bb602e5ac74c100eacfdf5cfac6961ef6ff52e8c28190f4e35dd3da94",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-modix-big60-2020.cfg",
+      "source_sha256_lf": "36fbea2c87e3289d5686dec606e1b4b7b23c6bfb9fcdca85b453eb4fafe691ba",
+      "classification": "GENERATION_INPUT_INCOMPLETE",
+      "scenario": "baseline_without_display",
+      "headless_class": "bed_circuit_absent"
+    },
+    {
+      "filename": "printer-monoprice-mini-delta-2017.cfg",
+      "source_sha256_lf": "a54ce06a39f9291dd36082a8d7c05873091bef43b992d0f5fddc65435ecf77c0",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-monoprice-select-mini-v1-2016.cfg",
+      "source_sha256_lf": "7dea5bb2d72bca80a8e90f8929271e916858569ad110671ffd730166cb282d62",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-monoprice-select-mini-v2-2018.cfg",
+      "source_sha256_lf": "25baf1ac3425a37dd27958fc0b809f72648c0afb46ff325c9db001178b776b0e",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-mtw-create-2015.cfg",
+      "source_sha256_lf": "ef3bc9fd33304d1207a34e9114382894b231109346a0a8cb38a5c2da6ed8272c",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-prusa-mini-plus-2020.cfg",
+      "source_sha256_lf": "8892f2286e1a8560281d053360d86837fe03b81acbf7c79a0ca1e1665d915cc4",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "fan_options_unreviewed"
+    },
+    {
+      "filename": "printer-ratrig-v-minion-2021.cfg",
+      "source_sha256_lf": "205ab4b07f1adfaf707c4f8fe15636fba4db578c82343915f66f6e047615ceaa",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-robo3d-r2-2017.cfg",
+      "source_sha256_lf": "64a55854af3388173d5731b02d006e83498e7fb36622559a207adf90c82a3478",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-seemecnc-rostock-max-v2-2015.cfg",
+      "source_sha256_lf": "f160e4b970e9a1ee3cb0ce31761c95020839b25394c7ed23a3035d53a7f8db05",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-sovol-sv01-2020.cfg",
+      "source_sha256_lf": "b02b864785d7288db12ea86890ac4a6e9de6051d5dc66ddb033aac7108bd5653",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-sovol-sv05-2022.cfg",
+      "source_sha256_lf": "505818e5eae22c0602ef4affa4695231ec167b16e1f98e6508b55fbaf1e94919",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-sovol-sv06-2022.cfg",
+      "source_sha256_lf": "b3e506c73734cd404b64b62fc3fa259e2b5602f473e93838fc7b031d38a39aa6",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_motor_selection",
+      "headless_class": "tmc_selection_missing"
+    },
+    {
+      "filename": "printer-sovol-sv06-plus-2023.cfg",
+      "source_sha256_lf": "12bdb7e32764659cf19fd69a1d4180227995a3c5f5d614ebabf5650a62af2532",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_motor_selection",
+      "headless_class": "tmc_selection_missing"
+    },
+    {
+      "filename": "printer-sunlu-s8-2020.cfg",
+      "source_sha256_lf": "c5c1c25082797c973da9395e0245168614cd2b5695aef65705b24b0bea6bd675",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_thermal_review",
+      "headless_class": "thermal_policy_review_missing"
+    },
+    {
+      "filename": "printer-sunlu-t3-2022.cfg",
+      "source_sha256_lf": "05b057ece3a21b9919ba9956066c77380dbc058d57ee4b1c5347006864fc67bb",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-tevo-flash-2018.cfg",
+      "source_sha256_lf": "5e5850fc6f640d466bcfc3fd6fb4ed15720355ceecf5f68d8c102dfafb981f81",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "homing_dependency_blocked"
+    },
+    {
+      "filename": "printer-tevo-tarantula-pro-2020.cfg",
+      "source_sha256_lf": "c1fdaa1a42f235ce31b0575f242deeedaa796dc94accd189b0d984177e0db659",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-tronxy-crux1-2022.cfg",
+      "source_sha256_lf": "e5840823c95f55beaa262f6d7287059e7b6f0667e44b81118341d81e0af035f1",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-tronxy-p802e-2020.cfg",
+      "source_sha256_lf": "c8e60f7fc894cfc19ea980b44523f948191f5277b97026d97cbb1f3f29528484",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-tronxy-p802m-2020.cfg",
+      "source_sha256_lf": "2022d33efbedd6f34c5957efd04e001eaf450534fd0f22bd6ccb278705c67753",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-tronxy-x5s-2018.cfg",
+      "source_sha256_lf": "17598eb2c38f38dc9a8482300ca116bf70b82dc6592eb9d4937893727761c734",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_thermal_review",
+      "headless_class": "thermal_policy_review_missing"
+    },
+    {
+      "filename": "printer-tronxy-x5sa-pro-2020.cfg",
+      "source_sha256_lf": "110b6bc12e3f653f81d4a10ee64c7d8973c8326674e29ca9b033df97095c5771",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-tronxy-x5sa-v6-2019.cfg",
+      "source_sha256_lf": "d82fbc9ec7560afa35046cefbb83100aed299a7a39913f2a2d1fc94ddb641047",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-tronxy-x8-2018.cfg",
+      "source_sha256_lf": "c9b097a51c3e99032f06247a28ffc1302cc22626e4e091a3cfdd14f0416e765d",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-tronxy-xy-2-Pro-2020.cfg",
+      "source_sha256_lf": "f85e94df3eec4811d2601773919cbbb266ef8abeca1e02f3242efba0a2c93eba",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-twotrees-sapphire-plus-sp-5-v1-2020.cfg",
+      "source_sha256_lf": "86d2584bbe354d087a1f3b4f1f5b43b7baac0bd39ba37cc879fd52dd10dec7a4",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-twotrees-sapphire-plus-sp-5-v1.1-2021.cfg",
+      "source_sha256_lf": "1386636f939da9348381247191876f4836e11a0970080067a3cdaca0f855833a",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-twotrees-sapphire-pro-sp-3-2020.cfg",
+      "source_sha256_lf": "f3798a40505edf867dcc90ece626d892ef46b70646445bdbef40f1c9f7a2eb9e",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-velleman-k8200-2013.cfg",
+      "source_sha256_lf": "5aed2ca77e2fd6a6cfb78c1134a78a49c030085bf045c4a0908e264a1ae3d882",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-velleman-k8800-2017.cfg",
+      "source_sha256_lf": "037460b3e1885dfc8686a47d01f5090568f3ffa545d7d3eea1cc4328f21eb9a5",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "unsupported_kinematics"
+    },
+    {
+      "filename": "printer-voxelab-aquila-2021.cfg",
+      "source_sha256_lf": "f3cfd85bab6834f9ecaf2a1b89f6b291ebf9fe05b6e8672503949f8a12d3c06f",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-wanhao-duplicator-6-2016.cfg",
+      "source_sha256_lf": "b90c75336230530ece62d2f318db246f56a9f7431199b36a23fd8f917b54ce1d",
+      "classification": "SOURCE_DEPENDENCY_BLOCKED",
+      "scenario": "baseline_without_display",
+      "headless_class": "electrical_dependency_blocked"
+    },
+    {
+      "filename": "printer-wanhao-duplicator-9-2018.cfg",
+      "source_sha256_lf": "a560a782198e003c7052528d17e3c45ba26dadb4b7eb82c88b638805dd824f4b",
+      "classification": "KACE_CAPABILITY_LIMIT",
+      "scenario": "baseline_without_display",
+      "headless_class": "motion_policy_limit"
+    },
+    {
+      "filename": "printer-wanhao-duplicator-i3-mini-2017.cfg",
+      "source_sha256_lf": "5390c34455af6e7c9075a2af557404224625bdcf7640bde4c195610cb87c93a2",
+      "classification": "GENERATION_INPUT_INCOMPLETE",
+      "scenario": "baseline_without_display",
+      "headless_class": "bed_circuit_absent"
+    },
+    {
+      "filename": "printer-wanhao-duplicator-i3-plus-2017.cfg",
+      "source_sha256_lf": "50d31ab39304d06b89b8f201aa607d5b257c4f2a4b4838a75bf459aa0662d255",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    },
+    {
+      "filename": "printer-wanhao-duplicator-i3-plus-mark2-2019.cfg",
+      "source_sha256_lf": "d6e8008f5cfc4b36b55159277d00ddbf61d7829ee4c19a0186cc2f3718d5795b",
+      "classification": "NEEDS_USER_INPUT",
+      "scenario": "explicit_probe_selection",
+      "headless_class": "probe_selection_missing"
+    },
+    {
+      "filename": "printer-wanhao-duplicator-i3-v2.1-2017.cfg",
+      "source_sha256_lf": "6ca4fe8edb2c6400e298a619f3515a75d33c2c2c62b47f01a526183731a94453",
+      "classification": "LOAD_EVIDENCE",
+      "scenario": "baseline_without_display",
+      "headless_class": "loaded_generated_configuration"
+    }
+  ]
+}

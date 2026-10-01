@@ -51,6 +51,9 @@ pid_Kp: 20
 pid_Ki: 1
 pid_Kd: 100
 [heater_bed]
+heater_pin: PA6
+sensor_pin: PA7
+sensor_type: Generic 3950
 control: {bed_control}
 {bed_pid}{probe_section}{calibration}""".encode()
 
@@ -152,6 +155,20 @@ class DryRunPresentationTests(unittest.TestCase):
         self.assertIn("\033[", colored)
         self.assertNotIn("\033[", plain)
         self.assertIn("Configuration summary", plain)
+
+    def test_bootstrap_color_hint_survives_output_pipe_and_respects_no_color(self):
+        from unittest.mock import patch
+        from core.configuration_review import terminal_supports_color
+        with patch.dict('os.environ', {'KACE_COLOR': '1', 'TERM': 'xterm-256color'}, clear=True):
+            self.assertTrue(terminal_supports_color(io.StringIO()))
+            with patch.dict('os.environ', {'NO_COLOR': ''}):
+                self.assertFalse(terminal_supports_color(io.StringIO()))
+
+    def test_spanish_commissioning_message_is_not_repeated(self):
+        from unittest.mock import patch
+        with patch('core.translations.get_mode', return_value='Normal'):
+            rendered = render_configuration_review(self.review, language='Español', color=False)
+        self.assertEqual(rendered.count('Verificá la dirección del movimiento'), 1)
 
 
 if __name__ == "__main__":

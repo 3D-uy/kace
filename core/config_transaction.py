@@ -16,7 +16,7 @@ from typing import Callable, Mapping, Optional
 from urllib.parse import urlsplit
 from weakref import WeakValueDictionary
 
-from core.configuration_review import ConfigurationReview, build_configuration_review
+from core.configuration_review import ConfigurationReview, build_configuration_review, validate_configuration_plan
 
 from core.managed_config import (
     HARDWARE_REMOTE,
@@ -199,6 +199,8 @@ class ConfigDeploymentTransaction:
         state_sink: Optional[Callable[[str, str], None]] = None,
         verify_existing_ready: bool = False,
         verify_firmware: Optional[Callable[[], None]] = None,
+        firmware_reservation_reader: Optional[Callable[[str], dict]] = None,
+        selected_board: Optional[dict] = None,
     ):
         if activation not in {"firmware", "service", "none"}:
             raise ValueError(f"Unsupported activation mode: {activation}")
@@ -223,6 +225,9 @@ class ConfigDeploymentTransaction:
         self.state_sink = state_sink
         self.verify_existing_ready = bool(verify_existing_ready)
         self.verify_firmware = verify_firmware
+        self.firmware_reservation_reader = firmware_reservation_reader
+        import copy
+        self.selected_board = copy.deepcopy(selected_board)
 
     def _emit(self, state: str, detail: str) -> None:
         if self.state_sink is None:
@@ -425,6 +430,10 @@ class ConfigDeploymentTransaction:
     def _run_locked(self) -> ConfigTransactionResult:
         self._emit("BACKUP", "validating configuration and preparing snapshot")
         try:
+            from core.display_configuration import validate_generated_display_artifacts
+            validate_generated_display_artifacts(self.generated_hardware, self.generated_macros)
+            from core.board_auxiliary import validate_board_electrical_artifact
+            validate_board_electrical_artifact(self.selected_board, self.generated_hardware)
             self.transport.validate_activation_target()
             remote = read_config_state(self.transport, self.generated_hardware, self.generated_macros)
             self.plan = build_managed_config_plan(
@@ -433,8 +442,14 @@ class ConfigDeploymentTransaction:
             self._expected_config_state = {
                 **remote, **{item.remote_name: item.content for item in self.plan.artifacts},
             }
+            validate_generated_display_artifacts(
+                self.generated_hardware, self.generated_macros, included_files=self._expected_config_state,
+            )
             diff = self.plan.dry_run_diff()
-            configuration_review = build_configuration_review(self.plan)
+            configuration_review = build_configuration_review(
+                self.plan, firmware_reservation_reader=self.firmware_reservation_reader,
+                selected_board=self.selected_board,
+            )
             require_conditional_writes(self.transport, self.plan, persist_root=self.snapshot_root)
             if self.review is None:
                 self.output(diff or "No configuration changes are required.")
@@ -512,6 +527,16 @@ class ConfigDeploymentTransaction:
             # Snapshot persistence can take time. Check again immediately before
             # the first write; external editors do not participate in our lock.
             revalidate_config_state(self.transport, current)
+            # Confirmation/snapshotting can take time. Do not publish using
+            # reservation evidence from firmware bytes that have since changed.
+            if self.firmware_reservation_reader is not None or self.selected_board is not None:
+                validation = validate_configuration_plan(
+                    self.plan, firmware_reservation_reader=self.firmware_reservation_reader,
+                    selected_board=self.selected_board,
+                )
+                if not validation.valid:
+                    raise ConfigConflictError("configuration validation changed before publication: "
+                                              + "; ".join(item.message for item in validation.errors))
         except ConfigConflictError as exc:
             self._preserve_proposal()
             return ConfigTransactionResult(
@@ -635,23 +660,43 @@ class MoonrakerConfigTransport:
             raise ConfigConflictError("Moonraker config root does not match active Klipper printer.cfg")
 
     def verify_active_configuration(self, plan):
+        import configparser
         from core.moonraker import _get, _base_url
-        from core.managed_config import effective_hardware_text, _section_options
+        from core.managed_config import effective_hardware_text
         ok, detail, body = _get(_base_url(self.host, self.port) + "/printer/objects/query?configfile", api_key=self.api_key)
-        active = body.get("result", {}).get("status", {}).get("configfile", {}).get("config") if ok else None
-        if not isinstance(active, dict):
+        active = body if ok else None
+        for key in ("result", "status", "configfile", "config"):
+            active = active.get(key) if isinstance(active, dict) else None
+        if (not isinstance(active, dict) or any(
+            not isinstance(section, str) or not isinstance(options, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str)
+                   for key, value in options.items())
+            for section, options in active.items()
+        )):
             raise ConfigConflictError("active configuration could not be verified; explicit activation is required")
-        active = {
-            str(section).casefold(): {str(key).casefold(): value for key, value in options.items()}
-            for section, options in active.items() if isinstance(options, dict)
-        }
-        expected = _section_options(effective_hardware_text(plan))
+        # Match Klipper's configfile.ConfigFileReader: strip # comments before
+        # parsing, then apply RawConfigParser's inline ;/# comment rules to
+        # all option lines, including multiline G-code and Jinja templates.
+        parser = configparser.RawConfigParser(strict=False, inline_comment_prefixes=(';', '#'))
+        try:
+            parser.read_string('\n'.join(
+                line.split('#', 1)[0] for line in effective_hardware_text(plan).replace('\r\n', '\n').split('\n')
+            ))
+        except configparser.Error as exc:
+            raise ConfigConflictError("expected configuration could not be parsed; explicit activation is required") from exc
+        expected = {section: dict(parser.items(section, raw=True)) for section in parser.sections()}
         for section, options in expected.items():
             if section.startswith("include "):
                 continue
+            if section not in active:
+                raise ConfigConflictError(f"active configuration is missing [{section}]; explicit activation is required")
             for name, value in options.items():
                 actual = active.get(section, {}).get(name)
-                if actual is None or " ".join(str(actual).split()) != " ".join(value.split()):
+                # configfile.config contains raw parsed strings, not typed
+                # settings. Parsing above already normalizes config formatting.
+                # Further whitespace folding can join commands or alter quoted
+                # text/Jinja; type coercion could conceal an unexpected API shape.
+                if actual != value:
                     raise ConfigConflictError(f"active configuration differs at [{section}] {name}; explicit activation is required")
 
     def supports_conditional_write(self, previous):
