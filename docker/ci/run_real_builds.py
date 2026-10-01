@@ -27,6 +27,14 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, default=str) + "\n", encoding="utf-8")
 
 
+def source_revision(root=ROOT):
+    # The hosted checkout is runner-owned while Docker runs as root.
+    # Trust only this mounted checkout for this read; do not change global Git config.
+    return subprocess.check_output(
+        ["git", "-c", f"safe.directory={root}", "rev-parse", "HEAD"],
+        cwd=root, text=True).strip()
+
+
 def gate_passed(result, artifacts):
     return (result.wasSuccessful() and not result.skipped
             and not result.expectedFailures and result.testsRun == 7
@@ -102,8 +110,7 @@ def main():
     try:
         from tests.klipper_contract import KLIPPER_REF, KLIPPER_REPO_URL
         report.update(klipper_commit=KLIPPER_REF, klipper_repository=KLIPPER_REPO_URL,
-                      tested_commit=subprocess.check_output(
-                          ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+                      tested_commit=source_revision(),
                       pr_head=os.environ.get("KACE_CI_HEAD_SHA"),
                       python=sys.version, tools={})
         # Fixed absolute paths exclude the simulator's /usr/local/bin/make.

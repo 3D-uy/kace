@@ -2,14 +2,21 @@
 import hashlib
 import io
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
 
-from docker.ci.run_real_builds import BuildEvidence, gate_passed
+from docker.ci.run_real_builds import BuildEvidence, gate_passed, source_revision
 
 
 class RealBuildGateTests(unittest.TestCase):
+    def test_checkout_identity_survives_container_ownership_boundary(self):
+        expected = source_revision()
+        with patch.dict(os.environ, {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}):
+            self.assertEqual(source_revision(), expected)
+
     def result(self, outcome="pass", count=7):
         class Sample(unittest.TestCase):
             def runTest(self):
