@@ -92,6 +92,37 @@ class ReproducibleCiContractTests(unittest.TestCase):
         self.assertEqual(upload["with"]["path"], "tests/results/reviewed-scenarios/")
         self.assertEqual(upload["with"]["if-no-files-found"], "error")
 
+    def test_source_collectors_run_after_pinned_preparation_and_keep_failures(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+        self.assertEqual(workflow["permissions"], {"contents": "read"})
+        steps = workflow["jobs"]["unit-tests"]["steps"]
+        prepare = next(i for i, step in enumerate(steps) if step.get("id") == "klipper")
+        unit = next(i for i, step in enumerate(steps) if "tests/run_tests.py --verbose" in step.get("run", ""))
+        full = next(i for i, step in enumerate(steps) if "python3 -m pytest tests" in step.get("run", ""))
+        self.assertLess(prepare, unit)
+        self.assertLess(prepare, full)
+        self.assertIn("!cancelled()", steps[full]["if"])
+        self.assertIn("steps.klipper.outcome == 'success'", steps[full]["if"])
+        for step in (steps[unit], steps[full]):
+            self.assertEqual(step["shell"], "bash")  # Actions bash uses -eo pipefail.
+            self.assertNotIn("continue-on-error", step)
+        upload = steps[-1]
+        self.assertEqual(upload["if"], "always()")
+        self.assertEqual(upload["with"]["if-no-files-found"], "error")
+
+    def test_real_builds_are_required_independent_and_retained(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+        job = workflow["jobs"]["docker-firmware-build"]
+        self.assertEqual(job["name"], "Docker MCU Firmware Builds (LPC1769, STM32, RP2040, AVR)")
+        self.assertEqual(job["needs"], "lint")
+        run = next(step for step in job["steps"] if "run_real_builds.py" in step.get("run", ""))
+        self.assertEqual(run["shell"], "bash")
+        self.assertNotIn("continue-on-error", run)
+        self.assertNotIn("continue-on-error", job)
+        upload = job["steps"][-1]
+        self.assertEqual(upload["if"], "always()")
+        self.assertEqual(upload["with"]["if-no-files-found"], "error")
+
     def test_firmware_container_pins_base_digest_and_hashed_locks(self):
         dockerfile = (ROOT / "docker" / "ci" / "Dockerfile").read_text(encoding="utf-8")
         self.assertRegex(
