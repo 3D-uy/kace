@@ -17,7 +17,7 @@
 [![API: Moonraker](https://img.shields.io/badge/API-Moonraker-5965a8?style=flat-square)](https://moonraker.readthedocs.io/en/latest/)
 [![GitHub stars](https://img.shields.io/github/stars/3D-uy/kace?style=flat-square&logo=github&label=stars&color=e3b341)](https://github.com/3D-uy/kace)
 
-[English](../../README.md) · [Español](README.md) · [Português](../pt/README.md)
+🌐 [English](../../README.md) · [Español](README.md) · [Português](../pt/README.md)
 
 KACE te guía por las decisiones de hardware de tu impresora para generar y revisar su configuración de Klipper.
 Su asistente de terminal prepara firmware MCU cuando está admitido y te acompaña hasta la aplicación y verificación de la instalación.
@@ -178,12 +178,12 @@ Respeta el [código de conducta (EN)](../../CODE_OF_CONDUCT.md). Reporta vulnera
 
 | Proyecto | Su relación con KACE |
 | --- | --- |
-| [Klipper](https://www.klipper3d.org/) | Firmware y sistema de configuración al que se dirige KACE; los perfiles revisados y el código upstream sustentan la generación y compilación MCU. |
-| [Moonraker](https://moonraker.readthedocs.io/en/latest/) | API del host utilizada para acceder a configuraciones, activar cambios y comprobar el estado de impresora/firmware. |
-| [Mainsail](https://docs.mainsail.xyz/) y [MainsailOS](https://docs.mainsail.xyz/mainsailos/) | Interfaz ofrecida por el bootstrap y base de imagen preconfigurada utilizada por Studio. |
-| [Fluidd](https://docs.fluidd.xyz/) | Interfaz alternativa que instala el bootstrap cuando se selecciona, incluida su configuración cliente. |
-| [Raspberry Pi](https://www.raspberrypi.com/software/) | Ecosistema del host, opciones de imagen Raspberry Pi OS e Imager para la preparación manual. |
-| [Crowsnest](https://docs.mainsail.xyz/crowsnest/) | Streaming de cámara opcional instalado mediante el bootstrap. |
+| [<img src="https://www.klipper3d.org/img/klipper.svg" width="24" height="24" alt="">&nbsp;Klipper](https://www.klipper3d.org/) | Firmware y sistema de configuración al que se dirige KACE; los perfiles revisados y el código upstream sustentan la generación y compilación MCU. |
+| [<img src="https://moonraker.readthedocs.io/en/latest/assets/images/favicon.png" width="24" height="24" alt="">&nbsp;Moonraker](https://moonraker.readthedocs.io/en/latest/) | API del host utilizada para acceder a configuraciones, activar cambios y comprobar el estado de impresora/firmware. |
+| [<img src="https://docs.mainsail.xyz/assets/logo.svg" width="24" height="24" alt="">&nbsp;Mainsail](https://docs.mainsail.xyz/) y<br>[<img src="https://docs.mainsail.xyz/assets/logo.svg" width="24" height="24" alt="">&nbsp;MainsailOS](https://docs.mainsail.xyz/mainsailos/) | Interfaz ofrecida por el bootstrap y base de imagen preconfigurada utilizada por Studio. |
+| [<img src="https://raw.githubusercontent.com/fluidd-core/fluidd/7a75e4857282a24d733540ebf07cf6b1bc7717e9/public/img/icons/favicon-32x32.png" width="24" height="24" alt="">&nbsp;Fluidd](https://docs.fluidd.xyz/) | Interfaz alternativa que instala el bootstrap cuando se selecciona, incluida su configuración cliente. |
+| [<img src="https://downloads.raspberrypi.com/raspios_armhf/Raspberry_Pi_OS_(32-bit).png" width="24" height="24" alt="">&nbsp;Raspberry&nbsp;Pi](https://www.raspberrypi.com/software/) | Ecosistema del host, opciones de imagen Raspberry Pi OS e Imager para la preparación manual. |
+| [<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mainsail-crew/crowsnest/436042452f564f3d737e3b980a213f849a8a0562/.github/crowsnest-logo-darkmode.png"><img src="https://raw.githubusercontent.com/mainsail-crew/crowsnest/436042452f564f3d737e3b980a213f849a8a0562/.github/crowsnest-logo-lightmode.png" width="24" height="24" alt=""></picture>&nbsp;Crowsnest](https://docs.mainsail.xyz/crowsnest/) | Streaming de cámara opcional instalado mediante el bootstrap. |
 
 Reporta errores y propone mejoras mediante los [issues de KACE](https://github.com/3D-uy/kace/issues).
 
