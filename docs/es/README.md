@@ -15,7 +15,7 @@ Requiere Linux/Raspberry Pi, Python 3.11+, Git, red para las dependencias y los 
 Para una Pi nueva, usa **KACE Studio**. Para un host Linux existente, el siguiente instalador verifica su identidad inmutable antes de ejecutarse. Revísalo antes de usarlo: instala la revisión fijada, que puede diferir del código que estás leyendo.
 
 ```bash
-KACE_COMMIT='56eb565d96b943e2d5824df2c1e6fced33377401'
+KACE_COMMIT='b7988b57b5fc80fbc55c3d1326768289dbccb179'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
