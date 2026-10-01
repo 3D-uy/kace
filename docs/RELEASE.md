@@ -18,14 +18,20 @@ unexecuted CI, firmware builds or hardware checks as passed.
 
 ## Pre-release gates
 
-Run the complete source validation:
+Prepare clean pinned Klipper sources as described in [Testing](DEVELOPMENT.md),
+then run complete source validation with a fresh scenario output directory:
 
 ```bash
+python -m pytest tests --ignore=tests/results -q -rs
 python tests/run_tests.py --verbose
 python tests/run_tests.py --yaml-check
-python tests/run_tests.py --full-klipper-sweep --verbose
+python -m tests.sweep.scenario_contract --artifacts tests/results/reviewed-scenarios
 python tests/matrix/run_matrix.py --profile full
 ```
+
+The reviewed-scenario gate retains raw sweep failures and proves supported loads,
+concrete boundaries and required input separately. See the [sweep contract](../tests/sweep/README.md);
+raw failures are not relabeled as passes.
 
 Confirm the containerized MCU build job passes, review all matrix JSON/Markdown results, and verify there are no `KACE_ERROR`, `KLIPPER_ERROR`, or `INFRA_ERROR` results. Expected safe rejections are not passes and must match the intended unsupported combinations.
 

@@ -1,168 +1,111 @@
-# 🖥️ Guía de Compatibilidad de Pantallas
+# 🖥️ Configuración y soporte de pantallas
 
-> **Filosofía de KACE:** detectar → clasificar → informar → recomendar.
-> KACE nunca modifica ni deshabilita automáticamente la configuración de su pantalla.
+Revisado el 27 de septiembre de 2026 contra las dos revisiones oficiales de Klipper citadas abajo.
 
----
+## Qué soporta KACE actualmente
 
-## ¿Por qué es importante?
+El soporte del controlador en Klipper, una configuración válida y la compatibilidad
+eléctrica son tres requisitos distintos. El nombre de un driver o un conector EXP
+no establece el módulo exacto, pinout, alimentación, niveles de señal ni cableado.
 
-Klipper es un firmware **orientado a la web**. Sus interfaces principales son [Mainsail](https://docs.mainsail.xyz/) y [Fluidd](https://docs.fluidd.xyz/) — paneles de control basados en navegador que ofrecen control total de la impresora desde cualquier teléfono, tablet o PC.
+**Ninguna pareja física de placa/pantalla del catálogo actual de KACE tiene evidencia
+suficiente del módulo y cableado para generar una configuración activa guiada.**
+Un resultado desconocido bloquea la generación incluso con selección manual o
+riesgo aceptado. Las clasificaciones inseguras mantienen sus restricciones.
+Las etiquetas heredadas `supported`, `partial` o de adaptadores en los datos no
+certifican hardware.
 
-Muchas impresoras OEM incluyen pantallas táctiles diseñadas **específicamente para el firmware Marlin**. Estas pantallas utilizan protocolos propietarios, puentes seriales específicos del fabricante o firmware de pantalla personalizado que asume el conjunto de comandos de Marlin. Cuando Klipper reemplaza a Marlin, estas pantallas suelen dejar de funcionar, no porque Klipper esté roto, sino porque la pantalla nunca fue diseñada para él.
+KACE comprueba la configuración efectiva, includes y artefactos que genera,
+conserva o publica durante la instalación inicial y sus reanudaciones pendientes.
+Después de `DONE` (`COMPLETE` en el checkpoint de firmware), los cambios del usuario
+quedan fuera de su responsabilidad: no hay monitorización, revalidación ni gestión
+de esas modificaciones. Iniciar expresamente otra instalación es un flujo separado.
 
-> **Esto no es un error de KACE.** Es una limitación de compatibilidad de pantallas OEM.
+## Qué ocurre con la configuración
 
----
+| Ruta | Comportamiento actual |
+|---|---|
+| Sin pantalla (`none`) | Omite los bloques de pantalla del nuevo hardware generado. No ordena borrar archivos manuales ajenos del destino. |
+| Detección automática o pantalla física seleccionada con evidencia desconocida | Rechaza la generación; tener pines aparentemente completos o aceptar el riesgo no aporta evidencia de hardware. |
+| Ruta restrictiva `unsafe` | La selección explícita exige reconocer el riesgo. El renderizador puede producir una referencia comentada inactiva, nunca una configuración activa certificada eléctricamente. Una referencia insegura automática también puede comentarse. |
+| Hardware generado guardado, macros o sus includes | Se vuelven a comprobar antes de publicar y reanudar el flujo pendiente, incluso si no hay cambios. Las etiquetas guardadas no permiten eludir el control. |
+| `[display]` o include exclusivamente manual ya existente en el destino | Puede conservarse tras comprobar configuración efectiva y requisitos del driver/transporte, con advertencia de verificación eléctrica. No certifica todas las opciones ni las conexiones físicas. |
 
-## Definición de los Estados de Compatibilidad
+Un include alcanzado desde hardware/macros generados conserva esas restricciones
+aunque también lo referencie un archivo manual. La conservación es condicional;
+KACE no promete mantener activa toda sección de pantalla del origen.
 
-| Estado | Significado |
-|--------|-------------|
-| 🟢 **COMPATIBLE** | Funciona de forma nativa en Klipper — sin problemas |
-| 🟡 **PARCIAL** | Funciona con limitaciones; funcionalidad de menú reducida o ausente |
-| 🔴 **NO COMPATIBLE** | Incompatible; puede causar pantalla negra, bucle de arranque o conflictos seriales |
-| ⬜ **SIN PRUEBAS** | Sin datos de compatibilidad disponibles; resultado desconocido |
+## Las 14 entradas físicas del catálogo
 
----
+Son claves de selección de KACE, **no catorce nombres de sección nativos de Klipper**.
+Todas quedan sujetas a las restricciones de evidencia anteriores.
 
-## Referencia de Tipos de Pantalla
+| Clave KACE | Sintaxis oficial o límite |
+|---|---|
+| `display` | `[display]` con `lcd_type` soportado y sus opciones obligatorias |
+| `st7920` | `lcd_type: st7920` dentro de `[display]` |
+| `emulated_st7920` | `lcd_type: emulated_st7920` dentro de `[display]` |
+| `hd44780` | `lcd_type: hd44780` dentro de `[display]` |
+| `hd44780_spi` | `lcd_type: hd44780_spi` dentro de `[display]` |
+| `aip31068_spi` | `lcd_type: aip31068_spi` dentro de `[display]` |
+| `uc1701` | `lcd_type: uc1701` dentro de `[display]` |
+| `ssd1306` | `lcd_type: ssd1306` dentro de `[display]` |
+| `sh1106` | `lcd_type: sh1106` dentro de `[display]` |
+| `btt_tft35` | Etiqueta de familia, no sección ni driver nativo. Un nombre de modo/revisión no certifica cableado. |
+| `mks_mini12864` | Etiqueta de familia, no sección ni driver nativo. Sin inferencia universal de SPI/FSMC. |
+| `dwin_set` | Etiqueta OEM heredada, sin sección ni driver nativo en las revisiones examinadas. |
+| `tft_serial` | Etiqueta OEM heredada, sin sección ni driver nativo en las revisiones examinadas. |
+| `t5uid1` | Sin sección/driver nativo en las revisiones examinadas; KACE conserva su política restrictiva. |
 
-### 🟢 Pantallas Compatibles
+En un `[display]` mantenido manualmente, `lcd_type` es obligatorio. Algunos campos
+adicionales obligatorios son `cs_pin`, `sclk_pin`, `sid_pin` para ST7920;
+`rs_pin`, `e_pin`, `d4_pin` a `d7_pin` para HD44780; `latch_pin` para
+HD44780_SPI/AIP31068_SPI; y `cs_pin`, `a0_pin` para UC1701. Emulated ST7920
+requiere `en_pin` y las tres opciones de pines SPI por software. SSD1306/SH1106
+pueden usar I2C o SPI; elegir SPI exige `cs_pin` y `dc_pin`. Los buses por software
+necesitan todos sus pines. Los defaults de bus y los pines MCU válidos dependen del
+hardware seleccionado. Estas listas **no son configuraciones listas para activar**.
+Consultá la referencia oficial para los requisitos completos y opciones adicionales.
 
-Compatibles de forma nativa con Klipper, sin configuración adicional:
+## Identidad OEM y módulos auxiliares
 
-| Tipo de Pantalla | Ejemplos | Notas |
-|---|---|---|
-| **LCD 12864 Estándar** | LCD original Ender 3, RepRapDiscount Smart LCD | Totalmente compatible |
-| **mini12864** | BTT mini12864, pantalla del kit SKR 1.4 | Totalmente compatible |
-| **ST7920** | Controlador RepRapDiscount Smart LCD | Totalmente compatible |
-| **UC1701** | Variantes mini12864 | Totalmente compatible |
-| **HD44780** | LCD de caracteres 20×4 | Totalmente compatible |
-| **SSD1306 OLED** | Varios módulos OLED pequeños | Totalmente compatible |
+Los nombres oficiales exactos `printer-creality-ender3-2018.cfg` y
+`printer-creality-ender3pro-2020.cfg` identifican el consejo genérico Ender 3;
+`printer-creality-ender3-v2-2020.cfg` identifica V2 por separado. Los alias históricos
+explícitos están en `data/displays.yaml`. Neo, S1, Max, archivos renombrados y futuras
+variantes no heredan pantalla por coincidencia parcial. Reconocer un perfil no
+identifica ni certifica la pantalla conectada, ni instala firmware comunitario.
 
----
+Las secciones de software de Klipper como `[display_status]`, `[display_data ...]`,
+`[display_template ...]` y `[menu ...]` son distintas de las pantallas físicas.
+La etiqueta heredada `lcd_menu` de KACE no es una sección nativa para copiar al
+archivo. Estas funciones de software tienen sus propios requisitos.
 
-### 🟡 Soporte Parcial
+Los módulos nativos `[neopixel ...]`, `[dotstar ...]`, `[adxl345 ...]` y
+`[sx1509 ...]` no dejan de estar soportados por Klipper porque el manejador avanzado
+genérico de KACE los emita como comentarios. Ese manejador conserva referencias,
+no instalaciones completas validadas. Los contratos existentes de dependencias
+de hardware por placa son independientes. **`[pca9685]` no es una sección autónoma
+válida: no la descomentes.** PCA9685 es interno de Replicape; KACE no lo convierte
+a `[replicape]`.
 
-Estas pantallas pueden funcionar a un nivel básico pero probablemente tendrán menús faltantes, funcionalidad reducida o problemas menores:
+## Diagnosticar un problema de pantalla
 
-| Tipo de Pantalla | Impresoras Comunes | Limitación Conocida |
-|---|---|---|
-| **TFT Serial (tft_serial)** | Artillery Sidewinder, Artillery Genius, Artillery Hornet, Ender 6, CR-10 Smart | Los menús seriales generalmente no funcionan bajo Klipper |
-| **DWIN / DGUS (dwin_set)** | Varias | Requiere firmware de pantalla comunitario compatible — sensible a la versión |
+Leé el error real de Klipper e identificá placa, revisión de pantalla, conexión y
+configuración efectiva. Una pantalla negra por sí sola no demuestra conflicto
+de protocolo, memoria dañada, reset del MCU ni apagado de Linux. No uses consejos
+genéricos de familia OEM como receta de cableado o flasheo. Mainsail/Fluidd son
+interfaces web separadas, normalmente conectadas mediante Moonraker; usarlas no
+demuestra que una pantalla conectada sea eléctricamente segura. La provisión de
+Studio y la conectividad SSH también son independientes del soporte del driver LCD.
 
-**Enfoque recomendado para soporte parcial:** use la interfaz web (Mainsail/Fluidd) como interfaz principal. La pantalla puede mostrar el estado básico pero no es confiable para la navegación de menús.
+## Referencias oficiales y límites
 
----
+- [Referencia de configuración fijada por KACE](https://github.com/Klipper3d/klipper/blob/fe4eb8650bd7de4c2100a14eaf09b0965c430e29/docs/Config_Reference.md#display-support).
+- [Registro de drivers LCD de la revisión fijada](https://github.com/Klipper3d/klipper/blob/fe4eb8650bd7de4c2100a14eaf09b0965c430e29/klippy/extras/display/display.py).
+- [Referencia de la revisión posterior archivada](https://github.com/Klipper3d/klipper/blob/ce7002bedf37e938bb483572949f3703ac6476cb/docs/Config_Reference.md#display-support).
+- [Sitio oficial de referencia](https://www.klipper3d.org/Config_Reference.html#display-support), que puede cambiar después de esas revisiones.
+- [Alcance de KACE](../en/SUPPORT_SCOPE.md) y [guía de pruebas](../DEVELOPMENT.md), en inglés.
 
-### 🔴 Pantallas No Compatibles
-
-Estas pantallas no son compatibles con Klipper sin modificaciones comunitarias significativas:
-
-| Tipo / Sección | Impresoras Comunes | Problema |
-|---|---|---|
-| **t5uid1 (protocolo DGUS)** | Creality CR-6 SE | Firmware OEM propietario de Creality — Klipper no tiene soporte incorporado |
-| **Neopixel / WS2812** | Varias | Fuera del alcance de configuración actual de KACE |
-| **Dotstar / APA102** | Varias | Fuera del alcance de configuración actual de KACE |
-| **Expansor GPIO SX1509** | Algunas placas MKS | No compatible con el motor de configuración de KACE |
-
----
-
-## Compatibilidad de Impresoras OEM
-
-### Creality CR-6 SE
-
-**Estado:** 🔴 NO COMPATIBLE
-
-La CR-6 SE utiliza una pantalla táctil DGUS propietaria de Creality con firmware OEM diseñado exclusivamente para Marlin. Klipper no tiene soporte incorporado para el protocolo `t5uid1` / DGUS.
-
-**Síntomas comunes cuando la pantalla permanece conectada:**
-- Pantalla negra al arrancar
-- Bucle de arranque / Klipper no inicia
-- Conflictos de comunicación serial
-
-**Acción recomendada:** Desconecte físicamente el cable de la pantalla de la placa principal.
-
-**Recurso comunitario:** La comunidad de código abierto ha desarrollado firmware de pantalla DGUS personalizado para la CR-6 SE. Busque: *"CR-6 SE Klipper DGUS firmware comunitario"*.
-
----
-
-### Artillery Sidewinder X1 / X2
-
-**Estado:** 🟡 PARCIAL
-
-Utiliza una pantalla TFT serial diseñada para el protocolo TFT de Marlin. Bajo Klipper:
-- La pantalla puede mostrar el estado básico de la impresora
-- Los menús de navegación generalmente no funcionarán
-- Algunos usuarios no reportan problemas; otros reportan conflictos seriales
-
-**Acción recomendada:** Use Mainsail o Fluidd como interfaz principal. Mantenga la pantalla conectada si lo desea, pero no dependa de ella para el control.
-
----
-
-### Artillery Genius
-
-**Estado:** 🟡 PARCIAL
-
-Misma situación TFT serial que el Sidewinder. Se recomienda la interfaz web para control completo.
-
----
-
-### Artillery Hornet
-
-**Estado:** 🟡 PARCIAL
-
-Misma situación TFT serial. Se recomienda la interfaz web.
-
----
-
-## Síntomas Comunes y Causas
-
-| Síntoma | Causa Probable |
-|---------|---------------|
-| Pantalla negra después de que Klipper inicia | Firmware de pantalla incompatible (ej., t5uid1 en CR-6 SE) |
-| La pantalla muestra "No Printer Attached" | El TFT serial no recibe respuestas con formato Marlin |
-| Klipper no puede conectarse al MCU | La pantalla está ocupando o conflictuando con el puerto serial |
-| El menú está congelado o no responde | El puente serial TFT no recibe las respuestas G-code esperadas de Marlin |
-| Bucle de arranque / ciclo de reinicio de Klipper | El firmware de la pantalla está reiniciando el MCU vía línea DTR/reset |
-| Menús parciales pero con entradas faltantes | El firmware TFT solo maneja parcialmente el formato de salida de Klipper |
-
----
-
-## Enfoque Recomendado para Principiantes
-
-1. **Desconecte la pantalla táctil OEM** (especialmente para CR-6 SE, impresoras Artillery)
-2. **Instale Mainsail o Fluidd** en su Raspberry Pi
-3. **Acceda a su impresora desde cualquier dispositivo** en su red local
-4. Disfrute de una interfaz mejor que la pantalla OEM
-
-Mainsail y Fluidd ofrecen:
-- Estado en tiempo real de la impresora y gráficos de temperatura
-- Gestión y carga de archivos Gcode
-- Historial y estadísticas de impresión
-- Integración de cámara web
-- Edición completa de macros y configuración
-- UI responsiva compatible con móviles
-
----
-
-## Para Usuarios Avanzados
-
-Si desea experimentar con la compatibilidad de pantallas OEM:
-
-- **Pantallas DGUS/DWIN:** Busque firmware de pantalla Klipper comunitario para su modelo específico. La versión del firmware debe coincidir exactamente con su hardware de pantalla.
-- **Pantallas TFT serial:** Algunos miembros de la comunidad han tenido éxito parcial configurando `[respond]` de Klipper y usando reenvío personalizado de G-code. Esto es experimental.
-- **Neopixel/RGB:** Klipper soporta neopixel de forma nativa mediante la sección `[neopixel]` — KACE simplemente no lo configura automáticamente. Puede agregarlo manualmente después de la generación.
-
-KACE nunca eliminará ni deshabilitará sus secciones de configuración de pantalla. Usted es libre de experimentar.
-
----
-
-## Ver También
-
-- [Configuración de Pantalla de Klipper](https://www.klipper3d.org/Config_Reference.html#display) — referencia oficial
-- [Documentación de Mainsail](https://docs.mainsail.xyz/)
-- [Documentación de Fluidd](https://docs.fluidd.xyz/)
-- [Guía de pruebas de KACE](TESTING.md)
-- [Resumen de la arquitectura de KACE](../../README.md#architecture)
+La revisión posterior archivada no se presenta como el HEAD actual de upstream.
+Estas comprobaciones no certifican una pantalla física ni constituyen una prueba E2E de hardware.

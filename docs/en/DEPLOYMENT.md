@@ -4,7 +4,7 @@ This document explains in detail how KACE deploys generated configuration files 
 
 ---
 
-## Transaction safety and MCU identity
+## 🛡️ Transaction safety and MCU identity
 
 Firmware checkpoint deployments verify the running build fingerprint inside the
 configuration transaction, after activation and Klipper `Ready`, before emitting
@@ -62,13 +62,11 @@ recovery. Klipper `Ready` alone does not prove that restoration succeeded.
 Hardware-free regression command:
 `python -m unittest tests.unit.test_deployment_p1 tests.unit.test_stabilization_p2 -v`.
 
-### Maintenance decision after P1/P2 stabilization
+### Shared recovery postcondition
 
-The two rollback routes had diverged: physical recovery rechecked restored bytes
-after restart, while configuration-only recovery could report success after an
-external edit during that restart. They now share the exact snapshot postcondition
-and check it before activation and before reporting recovery success. Their distinct
-physical/configuration orchestration remains separate.
+Physical and configuration recovery share the exact snapshot postcondition and
+check it before activation and before reporting recovery success. Their distinct
+orchestration remains separate.
 
 The remaining size and concentration of orchestration in `core/deployer.py`,
 `kace.py` and Studio's `main.py` are maintenance debt, not a demonstrated reason
@@ -140,10 +138,45 @@ run that omitted macros. User-owned includes retain their existing ownership.
 | API unavailable | Cannot bind destination to active Klipper; deployment stops | Cannot review or confirm activation |
 
 Unknown SSH host keys require explicit fingerprint confirmation and are stored
-in known_hosts. API keys sent over unencrypted HTTP require confirmation.
+in known_hosts. This SSH trust prompt is separate from Moonraker credentials.
 Neither route claims success from systemd status alone or automatically fetches
 journalctl logs. A Moonraker connection failure may offer the SFTP transport;
 this changes file transfer, not the activation authority.
+
+### Moonraker API keys and the effective URL
+
+The interactive Moonraker deployment entry point (`deploy_moonraker`) **rejects**
+a non-empty API key when the effective endpoint URL does not use `https`.
+It returns `PRECONDITION_FAILED` with
+`Moonraker API key requires an effective HTTPS URL.` before sending that key
+or preparing a configuration transaction. There is no HTTP override confirmation
+or automatic HTTPS upgrade.
+
+| Endpoint entered | API key | Credential gate |
+| --- | --- | --- |
+| `pi.local` or `http://pi.local`, port `7125` | Non-empty | Rejected; omitted scheme defaults to HTTP |
+| `pi.local:443` or `http://pi.local`, port `443` | Non-empty | Rejected; a port number does not enable TLS |
+| `https://pi.local:8443` | Non-empty | Passes this gate; the explicit URL port is retained |
+| `https://pi.local`, port `8443` | Non-empty | Passes this gate; the supplied port is appended |
+| `127.0.0.1`, port `7125` | Empty | Not blocked by this gate; Moonraker must authorize the request |
+
+Use an HTTPS endpoint that actually serves TLS with a certificate trusted by
+the client. Merely changing the URL scheme does not configure TLS on the server.
+Passing the credential gate does not prove connectivity, server authorization,
+filesystem authority or conditional publication support; those checks still run.
+
+For installation on this Raspberry, KACE selects loopback and ignores saved
+remote hosts/API keys. It first probes without a key. If that probe fails and
+a key is entered, the HTTP-key rejection still applies before sending it; the
+anonymous probe may already have occurred. Local no-key access depends on
+Moonraker's authorization configuration, not a bypass of that authorization.
+
+This is KACE's interactive deployment policy, not a requirement of the native
+Klipper API or a universal property of every HTTP client. Klipper exposes a
+[Unix-domain API socket](https://github.com/Klipper3d/klipper/blob/fe4eb8650bd7de4c2100a14eaf09b0965c430e29/docs/API_Server.md);
+Moonraker provides the HTTP layer and its own
+[authorization rules](https://moonraker.readthedocs.io/en/latest/external_api/authorization/).
+Studio's SSH/SFTP connection and SSH host-key confirmation are separate again.
 
 ## 5. Firmware staging and first installation
 
