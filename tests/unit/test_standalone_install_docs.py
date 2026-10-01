@@ -28,14 +28,23 @@ class TestStandaloneInstallDocs(unittest.TestCase):
                 relative_path,
             )
 
-    def test_quick_start_pins_and_verifies_installer_before_execution(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        quick_start = readme.split("## Quick start", 1)[1].split("## ", 1)[0]
-        self.assertIn(IMMUTABLE_REF, quick_start)
-        self.assertIn(INSTALL_SHA256, quick_start)
-        self.assertIn("sha256sum -c -", quick_start)
-        self.assertNotIn("bash <(curl", quick_start)
-        self.assertLess(quick_start.index("sha256sum -c -"), quick_start.index('bash "$installer"'))
+    def test_pinned_installation_verifies_installer_before_execution(self):
+        for relative_path, heading in (
+            ("README.md", "### 🔒 Verified / pinned installation"),
+            ("docs/es/README.md", "### 🔒 Instalación verificada / pinned"),
+            ("docs/pt/README.md", "### 🔒 Instalação verificada / pinned"),
+        ):
+            with self.subTest(path=relative_path):
+                readme = (ROOT / relative_path).read_text(encoding="utf-8")
+                pinned_install = readme.split(heading, 1)[1].split("## ", 1)[0]
+                self.assertIn(IMMUTABLE_REF, pinned_install)
+                self.assertIn(INSTALL_SHA256, pinned_install)
+                self.assertIn("sha256sum -c -", pinned_install)
+                self.assertNotIn("bash <(curl", pinned_install)
+                self.assertLess(
+                    pinned_install.index("sha256sum -c -"),
+                    pinned_install.index('bash "$installer"'),
+                )
 
     def test_documented_hash_is_well_formed(self):
         self.assertRegex(IMMUTABLE_REF, r"^[0-9a-f]{40}$")

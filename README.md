@@ -1,18 +1,89 @@
+![KACE — Klipper Automated Configuration Ecosystem](docs/assets/kace_banner.png)
+
 # KACE
 
-🌐 [English](README.md) · [Español](docs/es/README.md) · [Português](docs/pt/README.md)
+### Klipper Automated Configuration Ecosystem
 
-![KACE](docs/assets/kace_banner.png)
+**Guided printer configuration, firmware preparation and deployment for Klipper.**
 
-KACE is the Python CLI that runs on the printer host to prepare, review and deploy Klipper configuration and MCU firmware artifacts. [KACE Studio](https://github.com/3D-uy/KACE-studio) prepares the Raspberry Pi from Windows and provides SSH/SFTP access; KACE remains the configuration and installation authority.
+[![KACE version 0.9.4-rc.2](https://img.shields.io/badge/KACE-0.9.4--rc.2-e88c30?style=flat-square)](VERSION)
+[![Status: pre-release](https://img.shields.io/badge/status-pre--release-d29b32?style=flat-square)](#project-status)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](docs/en/INSTALLATION.md)
+[![License: GPLv3](https://img.shields.io/badge/license-GPLv3-2d718f?style=flat-square)](LICENSE)
+[![GitHub Actions: KACE CI](https://img.shields.io/github/actions/workflow/status/3D-uy/kace/ci.yml?branch=main&style=flat-square&label=tests&logo=githubactions&logoColor=white)](https://github.com/3D-uy/kace/actions/workflows/ci.yml)<br>
+[![Host: Linux](https://img.shields.io/badge/host-Linux-454545?style=flat-square&logo=linux&logoColor=white)](docs/en/INSTALLATION.md)
+[![Host: Raspberry Pi](https://img.shields.io/badge/host-Raspberry_Pi-A22846?style=flat-square&logo=raspberrypi&logoColor=white)](https://www.raspberrypi.com/software/)
+[![For Klipper](https://img.shields.io/badge/for-Klipper-e88c30?style=flat-square)](https://www.klipper3d.org/)
+[![API: Moonraker](https://img.shields.io/badge/API-Moonraker-5965a8?style=flat-square)](https://moonraker.readthedocs.io/en/latest/)
+[![GitHub stars](https://img.shields.io/github/stars/3D-uy/kace?style=flat-square&logo=github&label=stars&color=e3b341)](https://github.com/3D-uy/kace)
 
-**Pre-1.0; controlled qualification.** [VERSION](VERSION) declares the version; [CHANGELOG](CHANGELOG.md) records current candidate notes. Uncommitted source changes are not part of the pinned installer. Automated validation does not certify physical hardware or a stable release.
+[English](README.md) · [Español](docs/es/README.md) · [Português](docs/pt/README.md)
 
-## Quick start
+KACE guides you through your printer's hardware choices to generate and review a Klipper configuration.
+Its terminal wizard prepares MCU firmware where supported and takes you through applying and verifying the installation.
 
-Requires Linux/Raspberry Pi, Python 3.11+, Git, network access for dependencies and the permissions needed by the chosen workflow. Docker/toolchains are needed only for their documented build and validation paths.
+[Quick start](#quick-start) · [Hardware support](#hardware-and-platforms) · [KACE Studio](#kace-studio) · [Documentation](#documentation)
 
-For a new Pi, use **KACE Studio**. For an existing Linux host, the installer below verifies the immutable installer before executing it. Review it before use: it installs the pinned revision, not necessarily the source tree you are reading.
+<a id="what-kace-does"></a>
+
+## ✨ What KACE does
+
+| Capability | What you get |
+| --- | --- |
+| 🔌 **Select hardware** | Board/MCU selection, motors, probes, thermistors and fans. |
+| 📄 **Generate configuration** | `printer.cfg` and applicable macros in `~/kace/`, built from reviewed profiles and your answers. |
+| ⚙️ **Prepare firmware** | Builds for declared MCU targets, with the available delivery method and any required manual steps. |
+| 🔎 **Review changes** | Configuration differences before application, with supported calibration values and user-owned sections preserved. |
+| ✅ **Apply and verify** | Host deployment, activation checks and required firmware identity checks. |
+
+<a id="a-look-at-the-wizard"></a>
+<a id="guided-setup"></a>
+
+## 🧙 Guided setup
+
+The terminal wizard offers **English, Spanish and Portuguese**, with **Beginner** and **Advanced** modes.
+
+> **Hardware selection** → **Guided configuration** → **Generate Klipper config**<br>
+> → **Build MCU firmware** → **Review** → **Apply** → **Verify**
+
+Firmware steps depend on the selected supported target and workflow.
+
+<!-- Insert a real wizard/configuration-review screenshot here: docs/assets/kace-wizard.png.
+     Include descriptive alt text and the captured KACE version. Do not use a mockup as a product screenshot. -->
+
+<a id="quick-start"></a>
+
+## 🚀 Quick start
+
+On an existing **Raspberry Pi or Linux printer host**, open a terminal or connect over SSH.
+You need **Python 3.11+**, Git, Bash, Python's venv support and internet access.
+The installer may request sudo for missing system dependencies and the `kace` command.
+
+```bash
+git clone https://github.com/3D-uy/KACE.git kace-source &&
+cd kace-source &&
+KACE_SOURCE_REF="$(git rev-parse HEAD)" bash install.sh
+```
+
+This installs the revision you just cloned into `~/kace/` and opens KACE.
+Run `kace` to open it again. This path follows the repository's current default branch; use the verified option below for the fixed candidate.
+
+After reviewing the changes, confirm application and activation, then follow the [hardware checks](docs/HARDWARE_TESTING.md) before printing.
+
+Applying and verifying the configuration requires a working Klipper/Moonraker host.
+For a fresh Pi, start with [KACE Studio](#kace-studio) or the [manual host preparation guide](docs/en/INSTALLATION.md).
+
+<a id="verified-installation-pinned"></a>
+
+### 🔒 Verified / pinned installation
+
+For a fixed candidate with installer checksum verification, use the command below.
+It keeps the existing pinned reference and may differ from the current source.
+
+<details>
+<summary>Show the pinned installer command</summary>
+
+Requires `curl` and `sha256sum`. Review the script before running it.
 
 ```bash
 KACE_COMMIT='b7988b57b5fc80fbc55c3d1326768289dbccb179'
@@ -24,54 +95,102 @@ printf '%s  %s\n' "$KACE_INSTALL_SHA256" "$installer" | sha256sum -c - &&
 KACE_SOURCE_REF="$KACE_COMMIT" KACE_EXPECTED_COMMIT="$KACE_COMMIT" bash "$installer"
 ```
 
-To run the current source checkout instead:
+</details>
 
-```bash
-git clone https://github.com/3D-uy/KACE.git
-cd KACE
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --require-hashes -r requirements.txt
-python kace.py
-```
+<a id="kace-studio"></a>
 
-Manual host preparation is also possible: in Raspberry Pi Imager choose the exact Pi and a compatible OS, select target storage, configure hostname, user, network and SSH, then review and confirm the destructive write. Safely eject, boot the Pi and connect to its hostname or router-assigned IP. Install KACE there using the verified command above. Preparing the OS alone does not configure or commission the printer.
+## 🖥️ KACE Studio
 
-## 🧭 Use
+[KACE Studio](https://github.com/3D-uy/KACE-studio) is the companion desktop app for preparing a Raspberry Pi from **Windows 10/11**.
 
-1. Run `kace` after installation, or `python kace.py` from the activated source environment. Choose language and experience level.
-2. Select the exact board/MCU, printer geometry, motors, probes and other supported resources; review pins and electrical requirements.
-3. Review artifacts under `~/kace/`. Follow the selected firmware delivery procedure and physical identity verification.
-4. Review the configuration diff and preserved settings, explicitly apply/activate and wait for verified completion. Local Moonraker on the Pi uses `127.0.0.1:7125`.
-5. Commission sensors, endstops, motion and heating separately using the hardware guide. On interruption, follow the saved checkpoint and recovery instructions.
+- Write a Pi image to SD/USB and configure hostname, account, network and SSH for first boot.
+- Discover the Pi and connect through an SSH workspace.
+- Browse and download files over SFTP, then continue KACE setup on the Pi.
 
-## ⚠️ Scope and limits
+**Studio prepares the host; KACE configures the printer.** Studio requires Microsoft Edge WebView2 Runtime and is also a prerelease.
+See its [setup instructions](https://github.com/3D-uy/KACE-studio#quick-start) for installation and current image/platform choices.
 
-- Cartesian/CoreXY paths are implemented; searchable upstream profiles are not a compatibility guarantee. Runtime, provisional, prepare-only and configuration-only firmware paths remain distinct.
-- Unknown displays, unsupported mandatory circuits and unreviewed profile dependencies remain blocked. Review [support scope](docs/en/SUPPORT_SCOPE.md) and [display limits](docs/en/DISPLAYS.md).
-- Do not save edits from Mainsail/SSH during publication. Local writes use cooperative locks and atomic replacement per file, not a directory-wide transaction against arbitrary editors. Remote changed plans and existing-file replacement may require manual proposals.
-- Rollback preserves live edits and durable snapshots when safe restoration cannot be proven. `Ready` alone is not success: activation, artifact and firmware evidence remain required.
-- Responsibility covers initial installation and unfinished resumes through `DONE`/`COMPLETE`; no monitoring or revalidation of later user edits is promised.
+<a id="hardware-and-platforms"></a>
 
-## 🛠️ Development
+## 🔌 Hardware and platforms
 
-Use [Development](docs/DEVELOPMENT.md) for architecture, contribution and tests. Run the narrowest regression first, then affected gates. The complete suite includes pytest functions that the unittest runner does not collect. Never update snapshots just to make a failure pass.
+| Area | Current scope |
+| --- | --- |
+| KACE host | Raspberry Pi / Linux with Python 3.11+; configuration activation uses Klipper and Moonraker. |
+| Printer configuration | Cartesian and CoreXY, a primary extruder and heated bed, with supported motor, probe and fan paths. |
+| Desktop provisioning | KACE Studio on Windows 10/11; Pi model and OS choices are validated by Studio. |
+
+The current [board contracts](data/board_contracts/v1/) declare firmware runtime paths for these exact targets:
+
+| Board | MCU variant | Host connection |
+| --- | --- | --- |
+| BTT SKR Mini E3 v3.0 | STM32G0B1 | Native USB |
+| BTT SKR v1.4 / v1.4 Turbo | LPC1768 / LPC1769, respectively | Native USB |
+| BTT SKR Pico v1.0 | RP2040 | Native USB |
+| Creality v4.2.7 | STM32F103 | USB serial bridge, MCU USART1 |
+| MKS Robin Nano V3 | STM32F407 | Native USB |
+
+These are implemented software paths, **not a list of physically certified printers**.
+Board revision, MCU, wiring, bootloader and delivery method must match the selected target.
+Other entries may be provisional, configuration-only or preparation-only; a searchable Klipper profile does not establish full support.
+Check the [support scope](docs/en/SUPPORT_SCOPE.md) and [firmware delivery profiles](data/firmware_deployments.yaml) for the boundaries.
+
+<a id="project-status"></a>
+
+## 🧪 Project status
+
+KACE is **pre-1.0**. See [VERSION](VERSION) for the source version, [CHANGELOG](CHANGELOG.md) for changes and [ROADMAP](ROADMAP.md) for pending work.
+
+- Physical hardware validation is still pending; sensors, endstops, motion and heating need commissioning on your printer.
+- Multiple extruders, IDEX/toolchangers and general migration of arbitrary Klipper profiles are outside the current scope.
+- Guided active display generation is not yet available for a qualified board/display pair; see [display support](docs/en/DISPLAYS.md).
+- Some remote configuration changes require manual application. KACE covers initial setup and unfinished resumes; it does not monitor later edits.
+
+<a id="documentation"></a>
 
 ## 📚 Documentation
 
-| Purpose | Guide |
+| Looking for… | Read |
 | --- | --- |
-| Development, architecture and tests | [DEVELOPMENT.md](docs/DEVELOPMENT.md) |
-| Deployment and recovery | [DEPLOYMENT.md](docs/en/DEPLOYMENT.md) |
-| Hardware qualification | [HARDWARE_TESTING.md](docs/HARDWARE_TESTING.md) |
-| Support scope | [SUPPORT_SCOPE.md](docs/en/SUPPORT_SCOPE.md) |
-| Displays | [DISPLAYS.md](docs/en/DISPLAYS.md) |
-| Release | [RELEASE.md](docs/RELEASE.md) |
-| Code of conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
-| Roadmap | [ROADMAP.md](ROADMAP.md) |
-| Current candidate notes | [CHANGELOG.md](CHANGELOG.md) |
-| Security | [SECURITY.md](SECURITY.md) |
+| Host preparation, installation and running from source | [Installation guide](docs/en/INSTALLATION.md) |
+| Configuration review, deployment, concurrent edits and recovery | [Deployment guide](docs/en/DEPLOYMENT.md) |
+| Detailed hardware and feature boundaries | [Support scope](docs/en/SUPPORT_SCOPE.md) · [Displays](docs/en/DISPLAYS.md) |
+| Physical checks before using the printer | [Hardware testing](docs/HARDWARE_TESTING.md) |
+| Architecture, contracts, tests and firmware build environments | [Development guide](docs/DEVELOPMENT.md) |
+| Pinned versions, checksums and release validation | [Release guide](docs/RELEASE.md) |
+| Planned work and recent changes | [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md) |
 
-## License
+<a id="development-and-contributing"></a>
 
-[GPL-3.0](LICENSE).
+## 🛠️ Development and contributing
+
+Bug reports, documentation improvements and contributions to reviewed hardware support are welcome.
+Start with the [development guide](docs/DEVELOPMENT.md) for the source map, environment and relevant tests.
+For a bug report, include the KACE revision, host environment, exact board/MCU and reproduction steps, with credentials removed.
+
+Follow the [code of conduct](CODE_OF_CONDUCT.md). Report vulnerabilities through the [security policy](SECURITY.md).
+
+<a id="community--acknowledgements"></a>
+
+## ❤️ Community & Acknowledgements
+
+**Special thanks to the Klipper project and its community** for the firmware, configuration examples, documentation and shared knowledge that make KACE possible.
+
+| Project | Its role in KACE |
+| --- | --- |
+| [Klipper](https://www.klipper3d.org/) | The firmware and configuration system KACE targets; reviewed upstream profiles and source underpin configuration generation and MCU builds. |
+| [Moonraker](https://moonraker.readthedocs.io/en/latest/) | The host API used for configuration access, activation and printer/firmware state checks. |
+| [Mainsail](https://docs.mainsail.xyz/) & [MainsailOS](https://docs.mainsail.xyz/mainsailos/) | A dashboard offered by the bootstrap, plus a preconfigured image base used by Studio. |
+| [Fluidd](https://docs.fluidd.xyz/) | An alternative dashboard installed by the bootstrap when selected, including its client configuration. |
+| [Raspberry Pi](https://www.raspberrypi.com/software/) | The host ecosystem, Raspberry Pi OS image options and Imager for manual host preparation. |
+| [Crowsnest](https://docs.mainsail.xyz/crowsnest/) | Optional webcam streaming installed through the bootstrap. |
+
+Report bugs and suggest improvements through [KACE issues](https://github.com/3D-uy/kace/issues).
+
+**KACE is an independent project and is not officially affiliated with or endorsed by Klipper or any other project mentioned here.**
+
+<a id="license"></a>
+
+## 📜 License
+
+KACE is open source under the [GNU GPL v3](LICENSE).
