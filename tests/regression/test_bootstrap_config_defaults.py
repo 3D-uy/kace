@@ -666,7 +666,7 @@ curl() {
 
     case "$url" in
         */server/info)
-            printf '%s\n' '{"result":{"moonraker_version":"test"}}'
+            printf '%s\n' '{"result":{"moonraker_version":"test","components":["power"],"failed_components":[]}}'
             ;;
         */machine/device_power/devices)
             local call_count=0
@@ -740,7 +740,7 @@ mkdir -p "$TEST_STATE_DIR"
 curl() {
     local url="${!#}"
     case "$url" in
-        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test","components":["power"],"failed_components":[]}}' ;;
         */machine/device_power/devices) printf '%s\n' '{"result":{"devices":[]}}' ;;
         */machine/device_power/device) touch "$TEST_STATE_DIR/post-called" ; return 22 ;;
         *) return 22 ;;
@@ -768,7 +768,7 @@ mkdir -p "$TEST_STATE_DIR"
 curl() {
     local url="${!#}"
     case "$url" in
-        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test","components":["power"],"failed_components":[]}}' ;;
         */machine/device_power/devices)
             printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"error","type":"gpio"}]}}'
             ;;
@@ -796,7 +796,7 @@ sleep() { SECONDS=$((SECONDS + ${1:-1})); }
 curl() {
     local url="${!#}"
     case "$url" in
-        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test","components":["power"],"failed_components":[]}}' ;;
         */machine/device_power/devices)
             printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"off","type":"gpio"}]}}'
             ;;
@@ -830,7 +830,7 @@ sleep() { SECONDS=$((SECONDS + ${1:-1})); }
 curl() {
     local url="${!#}"
     case "$url" in
-        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test"}}' ;;
+        */server/info) printf '%s\n' '{"result":{"moonraker_version":"test","components":["power"],"failed_components":[]}}' ;;
         */machine/device_power/devices)
             if [ -f "$TEST_STATE_DIR/powered" ]; then
                 printf '%s\n' '{"result":{"devices":[{"device":"main_psu","status":"on","type":"gpio"}]}}'
