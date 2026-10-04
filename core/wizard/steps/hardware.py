@@ -577,6 +577,9 @@ def _step_tmc_currents(user_data):
 
 def _apply_z_tmc_mappings(user_data: dict) -> str | None:
     """Post-processing step: maps Z stepper TMC configurations."""
+    from core.tmc_socket import selected_socket_sections
+    if isinstance(user_data.get("board_parsed"), dict):
+        user_data["board_parsed"].update(selected_socket_sections(user_data["board_parsed"], user_data))
     z_motors = int(user_data.get('z_motors') or 1)
     if z_motors <= 1:
         return
@@ -625,6 +628,9 @@ def _apply_z_tmc_mappings(user_data: dict) -> str | None:
                         raise WizardExit()
                     parsed_data.setdefault(dest_tmc, {})[pin_key] = uart_pin
         else:
+            if dest_tmc in parsed_data:
+                # Already mapped, explicitly configured, or reviewed socket wiring.
+                continue
             # Socket assignment does not authorize changing the driver model.
             src_tmc = f"{model} {selected_driver}"
             tmc_src_data = parsed_data.get(src_tmc) or _parsed_full.get(src_tmc)
@@ -632,6 +638,6 @@ def _apply_z_tmc_mappings(user_data: dict) -> str | None:
                 parsed_data[dest_tmc] = tmc_src_data.copy()
                 parsed_data.pop(src_tmc, None)
             elif driver_mode in ["UART", "SPI"]:
-                print(f"\n{ERROR}{t('kace.abort_no_tmc_map', mode=driver_mode, driver=selected_driver)}{RESET}")
+                print(f"\n{ERROR}{t('kace.abort_no_tmc_map', mode=driver_mode, driver=selected_driver, model=driver_type, board=user_data.get('board') or '?')}{RESET}")
                 print(f"{WARNING}{t('kace.abort_generation')}{RESET}")
                 raise WizardExit()

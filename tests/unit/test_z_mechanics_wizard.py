@@ -22,7 +22,7 @@ def data(count=2):
 
 
 def choose(user, modes, inputs=(), confirm=True):
-    with patch.object(motion, "numbered_select", side_effect=modes), \
+    with patch.object(motion, "numbered_select", side_effect=[*modes, "confirm" if confirm else "edit"]), \
             patch.object(motion, "simple_input", side_effect=inputs), \
             patch.object(motion, "yes_no", return_value=confirm):
         return motion._step_z_mechanics(user)
@@ -149,14 +149,16 @@ def test_invalid_individual_input_does_not_commit(inputs):
     assert user == before
 
 
-def test_review_defaults_to_no_and_detects_changed_live_primary():
+def test_review_requires_explicit_choice_and_detects_changed_live_primary():
     user = data()
     def changed(*args, **kwargs):
-        assert kwargs["default"] is False
+        assert kwargs["default"] == 1
+        assert kwargs["require_explicit"] is True
         user["board_parsed"]["stepper_z"]["rotation_distance"] = "12"
-        return True
-    with patch.object(motion, "numbered_select", return_value="same"), \
-            patch.object(motion, "yes_no", side_effect=changed):
+        return "confirm"
+    def select(*args, **kwargs):
+        return changed(*args, **kwargs) if kwargs.get("require_explicit") else "same"
+    with patch.object(motion, "numbered_select", side_effect=select):
         assert motion._step_z_mechanics(user) == "__retry__"
     assert user["board_parsed"]["stepper_z"]["rotation_distance"] == "12"
     assert "rotation_distance_z1" not in user
@@ -207,7 +209,7 @@ def test_runner_back_from_probe_discards_confirmation_and_allows_new_choice():
         return "__back__" if len(visits) == 1 else "done"
     runner = WizardRunner({"z_mechanics": {"prompt": motion._step_z_mechanics},
                            "probe": {"prompt": probe}}, ["z_mechanics", "probe"], user)
-    with patch.object(motion, "numbered_select", side_effect=["same", "individual"]), \
+    with patch.object(motion, "numbered_select", side_effect=["same", "confirm", "individual", "confirm"]), \
             patch.object(motion, "simple_input", side_effect=["8", "16", "2:1", "48"]), \
             patch.object(motion, "yes_no", return_value=True), \
             patch("core.wizard.ui._print_step_header"):
@@ -234,3 +236,41 @@ def test_profile_and_custom_routes_pass_through_mechanics_before_probe():
     assert runner.get_default_next("homing_directions") == "z_mechanics"
     assert runner.get_default_next("z_mechanics") == "tmc_currents"
     assert runner.get_default_next("tmc_currents") == "probe"
+
+
+@pytest.mark.parametrize("action,expected", [("edit", "__retry__"), ("__back__", "__back__")])
+def test_review_navigation_preserves_live_values(action, expected):
+    user = data()
+    before = copy.deepcopy(user)
+    with patch.object(motion, "numbered_select", side_effect=["same", action]):
+        assert motion._step_z_mechanics(user) == expected
+    assert user == before
+
+
+def test_review_quit_discards_staged_values():
+    user = data()
+    before = copy.deepcopy(user)
+    with patch.object(motion, "numbered_select", side_effect=["same", "__quit__"]):
+        with pytest.raises(WizardExit):
+            motion._step_z_mechanics(user)
+    assert user == before
+
+
+@pytest.mark.parametrize("columns", [45, 100])
+def test_review_shows_socket_mapping_and_all_motor_scales(columns, capsys):
+    import os
+    user = data()
+    user["z_socket_assignments"] = {"stepper_z1": "extruder1"}
+    resolved = {f"{option}_{target}": value for target, values in
+                [("z", ("8", "16", "1:1", "200")), ("z1", ("4", "32", "2:1", "400"))]
+                for option, value in zip(motion.Z_MECHANICAL_OPTIONS, values)}
+    with patch.object(motion.shutil, "get_terminal_size", return_value=os.terminal_size((columns, 24))):
+        motion._print_z_mechanics_review(user, resolved)
+    output = capsys.readouterr().out
+    assert "E1" in output and "Z1" in output
+    for value in ["200", "400", "2:1", "32", "16"]:
+        assert value in output
+    assert "extruder1" not in output
+    import re
+    lines = re.sub(r"\x1b\[[0-9;]*m", "", output).splitlines()
+    assert all(len(line) <= columns for line in lines)

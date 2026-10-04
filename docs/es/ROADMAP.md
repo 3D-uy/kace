@@ -8,6 +8,8 @@ Prioridades de este código, sin fechas prometidas ni afirmaciones de calificaci
 
 Existen configuración guiada, publicación revisada, recuperación persistente, verificación de identidad del firmware y validación automática por capas. Sus límites están en [Alcance (EN)](../../docs/en/SUPPORT_SCOPE.md). El comportamiento del código debe distinguirse del candidato distribuido inmutable.
 
+El mapeo revisado de conectores TMC extraíbles cubre diez perfiles exactos; los ajustes eléctricos entre modelos siguen requiriendo revisión del usuario. Ver [alcance (EN)](../TMC_SOCKET_MAPPING.md).
+
 ## 🧭 Prioridades
 
 | Prioridad | Resultado requerido | Referencia |

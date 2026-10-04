@@ -78,7 +78,7 @@ def api_server(info, devices, *, info_status=200, power_status=200, startup_fail
 @unittest.skipUnless(_find_bash(), "bash is required")
 class TestBootstrapOptionalPower(unittest.TestCase):
     def run_services(self, *, enabled=False, previous=False, info=None, devices=None,
-                     info_status=200, power_status=200, startup_failures=0):
+                     info_status=200, power_status=200, startup_failures=0, clock_jump=0, mcu_present=True):
         with tempfile.TemporaryDirectory() as tmp, api_server(
             server_info(power=enabled) if info is None else info,
             [] if devices is None else devices,
@@ -105,7 +105,8 @@ class TestBootstrapOptionalPower(unittest.TestCase):
             before = power_file.read_bytes() if previous else None
             mcu = root / "dev/serial/by-id/usb-Klipper_test-if00"
             mcu.parent.mkdir(parents=True)
-            mcu.touch()
+            if mcu_present:
+                mcu.touch()
             source = BOOTSTRAP.read_text(encoding="utf-8")
             services = source[source.index('log_stage "SERVICES"'):source.index('# ── 10. Crowsnest')]
             runner = root / "services.sh"
@@ -135,7 +136,12 @@ DASHBOARD=mainsail
 SUDO=""
 systemctl() { printf '%s\n' "$*" >> "$PRINTER_HOME/services.log"; }
 chown() { :; }
-sleep() { SECONDS=$((SECONDS + ${1:-1})); }
+TEST_MONOTONIC_SECONDS=0
+_monotonic_seconds() { printf '%s\n' "$TEST_MONOTONIC_SECONDS"; }
+sleep() {
+    TEST_MONOTONIC_SECONDS=$((TEST_MONOTONIC_SECONDS + ${1:-1}))
+    SECONDS=$((SECONDS + TEST_CLOCK_JUMP))
+}
 curl() {
     local args=() arg
     for arg in "$@"; do
@@ -146,7 +152,7 @@ curl() {
 begin_power_reconciliation "$MOONRAKER_CONFIG" "$POWER_CONFIG_PATH"
 reconcile_power_relay_section "$MOONRAKER_CONFIG"
 ''' + services + '\nprintf "SERVICES_VERIFIED\\n"\n', encoding="utf-8")
-            env = dict(os.environ, KACE_TEST_PYTHON=Path(sys.executable).as_posix(), TEST_API_URL=url)
+            env = dict(os.environ, KACE_TEST_PYTHON=Path(sys.executable).as_posix(), TEST_API_URL=url, TEST_CLOCK_JUMP=str(clock_jump))
             result = subprocess.run([_find_bash(), runner.as_posix(), BOOTSTRAP.as_posix(), root.as_posix(), str(enabled).lower()],
                                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, env=env)
             after = power_file.read_bytes() if power_file.exists() else None
@@ -165,6 +171,41 @@ reconcile_power_relay_section "$MOONRAKER_CONFIG"
         result, state, _, _ = self.run_services(startup_failures=1, power_status=404)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(state["requests"], [("GET", "/server/info")] * 2)
+
+    def assert_terminal_failure(self, result, code):
+        prefix = "=== KACE_BOOTSTRAP_EVENT: "
+        events = [json.loads(line[len(prefix):-4]) for line in result.stdout.splitlines()
+                  if line.startswith(prefix)]
+        failures = [event for event in events if event["event"] == "workflow_failed"]
+        self.assertEqual(len(failures), 1, result.stdout)
+        self.assertEqual(failures[0]["stage"], "SERVICES")
+        self.assertEqual(failures[0]["code"], code)
+        self.assertEqual(failures[0]["exit_code"], 1)
+
+    def test_server_readiness_survives_wall_clock_correction(self):
+        for jump in (10000000, -10000000):
+            with self.subTest(jump=jump):
+                result, state, _, after = self.run_services(
+                    startup_failures=2, clock_jump=jump, power_status=404)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(state["requests"], [("GET", "/server/info")] * 3)
+                self.assertFalse(json.loads(after)["enabled"])
+
+    def test_actual_timeout_reports_api_failure_and_preserves_previous_state(self):
+        result, state, before, after = self.run_services(
+            previous=True, startup_failures=10, clock_jump=-10000000)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(before, after)
+        self.assertEqual(state["requests"], [("GET", "/server/info")] * 3)
+        self.assert_terminal_failure(result, "GPIO_RELAY_API_VERIFY")
+
+    def test_missing_mcu_reports_power_on_failure_without_persisting(self):
+        result, state, _, after = self.run_services(enabled=True, mcu_present=False,
+            devices=[{"device": "new_psu", "type": "gpio"}], clock_jump=10000000)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(state["powered"])
+        self.assertIsNone(after)
+        self.assert_terminal_failure(result, "POWER_ON")
 
     def test_removing_last_managed_device_accepts_absent_component(self):
         result, state, _, after = self.run_services(previous=True, power_status=404)
