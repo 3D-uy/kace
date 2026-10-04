@@ -6,7 +6,7 @@
 
 **Configuración guiada de impresoras, preparación de firmware y despliegue para Klipper.**
 
-[![KACE version 0.9.4-rc.2](https://img.shields.io/badge/KACE-0.9.4--rc.2-e88c30?style=flat-square)](../../VERSION)
+[![KACE version 0.9.4-rc.3](https://img.shields.io/badge/KACE-0.9.4--rc.3-e88c30?style=flat-square)](../../VERSION)
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-d29b32?style=flat-square)](#estado-del-proyecto)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](../en/INSTALLATION.md)
 [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-2d718f?style=flat-square)](../../LICENSE)
@@ -51,6 +51,8 @@ Los pasos de firmware dependen del destino admitido y del flujo elegido.
 <!-- Insertar aquí una captura real del asistente/revisión: docs/assets/kace-wizard.png.
      Incluir texto alternativo y la versión de KACE capturada. No usar un mockup como captura del producto. -->
 
+Los drivers TMC extraíbles usan el cableado revisado del conector aunque el ejemplo del perfil nombre otro chip. El mapeo entre modelos requiere corrientes explícitas; ver [alcance y perfiles admitidos (EN)](../TMC_SOCKET_MAPPING.md).
+
 <a id="inicio-rápido"></a>
 
 ## 🚀 Inicio rápido
@@ -86,7 +88,7 @@ Conserva la referencia fijada existente y puede diferir del código actual.
 Requiere `curl` y `sha256sum`. Revisa el script antes de ejecutarlo.
 
 ```bash
-KACE_COMMIT='b7988b57b5fc80fbc55c3d1326768289dbccb179'
+KACE_COMMIT='561f9b9463b0d443e386f8b1ef468980538093eb'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT

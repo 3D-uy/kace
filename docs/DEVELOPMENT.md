@@ -128,6 +128,10 @@ scenarios and real firmware builds. Missing infrastructure is not a passing gate
 On Windows, if pytest's shared temporary directory is inaccessible, use
 `--basetemp` with a new disposable directory; pytest may clear that target.
 
+Reviewed removable TMC wiring is resolved by `core/tmc_socket.py` from
+`data/tmc_sockets.json`, shared by wizard and generation. See the
+[TMC socket mapping contract](TMC_SOCKET_MAPPING.md) for scope and focused tests.
+
 ## Development container and firmware builds
 
 ```bash
@@ -178,6 +182,8 @@ writes; USB reappearance alone does not prove the running build. See
 [reviewed Klipper pin](https://github.com/Klipper3d/klipper/blob/fe4eb8650bd7de4c2100a14eaf09b0965c430e29/docs/Bootloaders.md).
 
 ## Contribution, snapshots and documentation
+
+Start every commit subject, including merge commits, with a relevant icon: `🔧 fix`, `📚 docs`, `🧹 chore`, `📦 release`, or `🔀 merge`.
 
 Keep changes scoped and backed by defect coverage. For board/generator changes,
 review exact identity, all mandatory dependencies, YAML pattern precedence,

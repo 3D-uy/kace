@@ -8,6 +8,8 @@ Priorities for this source tree, not release dates or a claim of completed quali
 
 Guided configuration, reviewed publication, durable recovery, firmware identity checks and layered automated validation exist. Their supported boundaries are documented in [Support scope](docs/en/SUPPORT_SCOPE.md). Source behavior must be distinguished from the immutable distributed candidate.
 
+Reviewed removable TMC socket mapping covers ten exact source profiles; cross-model electrical settings still require user review. See [mapping scope](docs/TMC_SOCKET_MAPPING.md).
+
 ## 🧭 Priorities
 
 | Priority | Required result | Reference |

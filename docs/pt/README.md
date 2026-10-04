@@ -6,7 +6,7 @@
 
 **Configuração guiada de impressoras, preparação de firmware e implantação para Klipper.**
 
-[![KACE version 0.9.4-rc.2](https://img.shields.io/badge/KACE-0.9.4--rc.2-e88c30?style=flat-square)](../../VERSION)
+[![KACE version 0.9.4-rc.3](https://img.shields.io/badge/KACE-0.9.4--rc.3-e88c30?style=flat-square)](../../VERSION)
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-d29b32?style=flat-square)](#estado-do-projeto)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](../en/INSTALLATION.md)
 [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-2d718f?style=flat-square)](../../LICENSE)
@@ -51,6 +51,8 @@ As etapas de firmware dependem do alvo suportado e do fluxo escolhido.
 <!-- Inserir aqui uma captura real do assistente/revisão: docs/assets/kace-wizard.png.
      Incluir texto alternativo e a versão do KACE capturada. Não usar um mockup como captura do produto. -->
 
+Drivers TMC removíveis usam a fiação revisada do conector mesmo quando o exemplo do perfil cita outro chip. O mapeamento entre modelos exige correntes explícitas; veja [escopo e perfis aceitos (EN)](../TMC_SOCKET_MAPPING.md).
+
 <a id="início-rápido"></a>
 
 ## 🚀 Início rápido
@@ -86,7 +88,7 @@ Ele mantém a referência fixada existente e pode diferir do código atual.
 Requer `curl` e `sha256sum`. Revise o script antes de executá-lo.
 
 ```bash
-KACE_COMMIT='b7988b57b5fc80fbc55c3d1326768289dbccb179'
+KACE_COMMIT='561f9b9463b0d443e386f8b1ef468980538093eb'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
