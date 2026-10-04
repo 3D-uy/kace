@@ -1,5 +1,7 @@
 import copy
 import os
+import shutil
+import textwrap
 from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
 from core.scraper import fetch_raw_config, parse_config, extract_profile_defaults
 from core.translations import t
@@ -58,6 +60,38 @@ def _clear_copied_z_mechanics(user_data):
             user_data.pop(key, None)
             provenance.pop(key, None)
     user_data["_value_provenance"] = provenance
+
+
+def _print_z_mechanics_review(staged, resolved):
+    """Compare motors without repeating input examples; wrap for narrow terminals."""
+    targets = ["z" + (str(i) if i else "") for i in range(int(staged["z_motors"]))]
+    assignments = staged.get("z_socket_assignments") or {}
+    sockets = {"stepper_z": "Z", "extruder": "E0", "extruder1": "E1",
+               "extruder2": "E2", "extruder3": "E3"}
+    rows = [(t("wizard.z_mechanics.socket"), [
+        sockets.get(assignments.get("stepper_" + target, "stepper_" + target),
+                    assignments.get("stepper_" + target, "stepper_" + target).removeprefix("stepper_").upper())
+        for target in targets])]
+    rows += [(t("wizard.z_mechanics.short_" + option), [
+        resolved[f"{option}_{target}"] or "1:1" for target in targets])
+        for option in Z_MECHANICAL_OPTIONS]
+    labels = [t("wizard.z_mechanics.parameter")] + [label for label, _ in rows]
+    widths = [max(map(len, labels))] + [
+        max(len(target), *(len(values[i]) for _, values in rows)) for i, target in enumerate(targets)]
+    width = max(20, shutil.get_terminal_size((100, 24)).columns - 4)
+    print(f"\n{SECTION}{t('wizard.z_mechanics.review')}{RESET}")
+    if sum(widths) + 3 * len(targets) <= width:
+        def row(values):
+            print("  " + "   ".join(value.ljust(size) for value, size in zip(values, widths)))
+        row([labels[0]] + [target.upper() for target in targets])
+        for label, values in rows:
+            row([label] + values)
+    else:
+        for label, values in rows:
+            print("  " + label)
+            for line in textwrap.wrap(" | ".join(f"{target.upper()}: {value}" for target, value in zip(targets, values)), width=width):
+                print("    " + line)
+    print("\n" + textwrap.fill(t("wizard.z_mechanics.staged_hint"), width=width))
 
 
 def _step_z_mechanics(user_data):
@@ -150,13 +184,17 @@ def _step_z_mechanics(user_data):
     resolved, provenance = resolve_generation_values(board, staged)
     require_resolved_safety_values({key: value for key, value in provenance.items()
                                     if not key.startswith(("run_current_", "hold_current_", "stealthchop_threshold_"))})
-    print(f"\n{SECTION}{t('wizard.z_mechanics.review')}{RESET}")
-    for index in range(count):
-        target = "z" + (str(index) if index else "")
-        print(f"  {target.upper()}")
-        for option in Z_MECHANICAL_OPTIONS:
-            print(f"    {t('wizard.z_mechanics.' + option)}: {resolved[f'{option}_{target}'] or '1:1'}")
-    if not yes_no(t("wizard.z_mechanics.confirm"), default=False):
+    _print_z_mechanics_review(staged, resolved)
+    action = numbered_select(t("wizard.z_mechanics.review_action"), choices=[
+        {"name": t("wizard.z_mechanics.confirm_continue"), "value": "confirm"},
+        {"name": t("wizard.z_mechanics.edit"), "value": "edit"},
+        _back_choice(), _quit_choice(),
+    ], default=1, require_explicit=True)
+    if action == _BACK:
+        return _BACK
+    if action in (_QUIT, None):
+        raise WizardExit()
+    if action != "confirm":
         return "__retry__"
     try:
         live_board = user_data.get("board_parsed") or {}

@@ -241,6 +241,8 @@ def _render_display_blocks(user_ctx, pins_ctx, parsed_data) -> str:
 
 def generate_config(parsed_data, user_data, output_path=None, include_macros=False, verbose=True, *, thermal_review_only=False):
     """Generate printer.cfg from parsed config and user data using Jinja2."""
+    from core.tmc_socket import selected_socket_sections
+    parsed_data = selected_socket_sections(parsed_data, user_data)
     from core.homing_source import require_supported_source_homing, require_supported_homing_context
     require_supported_source_homing(parsed_data)
     require_supported_homing_context(user_data)
@@ -430,6 +432,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         "fixed_pwm_beepers": copy.deepcopy(pwm_outputs),
         "probe_reset": copy.deepcopy(parsed_data.get("_board_probe_reset_source")),
         "bx_panel": copy.deepcopy(parsed_data.get("_board_bx_panel_source")),
+        "tmc_socket_source": copy.deepcopy(parsed_data.get("_tmc_socket_source")),
         "hardware_options": copy.deepcopy({
             name: options for name, options in pins_ctx.items()
             if not name.startswith("_")

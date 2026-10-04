@@ -8,6 +8,8 @@ Prioridades deste código, sem datas prometidas ou afirmações de qualificaçã
 
 Existem configuração guiada, publicação revisada, recuperação persistente, verificação da identidade de firmware e validação automática em camadas. Seus limites estão em [Escopo (EN)](../../docs/en/SUPPORT_SCOPE.md). O comportamento do código deve ser distinguido do candidato distribuído imutável.
 
+O mapeamento revisado de conectores TMC removíveis cobre dez perfis exatos; os ajustes elétricos entre modelos ainda exigem revisão do usuário. Veja [escopo (EN)](../TMC_SOCKET_MAPPING.md).
+
 ## 🧭 Prioridades
 
 | Prioridade | Resultado exigido | Referência |

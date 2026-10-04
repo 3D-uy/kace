@@ -1,0 +1,1592 @@
+{
+  "klipper_ref": "fe4eb8650bd7de4c2100a14eaf09b0965c430e29",
+  "description": "Reviewed removable-driver socket transport examples. Only UART/SPI wiring, not module electrical settings or physical qualification.",
+  "profiles": {
+    "generic-bigtreetech-skr-v1.3.cfg": {
+      "sha256": "9f79a5e68ae938b1b50e67f5a3a52ae7059d330b027cb4ed1bf1f3bdbba03730",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "P2.2",
+            "dir_pin": "!P2.6",
+            "enable_pin": "!P2.1"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_x",
+              "options": {
+                "uart_pin": "P1.17"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "P1.17",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "P0.19",
+            "dir_pin": "!P0.20",
+            "enable_pin": "!P2.8"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_y",
+              "options": {
+                "uart_pin": "P1.15"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "P1.15",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "P0.22",
+            "dir_pin": "P2.11",
+            "enable_pin": "!P0.21"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_z",
+              "options": {
+                "uart_pin": "P1.10"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "P1.10",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "P2.13",
+            "dir_pin": "!P0.11",
+            "enable_pin": "!P2.12"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder",
+              "options": {
+                "uart_pin": "P1.8"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "P1.8",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "P0.1",
+            "dir_pin": "P0.0",
+            "enable_pin": "!P0.10"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder1",
+              "options": {
+                "uart_pin": "P1.1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "P1.1",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-bigtreetech-skr-v1.4.cfg": {
+      "sha256": "79c1e9f86ad355e9264ba52332262ac319aa083fd6379d0c860d49ff34156165",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "P2.2",
+            "dir_pin": "P2.6",
+            "enable_pin": "!P2.1"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_x",
+              "options": {
+                "uart_pin": "P1.10"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "P1.10",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P1.17",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "P0.19",
+            "dir_pin": "P0.20",
+            "enable_pin": "!P2.8"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_y",
+              "options": {
+                "uart_pin": "P1.9"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "P1.9",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P1.17",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "P0.22",
+            "dir_pin": "!P2.11",
+            "enable_pin": "!P0.21"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_z",
+              "options": {
+                "uart_pin": "P1.8"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "P1.8",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P1.17",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "P2.13",
+            "dir_pin": "!P0.11",
+            "enable_pin": "!P2.12"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder",
+              "options": {
+                "uart_pin": "P1.4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "P1.4",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P1.17",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "P1.15",
+            "dir_pin": "P1.14",
+            "enable_pin": "!P1.16"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder1",
+              "options": {
+                "uart_pin": "P1.1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "P1.1",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P1.17",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-bigtreetech-skr-pro.cfg": {
+      "sha256": "a0118e14809db66917f48dd8a35c97e4c58448bba44bcd4e59a04c663ce8a121",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "PE9",
+            "dir_pin": "PF1",
+            "enable_pin": "!PF2"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_x",
+              "options": {
+                "uart_pin": "PC13"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "PA15",
+                "spi_bus": "spi3a"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "PE11",
+            "dir_pin": "PE8",
+            "enable_pin": "!PD7"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_y",
+              "options": {
+                "uart_pin": "PE3"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "PB8",
+                "spi_bus": "spi3a"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "PE13",
+            "dir_pin": "PC2",
+            "enable_pin": "!PC0"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_z",
+              "options": {
+                "uart_pin": "PE1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "PB9",
+                "spi_bus": "spi3a"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "PE14",
+            "dir_pin": "PA0",
+            "enable_pin": "!PC3"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder",
+              "options": {
+                "uart_pin": "PD4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "PB3",
+                "spi_bus": "spi3a"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "PD15",
+            "dir_pin": "PE7",
+            "enable_pin": "!PA3"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder1",
+              "options": {
+                "uart_pin": "PD1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "PG15",
+                "spi_bus": "spi3a"
+              }
+            }
+          }
+        },
+        "extruder2": {
+          "motor_pins": {
+            "step_pin": "PD13",
+            "dir_pin": "PG9",
+            "enable_pin": "!PF0"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder2",
+              "options": {
+                "uart_pin": "PD6"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder2",
+              "options": {
+                "cs_pin": "PG12",
+                "spi_bus": "spi3a"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-bigtreetech-skr-2.cfg": {
+      "sha256": "47dba0d579476dde1774aef3d3ff3d5cc65cf439ac00e20446ae02dd945b747e",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "PE2",
+            "dir_pin": "PE1",
+            "enable_pin": "!PE3"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_x",
+              "options": {
+                "uart_pin": "PE0"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "PE0",
+                "spi_software_miso_pin": "PA14",
+                "spi_software_mosi_pin": "PE14",
+                "spi_software_sclk_pin": "PE15"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "PD5",
+            "dir_pin": "!PD4",
+            "enable_pin": "!PD6"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_y",
+              "options": {
+                "uart_pin": "PD3"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "PD3",
+                "spi_software_miso_pin": "PA14",
+                "spi_software_mosi_pin": "PE14",
+                "spi_software_sclk_pin": "PE15"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "PA15",
+            "dir_pin": "PA8",
+            "enable_pin": "!PD1"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_z",
+              "options": {
+                "uart_pin": "PD0"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "PD0",
+                "spi_software_miso_pin": "PA14",
+                "spi_software_mosi_pin": "PE14",
+                "spi_software_sclk_pin": "PE15"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "PD15",
+            "dir_pin": "PD14",
+            "enable_pin": "!PC7"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder",
+              "options": {
+                "uart_pin": "PC6"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "PC6",
+                "spi_software_miso_pin": "PA14",
+                "spi_software_mosi_pin": "PE14",
+                "spi_software_sclk_pin": "PE15"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "PD11",
+            "dir_pin": "PD10",
+            "enable_pin": "!PD13"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder1",
+              "options": {
+                "uart_pin": "PD12"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "PD12",
+                "spi_software_miso_pin": "PA14",
+                "spi_software_mosi_pin": "PE14",
+                "spi_software_sclk_pin": "PE15"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-bigtreetech-octopus-v1.1.cfg": {
+      "sha256": "4a986df11c6e79c6ced396ed8b5dd9035e9820b074a12ed3a9bb6ae3898c0acb",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "PF13",
+            "dir_pin": "PF12",
+            "enable_pin": "!PF14"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_x",
+              "options": {
+                "uart_pin": "PC4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "PC4",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "PG0",
+            "dir_pin": "PG1",
+            "enable_pin": "!PF15"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_y",
+              "options": {
+                "uart_pin": "PD11"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "PD11",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "PF11",
+            "dir_pin": "PG3",
+            "enable_pin": "!PG5"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_z",
+              "options": {
+                "uart_pin": "PC6"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "PC6",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_": {
+          "motor_pins": {
+            "step_pin": "PG4",
+            "dir_pin": "PC1",
+            "enable_pin": "!PA0"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_",
+              "options": {
+                "uart_pin": "PC7"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_",
+              "options": {
+                "cs_pin": "PC7",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "PF9",
+            "dir_pin": "PF10",
+            "enable_pin": "!PG2"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder",
+              "options": {
+                "uart_pin": "PF2"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "PF2",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "PC13",
+            "dir_pin": "PF0",
+            "enable_pin": "!PF1"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder1",
+              "options": {
+                "uart_pin": "PE4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "PE4",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder2": {
+          "motor_pins": {
+            "step_pin": "PE2",
+            "dir_pin": "PE3",
+            "enable_pin": "!PD4"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder2",
+              "options": {
+                "uart_pin": "PE1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder2",
+              "options": {
+                "cs_pin": "PE1",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder3": {
+          "motor_pins": {
+            "step_pin": "PE6",
+            "dir_pin": "PA14",
+            "enable_pin": "!PE0"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder3",
+              "options": {
+                "uart_pin": "PD3"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder3",
+              "options": {
+                "cs_pin": "PD3",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-bigtreetech-octopus-pro-v1.0.cfg": {
+      "sha256": "059491cc40df909403b4a6bafb715d6b112c9d5e5e996468a1e20df76ef7c71d",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "PF13",
+            "dir_pin": "PF12",
+            "enable_pin": "!PF14"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_x",
+              "options": {
+                "uart_pin": "PC4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "PC4",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "PG0",
+            "dir_pin": "PG1",
+            "enable_pin": "!PF15"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_y",
+              "options": {
+                "uart_pin": "PD11"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "PD11",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "PF11",
+            "dir_pin": "PG3",
+            "enable_pin": "!PG5"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_z",
+              "options": {
+                "uart_pin": "PC6"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "PC6",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_": {
+          "motor_pins": {
+            "step_pin": "PG4",
+            "dir_pin": "PC1",
+            "enable_pin": "!PA0"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_",
+              "options": {
+                "uart_pin": "PC7"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_",
+              "options": {
+                "cs_pin": "PC7",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "PF9",
+            "dir_pin": "PF10",
+            "enable_pin": "!PG2"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder",
+              "options": {
+                "uart_pin": "PF2"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "PF2",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "PC13",
+            "dir_pin": "PF0",
+            "enable_pin": "!PF1"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder1",
+              "options": {
+                "uart_pin": "PE4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "PE4",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder2": {
+          "motor_pins": {
+            "step_pin": "PE2",
+            "dir_pin": "PE3",
+            "enable_pin": "!PD4"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder2",
+              "options": {
+                "uart_pin": "PE1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder2",
+              "options": {
+                "cs_pin": "PE1",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder3": {
+          "motor_pins": {
+            "step_pin": "PE6",
+            "dir_pin": "PA14",
+            "enable_pin": "!PE0"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder3",
+              "options": {
+                "uart_pin": "PD3"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder3",
+              "options": {
+                "cs_pin": "PD3",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-bigtreetech-octopus-pro-v1.1.cfg": {
+      "sha256": "e4dd0423b842dbe5ef4ca54d07501296370e1665619bd91c327456d20507d213",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "PF13",
+            "dir_pin": "PF12",
+            "enable_pin": "!PF14"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_x",
+              "options": {
+                "uart_pin": "PC4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "PC4",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "PG0",
+            "dir_pin": "PG1",
+            "enable_pin": "!PF15"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_y",
+              "options": {
+                "uart_pin": "PD11"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "PD11",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "PF11",
+            "dir_pin": "PG3",
+            "enable_pin": "!PG5"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_z",
+              "options": {
+                "uart_pin": "PC6"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "PC6",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "stepper_": {
+          "motor_pins": {
+            "step_pin": "PG4",
+            "dir_pin": "PC1",
+            "enable_pin": "!PA2"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_",
+              "options": {
+                "uart_pin": "PC7"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_",
+              "options": {
+                "cs_pin": "PC7",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "PF9",
+            "dir_pin": "PF10",
+            "enable_pin": "!PG2"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder",
+              "options": {
+                "uart_pin": "PF2"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "PF2",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "PC13",
+            "dir_pin": "PF0",
+            "enable_pin": "!PF1"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder1",
+              "options": {
+                "uart_pin": "PE4"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "PE4",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder2": {
+          "motor_pins": {
+            "step_pin": "PE2",
+            "dir_pin": "PE3",
+            "enable_pin": "!PD4"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder2",
+              "options": {
+                "uart_pin": "PE1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder2",
+              "options": {
+                "cs_pin": "PE1",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        },
+        "extruder3": {
+          "motor_pins": {
+            "step_pin": "PE6",
+            "dir_pin": "PA14",
+            "enable_pin": "!PE0"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder3",
+              "options": {
+                "uart_pin": "PD3"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder3",
+              "options": {
+                "cs_pin": "PD3",
+                "spi_bus": "spi1"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-bigtreetech-octopus-max-ez.cfg": {
+      "sha256": "7a043ad092aafba54564f83322ea81f2c6affa7d03243ab71828c9bcc67782d1",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "PC13",
+            "dir_pin": "PC14",
+            "enable_pin": "!PE6"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_x",
+              "options": {
+                "uart_pin": "PG14"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "PG14",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "PE4",
+            "dir_pin": "PE5",
+            "enable_pin": "!PE3"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_y",
+              "options": {
+                "uart_pin": "PG13"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "PG13",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "PE1",
+            "dir_pin": "PE0",
+            "enable_pin": "!PE2"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_z",
+              "options": {
+                "uart_pin": "PG12"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "PG12",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "stepper_": {
+          "motor_pins": {
+            "step_pin": "PB8",
+            "dir_pin": "PB9",
+            "enable_pin": "PB7"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 stepper_",
+              "options": {
+                "uart_pin": "PG11"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_",
+              "options": {
+                "cs_pin": "PG11",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "PB5",
+            "dir_pin": "PB4",
+            "enable_pin": "!PB6"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder",
+              "options": {
+                "uart_pin": "PG10"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "PG10",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "PG15",
+            "dir_pin": "PB3",
+            "enable_pin": "!PD5"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder1",
+              "options": {
+                "uart_pin": "PG9"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "PG9",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder2": {
+          "motor_pins": {
+            "step_pin": "PD3",
+            "dir_pin": "PD2",
+            "enable_pin": "!PD4"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder2",
+              "options": {
+                "uart_pin": "PD7"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder2",
+              "options": {
+                "cs_pin": "PD7",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder3": {
+          "motor_pins": {
+            "step_pin": "PA10",
+            "dir_pin": "PA9",
+            "enable_pin": "!PA15"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder3",
+              "options": {
+                "uart_pin": "PD6"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder3",
+              "options": {
+                "cs_pin": "PD6",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder4": {
+          "motor_pins": {
+            "step_pin": "PA8",
+            "dir_pin": "PC7",
+            "enable_pin": "!PC9"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder4",
+              "options": {
+                "uart_pin": "PG8"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder4",
+              "options": {
+                "cs_pin": "PG8",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder5": {
+          "motor_pins": {
+            "step_pin": "PG6",
+            "dir_pin": "PC6",
+            "enable_pin": "!PC8"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2209 extruder5",
+              "options": {
+                "uart_pin": "PG7"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder5",
+              "options": {
+                "cs_pin": "PG7",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-fysetc-spider.cfg": {
+      "sha256": "7d68a9f73a32273bfced0ccfbb009d5745f218d4957f476fb2d5c01de7eb7bdf",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "PE11",
+            "dir_pin": "PE10",
+            "enable_pin": "!PE9"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_x",
+              "options": {
+                "uart_pin": "PE7"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "PE7",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "PD8",
+            "dir_pin": "PB12",
+            "enable_pin": "!PD9"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_y",
+              "options": {
+                "uart_pin": "PE15"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "PE15",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "PD14",
+            "dir_pin": "PD13",
+            "enable_pin": "!PD15"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_z",
+              "options": {
+                "uart_pin": "PD10"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "PD10",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "PD5",
+            "dir_pin": "!PD6",
+            "enable_pin": "!PD4"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder",
+              "options": {
+                "uart_pin": "PD7"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "PD7",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "PE6",
+            "dir_pin": "!PC13",
+            "enable_pin": "!PE5"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder1",
+              "options": {
+                "uart_pin": "PC14"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "PC14",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder2": {
+          "motor_pins": {
+            "step_pin": "PE2",
+            "dir_pin": "!PE4",
+            "enable_pin": "!PE3"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder2",
+              "options": {
+                "uart_pin": "PC15"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder2",
+              "options": {
+                "cs_pin": "PC15",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder3": {
+          "motor_pins": {
+            "step_pin": "PD12",
+            "dir_pin": "PC4",
+            "enable_pin": "!PE8"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder3",
+              "options": {
+                "uart_pin": "PA15"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder3",
+              "options": {
+                "cs_pin": "PA15",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        },
+        "extruder4": {
+          "motor_pins": {
+            "step_pin": "PE1",
+            "dir_pin": "!PE0",
+            "enable_pin": "!PC5"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder4",
+              "options": {
+                "uart_pin": "PD11"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder4",
+              "options": {
+                "cs_pin": "PD11",
+                "spi_bus": "spi4"
+              }
+            }
+          }
+        }
+      }
+    },
+    "generic-mks-sgenl.cfg": {
+      "sha256": "b11415261dd9a0b9c1cf6651cb46fad428a097f9fca210417d1545d0212cefa2",
+      "sockets": {
+        "stepper_x": {
+          "motor_pins": {
+            "step_pin": "P2.2",
+            "dir_pin": "!P2.3",
+            "enable_pin": "!P2.1"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_x",
+              "options": {
+                "uart_pin": "P1.1"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_x",
+              "options": {
+                "cs_pin": "P1.1",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "stepper_y": {
+          "motor_pins": {
+            "step_pin": "P0.19",
+            "dir_pin": "!P0.20",
+            "enable_pin": "!P2.8"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_y",
+              "options": {
+                "uart_pin": "P1.8"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_y",
+              "options": {
+                "cs_pin": "P1.8",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "stepper_z": {
+          "motor_pins": {
+            "step_pin": "P0.22",
+            "dir_pin": "P2.11",
+            "enable_pin": "!P0.21"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 stepper_z",
+              "options": {
+                "uart_pin": "P1.10"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 stepper_z",
+              "options": {
+                "cs_pin": "P1.10",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "extruder": {
+          "motor_pins": {
+            "step_pin": "P2.13",
+            "dir_pin": "!P0.11",
+            "enable_pin": "!P2.12"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder",
+              "options": {
+                "uart_pin": "P1.15"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder",
+              "options": {
+                "cs_pin": "P1.15",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        },
+        "extruder1": {
+          "motor_pins": {
+            "step_pin": "P0.1",
+            "dir_pin": "P0.0",
+            "enable_pin": "!P0.10"
+          },
+          "transports": {
+            "UART": {
+              "section": "tmc2208 extruder1",
+              "options": {
+                "uart_pin": "P1.17"
+              }
+            },
+            "SPI": {
+              "section": "tmc2130 extruder1",
+              "options": {
+                "cs_pin": "P1.17",
+                "spi_software_miso_pin": "P0.5",
+                "spi_software_mosi_pin": "P4.28",
+                "spi_software_sclk_pin": "P0.4"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

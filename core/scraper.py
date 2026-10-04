@@ -311,6 +311,11 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
                     val = val.split('#')[0].strip()
                     
                 is_active_key = not (section_commented or is_key_commented)
+                # Empty commented DIAG examples do not declare sensorless wiring.
+                # Keep active empty options so downstream validation rejects them.
+                if (not is_active_key and current_section.startswith("tmc")
+                        and key in ("diag_pin", "diag0_pin", "diag1_pin") and not val):
+                    continue
                 if is_active_key:
                     data[current_section][key] = val
                     active_keys.setdefault(current_section, set()).add(key)
@@ -437,6 +442,10 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
     cooling = capture_required_cooling(raw_cfg, filename)
     if cooling is not None:
         data[COOLING_SOURCE] = cooling
+    from core.tmc_socket import capture_socket_source, SOURCE as TMC_SOCKET_SOURCE
+    socket_source = capture_socket_source(raw_cfg, filename)
+    if socket_source is not None:
+        data[TMC_SOCKET_SOURCE] = socket_source
     return data
 
 def sanitize_geometry_value(key, val):

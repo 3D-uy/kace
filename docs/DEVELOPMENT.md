@@ -128,6 +128,10 @@ scenarios and real firmware builds. Missing infrastructure is not a passing gate
 On Windows, if pytest's shared temporary directory is inaccessible, use
 `--basetemp` with a new disposable directory; pytest may clear that target.
 
+Reviewed removable TMC wiring is resolved by `core/tmc_socket.py` from
+`data/tmc_sockets.json`, shared by wizard and generation. See the
+[TMC socket mapping contract](TMC_SOCKET_MAPPING.md) for scope and focused tests.
+
 ## Development container and firmware builds
 
 ```bash

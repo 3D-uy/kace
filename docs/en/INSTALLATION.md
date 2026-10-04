@@ -29,6 +29,12 @@ Applying and verifying configuration requires that stack to be running.
 
 Preparing the OS does not configure or commission the printer. Studio's supported image/model combinations are documented in the Studio repository.
 
+For an interrupted Studio bootstrap, inspect the preserved configuration and
+power backups before retrying with the corrected script. See Studio's
+[image provisioning and recovery](https://github.com/3D-uy/KACE-studio/blob/main/docs/IMAGE_PROVISIONING.md)
+for the API, relay and MCU checks; an active wizard should be continued in its
+existing terminal rather than starting a second bootstrap.
+
 ## Run a source checkout without the installer
 
 For source exploration, from a separate checkout:
