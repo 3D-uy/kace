@@ -151,7 +151,7 @@ def test_current_confirmation_follows_guided_z_mechanics(tmp_path):
     user = data()
     user.update(driver_type="TMC2209", driver_mode="UART")
     user["board_parsed"]["tmc2209 stepper_z1"] = {"uart_pin": "PC11"}
-    with patch.object(motion, "numbered_select", return_value="same"), patch.object(motion, "yes_no", return_value=True):
+    with patch.object(motion, "numbered_select", side_effect=["same", "confirm"]), patch.object(motion, "yes_no", return_value=True):
         assert motion._step_z_mechanics(user) == "done"
     with patch.object(hardware, "simple_input", return_value="0.610"), patch.object(hardware, "yes_no", return_value=True):
         assert hardware._step_tmc_currents(user) == "done"

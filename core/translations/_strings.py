@@ -141,6 +141,56 @@ UI_STRINGS: dict = {
     "wizard.z_mechanics.review": {
         "English": "⚙️ Review Z motor mechanics", "Español": "⚙️ Revisar la mecánica de los motores Z", "Português": "⚙️ Revisar a mecânica dos motores Z",
     },
+    "wizard.z_mechanics.parameter": {
+        "English": "Parameter",
+        "Español": "Parámetro",
+        "Português": "Parâmetro",
+    },
+    "wizard.z_mechanics.socket": {
+        "English": "Motor socket",
+        "Español": "Conector del motor",
+        "Português": "Conector do motor",
+    },
+    "wizard.z_mechanics.short_rotation_distance": {
+        "English": "Travel per revolution (mm)",
+        "Español": "Recorrido por vuelta (mm)",
+        "Português": "Deslocamento por volta (mm)",
+    },
+    "wizard.z_mechanics.short_microsteps": {
+        "English": "Microsteps",
+        "Español": "Micropasos",
+        "Português": "Micropassos",
+    },
+    "wizard.z_mechanics.short_gear_ratio": {
+        "English": "Gear ratio",
+        "Español": "Reducción",
+        "Português": "Redução",
+    },
+    "wizard.z_mechanics.short_full_steps_per_rotation": {
+        "English": "Full steps per revolution",
+        "Español": "Pasos completos por vuelta",
+        "Português": "Passos completos por volta",
+    },
+    "wizard.z_mechanics.staged_hint": {
+        "English": "Confirming keeps these choices in the wizard. The printer configuration is written later. Editing repeats this step; go back to change primary Z.",
+        "Español": "Confirmar guarda estas opciones en el asistente. La configuración de la impresora se escribe más adelante. Editar repite este paso; volvé para cambiar el Z principal.",
+        "Português": "Confirmar mantém estas opções no assistente. A configuração da impressora será gravada depois. Editar repete esta etapa; volte para alterar o Z principal.",
+    },
+    "wizard.z_mechanics.review_action": {
+        "English": "What would you like to do?",
+        "Español": "¿Cómo querés continuar?",
+        "Português": "Como deseja continuar?",
+    },
+    "wizard.z_mechanics.confirm_continue": {
+        "English": "Confirm and continue",
+        "Español": "Confirmar y continuar",
+        "Português": "Confirmar e continuar",
+    },
+    "wizard.z_mechanics.edit": {
+        "English": "Edit additional motors",
+        "Español": "Editar motores adicionales",
+        "Português": "Editar motores adicionais",
+    },
     "wizard.z_mechanics.confirm": {
         "English": "Apply these values to the Z motors?", "Español": "¿Aplicar estos valores a los motores Z?", "Português": "Aplicar estes valores aos motores Z?",
     },
@@ -1304,9 +1354,9 @@ UI_STRINGS: dict = {
         "Português": "Erro: O pino {mode} é obligatorio. Abortando.",
     },
     "kace.abort_no_tmc_map": {
-        "English":   "Error: No {mode} pin mapping found on this board for {driver}.",
-        "Español":   "Error: No se encontró mapeo de pin {mode} en esta placa para {driver}.",
-        "Português": "Erro: Nenhum mapeamento de pino {mode} encontrado nesta placa para {driver}.",
+        "English":   "Error: No reviewed {mode} mapping for {model} on socket {driver} of {board}. Check the board profile and driver selection.",
+        "Español":   "Error: No hay un mapeo {mode} validado para {model} en el conector {driver} de {board}. Revisá el perfil de placa y el driver seleccionado.",
+        "Português": "Erro: Não há mapeamento {mode} validado para {model} no conector {driver} de {board}. Revise o perfil da placa e o driver selecionado.",
     },
     "kace.abort_generation": {
         "English":   "Generation aborted to prevent missing parameters.",

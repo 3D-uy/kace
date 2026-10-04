@@ -367,11 +367,14 @@ def validate_tmc_sense_resistors(sections: Mapping[str, object]) -> None:
 def resolve_tmc_sections(parsed: Mapping[str, object], user: Mapping[str, object]) -> dict:
     """Preserve electrical options only from the explicitly selected chip.
 
-    Missing sections retain the existing commented-template behavior. An
-    existing incompatible/incomplete section is an error, never a pin donor.
+    Reviewed removable sockets can supply missing sections with bus wiring
+    only. Otherwise missing sections retain commented-template behavior; an
+    incompatible/incomplete circuit is an error, never an arbitrary pin donor.
     UART pin sharing is checked using the selected board's aliases. Board/profile
     ownership is established by the caller; includes require later review.
     """
+    from core.tmc_socket import selected_socket_sections
+    parsed = selected_socket_sections(parsed, user)
     model = canonical_tmc_model(user.get("driver_type", ""))
     mode = user.get("driver_mode")
     if mode == "Standalone" or not model.startswith("tmc"):
@@ -574,6 +577,8 @@ def mark_user_override(user_data: dict, *keys: str) -> None:
 
 def tmc_current_context(parsed_data, user_data, key):
     """Recorded circuit/motor inputs, not an identity of the physical motor."""
+    from core.tmc_socket import selected_socket_sections
+    parsed_data = selected_socket_sections(parsed_data, user_data)
     target = key.rsplit("_", 1)[1]
     section = "extruder" if target == "e" else f"stepper_{target}"
     model = canonical_tmc_model(user_data.get("driver_type", ""))
@@ -743,6 +748,8 @@ def resolve_generation_values(
     ``validate_motors=False`` supplies an unvalidated draft to the motor editor.
     Generation and all other callers retain the default validation gate.
     """
+    from core.tmc_socket import selected_socket_sections
+    parsed_data = selected_socket_sections(parsed_data, user_data)
     explicit_provenance = dict(user_data.get("_value_provenance") or {})
     profile_source = user_data.get("_profile_parsed")
     if not isinstance(profile_source, Mapping):

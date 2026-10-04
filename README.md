@@ -6,7 +6,7 @@
 
 **Guided printer configuration, firmware preparation and deployment for Klipper.**
 
-[![KACE version 0.9.4-rc.2](https://img.shields.io/badge/KACE-0.9.4--rc.2-e88c30?style=flat-square)](VERSION)
+[![KACE version 0.9.4-rc.3](https://img.shields.io/badge/KACE-0.9.4--rc.3-e88c30?style=flat-square)](VERSION)
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-d29b32?style=flat-square)](#project-status)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](docs/en/INSTALLATION.md)
 [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-2d718f?style=flat-square)](LICENSE)
@@ -48,8 +48,12 @@ The terminal wizard offers **English, Spanish and Portuguese**, with **Beginner*
 
 Firmware steps depend on the selected supported target and workflow.
 
+The multi-Z review compares mechanics and assigned sockets side by side (with wrapping on narrow terminals). Choose Confirm and continue, Edit additional motors, or Back explicitly. Confirmation keeps the choices in the wizard; it does not write the printer configuration.
+
 <!-- Insert a real wizard/configuration-review screenshot here: docs/assets/kace-wizard.png.
      Include descriptive alt text and the captured KACE version. Do not use a mockup as a product screenshot. -->
+
+Removable TMC drivers use reviewed socket wiring even when the profile example names another chip. Cross-model mapping requires explicit motor currents; see [scope and supported profiles](docs/TMC_SOCKET_MAPPING.md).
 
 <a id="quick-start"></a>
 
