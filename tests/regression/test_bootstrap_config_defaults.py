@@ -72,6 +72,8 @@ export KACE_BOOTSTRAP_LIB_ONLY=1
 source "$1"
 shift
 SUDO=""
+TEST_MONOTONIC_SECONDS=0
+_monotonic_seconds() { printf '%s\n' "$TEST_MONOTONIC_SECONDS"; }
 """ + command
         return subprocess.run(
             [self.bash, "-c", script, "bootstrap-test", BOOTSTRAP.as_posix(), *(arg.as_posix() for arg in args)],
@@ -646,7 +648,7 @@ TEST_STATE_DIR="$1/state"
 mkdir -p "$TEST_STATE_DIR"
 
 sleep() {
-    SECONDS=$((SECONDS + ${1:-1}))
+    TEST_MONOTONIC_SECONDS=$((TEST_MONOTONIC_SECONDS + ${1:-1}))
 }
 
 curl() {
@@ -792,7 +794,7 @@ POWER_DEVICE=main_psu
 KACE_POWER_API_TIMEOUT=2
 KACE_POWER_DEVICE_TIMEOUT=2
 KACE_POWER_ON_TIMEOUT=2
-sleep() { SECONDS=$((SECONDS + ${1:-1})); }
+sleep() { TEST_MONOTONIC_SECONDS=$((TEST_MONOTONIC_SECONDS + ${1:-1})); }
 curl() {
     local url="${!#}"
     case "$url" in
@@ -826,7 +828,7 @@ KACE_POWER_ON_TIMEOUT=2
 KACE_POWER_MCU_TIMEOUT=2
 TEST_STATE_DIR="$1/state"
 mkdir -p "$TEST_STATE_DIR"
-sleep() { SECONDS=$((SECONDS + ${1:-1})); }
+sleep() { TEST_MONOTONIC_SECONDS=$((TEST_MONOTONIC_SECONDS + ${1:-1})); }
 curl() {
     local url="${!#}"
     case "$url" in
