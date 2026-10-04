@@ -16,10 +16,10 @@ on:
 permissions:
   contents: read
 
-# Cancel older runs on the same branch/PR when new commits are pushed.
-# Keeps CI queues clean and saves runner minutes.
+# Cancel older runs for the same event and branch/PR when superseded.
+# Manual validation must not cancel automatic push/PR checks for the same commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
