@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReproducibleCiContractTests(unittest.TestCase):
-    def test_schema_validation_jobs_install_the_hashed_development_lock(self):
+    def test_source_validation_jobs_install_hashed_development_and_ssh_locks(self):
         workflow = yaml.safe_load(
             (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         )
@@ -25,8 +25,7 @@ class ReproducibleCiContractTests(unittest.TestCase):
                 self.assertLess(install, validation)
                 self.assertEqual(
                     steps[install]["run"],
-                    "python3 -m pip install --require-hashes -r requirements-dev.txt"
-                    + (" -r requirements-ssh.txt" if job == "unit-tests" else ""),
+                    "python3 -m pip install --require-hashes -r requirements-dev.txt -r requirements-ssh.txt",
                 )
                 setup = next(step for step in steps
                              if step.get("uses", "").startswith("actions/setup-python@"))

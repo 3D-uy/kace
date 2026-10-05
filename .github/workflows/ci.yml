@@ -188,7 +188,7 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install dependencies
-        run: python3 -m pip install --require-hashes -r requirements-dev.txt
+        run: python3 -m pip install --require-hashes -r requirements-dev.txt -r requirements-ssh.txt
 
       - name: Run snapshot regression tests
         # KACE_UPDATE_SNAPSHOTS must never be set in CI.
