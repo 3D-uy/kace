@@ -27,6 +27,23 @@ _TIMEOUT     = 8   # seconds — generous enough for a Pi on local network
 
 # ── Internal helpers ─────────────────────────────────────────────
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Keep credentials, methods and results bound to the configured endpoint."""
+
+    def http_error_302(self, request, response, code, message, headers):
+        response.close()
+        raise urllib.error.HTTPError(
+            request.full_url, code, "Moonraker redirects are not allowed", headers, None
+        )
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+
+def _urlopen(request, timeout):
+    # A local opener leaves image downloads and other urllib consumers unchanged.
+    return urllib.request.build_opener(_RejectRedirects()).open(request, timeout=timeout)
+
+
 def _base_url(host: str, port: int) -> str:
     """Build the Moonraker base URL from host and port."""
     host = host.strip().rstrip("/")
@@ -44,7 +61,7 @@ def _get(url: str, api_key: str = None) -> tuple[bool, str, dict]:
         if api_key:
             headers["X-Api-Key"] = api_key
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        with _urlopen(req, timeout=_TIMEOUT) as resp:
             body = json.loads(resp.read().decode("utf-8", errors="replace"))
             return True, "OK", body
     except urllib.error.HTTPError as e:
@@ -70,7 +87,7 @@ def _post(url: str, data: bytes = b"", content_type: str = "application/json", a
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        with _urlopen(req, timeout=_TIMEOUT) as resp:
             body = json.loads(resp.read().decode("utf-8", errors="replace"))
             return True, "OK", body
     except urllib.error.HTTPError as e:
@@ -93,7 +110,7 @@ def _delete(url: str, api_key: str = None) -> tuple[bool, str, dict]:
         if api_key:
             headers["X-Api-Key"] = api_key
         req = urllib.request.Request(url, headers=headers, method="DELETE")
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        with _urlopen(req, timeout=_TIMEOUT) as resp:
             raw = resp.read()
             body = json.loads(raw.decode("utf-8")) if raw else {}
             return True, "OK", body
@@ -293,7 +310,7 @@ def download_printer_cfg(host: str, port: int, filename: str, api_key: str = Non
         if api_key:
             headers["X-Api-Key"] = api_key
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        with _urlopen(req, timeout=_TIMEOUT) as resp:
             return True, resp.read()
     except Exception as e:
         return False, str(e).encode("utf-8")

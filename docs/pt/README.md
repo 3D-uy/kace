@@ -196,3 +196,5 @@ Relate bugs e sugira melhorias pelas [issues do KACE](https://github.com/3D-uy/k
 ## 📜 Licença
 
 O KACE é open source sob a [GNU GPL v3](../../LICENSE).
+
+Correções no código-fonte: redirecionamentos do Moonraker são rejeitados. Consulte os [contratos de desenvolvimento](../DEVELOPMENT.md) para operações remotas e limites de validação. O candidato para download não muda até preparar uma nova release.

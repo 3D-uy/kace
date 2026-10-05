@@ -25,7 +25,8 @@ class ReproducibleCiContractTests(unittest.TestCase):
                 self.assertLess(install, validation)
                 self.assertEqual(
                     steps[install]["run"],
-                    "python3 -m pip install --require-hashes -r requirements-dev.txt",
+                    "python3 -m pip install --require-hashes -r requirements-dev.txt"
+                    + (" -r requirements-ssh.txt" if job == "unit-tests" else ""),
                 )
                 setup = next(step for step in steps
                              if step.get("uses", "").startswith("actions/setup-python@"))

@@ -29,7 +29,7 @@ _skip_no_jinja2 = unittest.skipUnless(
 @_skip_no_jinja2
 class TestE2ERuntimeFlow(unittest.TestCase):
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     @patch("core.wizard.discover_mcu")
     @patch("core.wizard.fetch_config_list")
     def test_complete_e2e_runtime_pipeline(self, mock_fetch, mock_mcu, mock_urlopen):

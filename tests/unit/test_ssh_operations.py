@@ -105,6 +105,8 @@ class DeployConfigPathTests(unittest.TestCase):
         ssh.open_sftp.return_value = sftp
         paramiko = MagicMock()
         paramiko.SSHClient.return_value = ssh
+        paramiko.SFTPClient.return_value = sftp
+        ssh.get_transport.return_value.open_session.return_value.closed = False
         paramiko.AuthenticationException = type("AuthenticationException", (Exception,), {})
         with (
             patch("core.deployer._require_paramiko", return_value=paramiko),

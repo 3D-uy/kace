@@ -117,6 +117,7 @@ class TransactionIdentityTests(unittest.TestCase):
                 else:
                     stack.enter_context(patch.object(deployer, "_require_paramiko", return_value=SimpleNamespace(AuthenticationException=RuntimeError)))
                     stack.enter_context(patch.object(deployer, "_connect_ssh_client", return_value=Mock()))
+                    stack.enter_context(patch.object(deployer, "_open_sftp_bounded", return_value=Mock()))
                     stack.enter_context(patch("core.config_transaction.SftpConfigTransport", return_value=transport))
                     result = deployer.deploy_config(user)
                 self.assertEqual(result.outcome, WorkflowOutcome.DEPLOYMENT_FAILED, result.detail)

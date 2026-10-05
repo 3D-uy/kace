@@ -196,3 +196,5 @@ Reporta errores y propone mejoras mediante los [issues de KACE](https://github.c
 ## 📜 Licencia
 
 KACE es software open source bajo la [GNU GPL v3](../../LICENSE).
+
+Correcciones en fuente: se rechazan redirecciones de Moonraker. Consultá los [contratos de desarrollo](../DEVELOPMENT.md) para operaciones remotas y límites de validación. El candidato descargable no cambia hasta preparar una nueva release.

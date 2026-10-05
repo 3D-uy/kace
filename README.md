@@ -198,3 +198,5 @@ Report bugs and suggest improvements through [KACE issues](https://github.com/3D
 ## 📜 License
 
 KACE is open source under the [GNU GPL v3](LICENSE).
+
+Source corrections: Moonraker redirects are rejected. See [development contracts](docs/DEVELOPMENT.md) for remote-operation and validation limits. The downloadable candidate is unchanged until a new release is prepared.
