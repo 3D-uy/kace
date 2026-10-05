@@ -16,13 +16,14 @@ def ed25519_key():
 
 
 @pytest.fixture
-def ssh_server():
+def ssh_server(monkeypatch):
     host_key, client_key = ed25519_key(), ed25519_key()
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     listener.settimeout(3)
     stop = threading.Event()
+    negotiated = threading.Event()
     errors = []
     transports = []
 
@@ -43,14 +44,26 @@ def ssh_server():
             transports.append(transport)
             transport.add_server_key(host_key)
             transport.start_server(server=Server())
+            negotiated.set()
             stop.wait(3)
-        except (OSError, paramiko.SSHException) as exc:
+        except (OSError, EOFError, paramiko.SSHException) as exc:
             if not stop.is_set():
                 errors.append(exc)
         finally:
             for transport in transports:
                 transport.close()
 
+    original_close = paramiko.SSHClient.close
+
+    def close_after_server_negotiation(client):
+        # Host-key rejection can close the client before start_server returns.
+        # Keep that expected rejection from racing the server's handshake check.
+        try:
+            assert negotiated.wait(3), "Loopback server did not complete SSH negotiation"
+        finally:
+            original_close(client)
+
+    monkeypatch.setattr(paramiko.SSHClient, "close", close_after_server_negotiation)
     worker = threading.Thread(target=serve, daemon=True)
     worker.start()
     yield listener.getsockname()[1], host_key, client_key
