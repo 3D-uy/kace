@@ -44,6 +44,9 @@ class FakeParamiko:
     def SSHClient(self):
         return self.client
 
+    def SFTPClient(self, channel):
+        return self.client.open_sftp.return_value
+
 
 class SshBoundaryTests(unittest.TestCase):
     def setUp(self):
@@ -55,6 +58,7 @@ class SshBoundaryTests(unittest.TestCase):
         self.sftp = MagicMock()
         self.ssh = MagicMock()
         self.ssh.open_sftp.return_value = self.sftp
+        self.ssh.get_transport.return_value.open_session.return_value.closed = False
         self.paramiko = FakeParamiko(self.ssh)
         self.user = {
             "host": "pi.local",
@@ -174,7 +178,7 @@ class MoonrakerBoundaryTests(unittest.TestCase):
             with self.subTest(host=host, port=port), \
                     patch("core.menu.simple_input", side_effect=[host, port, "test-key"]), \
                     patch("core.menu.yes_no") as confirm, \
-                    patch("urllib.request.urlopen") as request, \
+                    patch("core.moonraker._urlopen") as request, \
                     patch("core.config_transaction.configuration_transport") as transport, \
                     patch("core.deployer._run_config_transaction") as run:
                 result = deploy_moonraker({})
@@ -194,7 +198,7 @@ class MoonrakerBoundaryTests(unittest.TestCase):
             with self.subTest(host=host, port=port), \
                     patch("core.menu.simple_input", side_effect=[host, port, key]), \
                     patch("core.menu.yes_no") as confirm, \
-                    patch("urllib.request.urlopen") as request, \
+                    patch("core.moonraker._urlopen") as request, \
                     patch("core.config_transaction.configuration_transport") as transport, \
                     patch("core.deployer._run_config_transaction") as run:
                 request.return_value.__enter__.return_value.read.return_value = (

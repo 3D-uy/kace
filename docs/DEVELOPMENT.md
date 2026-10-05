@@ -210,3 +210,22 @@ README and ROADMAP are the primary EN/ES/PT entry points. Change all three for
 user steps, limits or priorities. Link detailed engineering procedures to one
 canonical source. Keep current candidate notes in [CHANGELOG](../CHANGELOG.md);
 archive old audits, run results and superseded guides locally outside both repos.
+
+## Remote HTTP and SSH contracts
+
+Moonraker requests reject all HTTP redirects with a local urllib opener. Configure
+an explicit final endpoint when using a reverse proxy; credentials and operation
+methods must never be forwarded by redirects. Image downloads have their own
+separate transport policy. Tests exercise real loopback endpoints with synthetic
+credentials.
+
+SFTP deployment bounds channel opening, subsystem acknowledgement and protocol
+initialization to 10 seconds; channel reads/writes also have a 10-second timeout.
+A timeout fails deployment and never establishes COMMITTED. Trust-store checks
+and conditional publication remain unchanged. Optional SSH regression tests need
+`requirements-ssh.txt` in addition to the development lock.
+
+Regenerate the runtime lock before the development lock, whose constraints use
+`requirements.txt`. Shared versions, including wcwidth, must agree; the
+`test_dependency_locks.py` regression enforces this. Dependency updates must be
+validated on Python 3.11 and by installing the hashed locks in clean environments.

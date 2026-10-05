@@ -1,6 +1,6 @@
 """Unit tests for core/moonraker.py — Moonraker HTTP API client.
 
-All tests are fully offline: urllib.request.urlopen is patched via
+All tests are fully offline: core.moonraker._urlopen is patched via
 unittest.mock so no real network calls are made. Follows the same
 zero-dependency test pattern used throughout the KACE test suite.
 """
@@ -78,7 +78,7 @@ class TestBaseUrl(unittest.TestCase):
 
 class TestCheckMoonraker(unittest.TestCase):
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_success_returns_version(self, mock_urlopen):
         """A valid /server/info response should return (True, version)."""
         mock_urlopen.return_value = _fake_response(
@@ -88,7 +88,7 @@ class TestCheckMoonraker(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("v0.9.1", info)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_url_error_returns_false(self, mock_urlopen):
         """A connection error should return (False, error_message)."""
         import urllib.error
@@ -97,7 +97,7 @@ class TestCheckMoonraker(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Connection", info)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_http_error_returns_false(self, mock_urlopen):
         """An HTTP error should return (False, error_message)."""
         mock_urlopen.side_effect = _http_error(403, "Forbidden")
@@ -105,7 +105,7 @@ class TestCheckMoonraker(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("403", info)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_timeout_returns_false(self, mock_urlopen):
         """A timeout should return (False, error_message) without raising."""
         import socket
@@ -113,7 +113,7 @@ class TestCheckMoonraker(unittest.TestCase):
         ok, info = check_moonraker("192.168.1.100", 7125)
         self.assertFalse(ok)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_calls_correct_endpoint(self, mock_urlopen):
         """check_moonraker must request /server/info."""
         mock_urlopen.return_value = _fake_response({"result": {"moonraker_version": "0.1"}})
@@ -134,7 +134,7 @@ class TestUploadPrinterCfg(unittest.TestCase):
             f.write("[printer]\nmax_velocity: 300\n")
         return path
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_upload_success(self, mock_urlopen):
         """Successful upload should return (True, path)."""
         import tempfile
@@ -147,7 +147,7 @@ class TestUploadPrinterCfg(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(result, "printer.cfg")
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_upload_explicit_filename(self, mock_urlopen):
         """Specifying an explicit filename should use it in the multipart header."""
         import tempfile
@@ -162,7 +162,7 @@ class TestUploadPrinterCfg(unittest.TestCase):
         called_req = mock_urlopen.call_args[0][0]
         self.assertIn(b'filename="custom.cfg"', called_req.data)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_nested_upload_uses_path_field_to_create_missing_directory(self, mock_urlopen):
         """Moonraker's path form field creates a missing config subdirectory."""
         mock_urlopen.return_value = _fake_response(
@@ -183,7 +183,7 @@ class TestUploadPrinterCfg(unittest.TestCase):
         self.assertIn(b'filename="generated-hardware.cfg"', body)
         self.assertNotIn(b'filename="kace/generated-hardware.cfg"', body)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_upload_default_basename(self, mock_urlopen):
         """Omitting filename should default to the file's basename (e.g. macros.cfg)."""
         import tempfile
@@ -198,7 +198,7 @@ class TestUploadPrinterCfg(unittest.TestCase):
         called_req = mock_urlopen.call_args[0][0]
         self.assertIn(b'filename="macros.cfg"', called_req.data)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_upload_http_error_returns_false(self, mock_urlopen):
         """A 500 error during upload should return (False, error)."""
         import tempfile
@@ -217,7 +217,7 @@ class TestUploadPrinterCfg(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("not found", msg)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_calls_upload_endpoint(self, mock_urlopen):
         """upload_printer_cfg must POST to /server/files/upload."""
         import tempfile
@@ -236,14 +236,14 @@ class TestUploadPrinterCfg(unittest.TestCase):
 
 class TestRestartFirmware(unittest.TestCase):
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_success(self, mock_urlopen):
         """A 200 response should return (True, message)."""
         mock_urlopen.return_value = _fake_response({"result": "ok"})
         ok, msg = restart_firmware("mypi", 7125)
         self.assertTrue(ok)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_http_error_returns_false(self, mock_urlopen):
         """An HTTP error should return (False, message)."""
         mock_urlopen.side_effect = _http_error(503, "Service Unavailable")
@@ -251,7 +251,7 @@ class TestRestartFirmware(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("503", msg)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_calls_firmware_restart_endpoint(self, mock_urlopen):
         """restart_firmware must POST to /printer/restart."""
         mock_urlopen.return_value = _fake_response({"result": "ok"})
@@ -265,13 +265,13 @@ class TestRestartFirmware(unittest.TestCase):
 
 class TestRestartKlipperService(unittest.TestCase):
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_success(self, mock_urlopen):
         mock_urlopen.return_value = _fake_response({"result": "ok"})
         ok, msg = restart_klipper_service("mypi", 7125)
         self.assertTrue(ok)
 
-    @patch("urllib.request.urlopen")
+    @patch("core.moonraker._urlopen")
     def test_calls_machine_services_endpoint(self, mock_urlopen):
         """restart_klipper_service must POST to /machine/services/restart."""
         mock_urlopen.return_value = _fake_response({"result": "ok"})

@@ -422,6 +422,40 @@ def _verify_running_firmware_checkpoint(user_data, host, port, api_key=None):
     return workflow_success(f"Configuration deployed and firmware {reported} verified.")
 
 
+SFTP_TIMEOUT_SECONDS = 10.0
+
+
+def _open_sftp_bounded(ssh, paramiko):
+    """Bound channel opening, subsystem acknowledgement and version exchange."""
+    import threading
+
+    transport = ssh.get_transport()
+    if transport is None or not transport.is_active():
+        raise OSError("SSH transport is not active")
+    channel = transport.open_session(timeout=SFTP_TIMEOUT_SECONDS)
+    timer = None
+    opened = False
+    try:
+        channel.settimeout(SFTP_TIMEOUT_SECONDS)
+        # Subsystem acknowledgement ignores Channel.settimeout in Paramiko.
+        timer = threading.Timer(SFTP_TIMEOUT_SECONDS, channel.close)
+        timer.daemon = True
+        timer.name = "kace-sftp-init-timeout"
+        timer.start()
+        channel.invoke_subsystem("sftp")
+        sftp = paramiko.SFTPClient(channel)
+        if channel.closed:
+            sftp.close()
+            raise TimeoutError("SFTP channel closed during initialization")
+        opened = True
+        return sftp
+    finally:
+        if timer is not None:
+            timer.cancel()
+        if not opened:
+            channel.close()
+
+
 def deploy_config(user_data):
     """Deploy configuration through the shared verified transaction over SFTP."""
     from core.config_transaction import SftpConfigTransport
@@ -448,7 +482,7 @@ def deploy_config(user_data):
             password=password,
             timeout=10,
         )
-        sftp = ssh.open_sftp()
+        sftp = _open_sftp_bounded(ssh, paramiko)
         destination = user_data["dest_path"]
         if destination.endswith(".cfg") and posixpath.basename(destination) != "printer.cfg":
             raise ValueError("SFTP activation requires the active printer.cfg, not an alternate filename")

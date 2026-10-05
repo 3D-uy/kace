@@ -1,4 +1,5 @@
 -r requirements.in
+-c requirements.txt
 
 # Full BoardContract schema and test suite.
 jsonschema==4.25.1

@@ -88,7 +88,7 @@ Ele mantém a referência fixada existente e pode diferir do código atual.
 Requer `curl` e `sha256sum`. Revise o script antes de executá-lo.
 
 ```bash
-KACE_COMMIT='561f9b9463b0d443e386f8b1ef468980538093eb'
+KACE_COMMIT='042fcc9cba81e4f4a2d927480853584754fc9f62'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
@@ -196,3 +196,5 @@ Relate bugs e sugira melhorias pelas [issues do KACE](https://github.com/3D-uy/k
 ## 📜 Licença
 
 O KACE é open source sob a [GNU GPL v3](../../LICENSE).
+
+Correções no código-fonte: redirecionamentos do Moonraker são rejeitados. Consulte os [contratos de desenvolvimento](../DEVELOPMENT.md) para operações remotas e limites de validação. O candidato para download não muda até preparar uma nova release.
