@@ -58,6 +58,22 @@ is changed by this correction.
 Empty commented DIAG examples (present in SKR 2) are omitted during parsing.
 Active empty DIAG options remain errors; no sensorless wiring is inferred.
 
+## Editable generated options
+
+Generated TMC2208/2209/2130/5160 sections (including the TMC2225 alias) expose
+`interpolate`, `hold_current` and `stealthchop_threshold` for later editing.
+Explicit settings stay active. Otherwise, commented examples preserve Klipper's
+defaults: interpolation enabled, hold current following `run_current`, and
+spreadCycle mode. Uncommenting `hold_current` makes it a separate fixed setting;
+leaving it commented keeps it tied to the running current.
+
+EN/ES/PT comments explain spreadCycle's torque/positioning accuracy and
+stealthChop's quieter operation: `0` selects spreadCycle, `999999` selects
+stealthChop throughout normal operating speeds, and other positive thresholds
+switch modes at that speed in mm/s. Using one mode throughout is preferred.
+KACE does not add `uart_address` or `sense_resistor` examples; existing explicit
+values remain intact because they describe the actual circuit.
+
 ## Validation
 
 Run `python -m pytest tests/unit/test_tmc_socket.py -q`, followed by the affected

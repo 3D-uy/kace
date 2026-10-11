@@ -44,6 +44,14 @@ probeable bed is printable area intersected with probe reach. Consumers must use
 the shared model and reject an empty intersection. These bounds do not imply
 IDEX/toolchanger support or authorize motion outside mechanical travel.
 
+Optional automatic leveling examples follow the resolved probe selection, not
+the presence of probe pins in a board file. Without a selected probe, KACE omits
+the commented `z_tilt` and `quad_gantry_level` examples. With a probe and multiple
+independent Z motors, it offers `z_tilt`, except for CoreXY with exactly four Z
+motors, which receives `quad_gantry_level`. These examples remain commented and
+their physical pivot/corner coordinates require review before use; this policy
+does not exclude Klipper's separately configured manual probing workflows.
+
 Studio source mode prefers the sibling bootstrap; packaged mode uses its bundled
 copy. Preserve stage/error markers, installer tuple, workflow schemas, receipts
 and terminal states. Bootstrap changes need checks in both repositories and the

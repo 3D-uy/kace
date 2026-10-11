@@ -237,6 +237,34 @@ def translate_comment(comment, lang):
             "Español": "Corriente de funcionamiento del motor (Amperios)",
             "Português": "Corrente de funcionamento do motor (Amperes)"
         },
+        "Commented options keep Klipper defaults; uncomment to customize.": {
+            "Español": "Las opciones comentadas conservan los valores predeterminados de Klipper; descomenta para personalizar.",
+            "Português": "As opções comentadas mantêm os valores padrão do Klipper; descomente para personalizar."
+        },
+        "True: interpolate to 256 microsteps; False: use configured microsteps": {
+            "Español": "True: interpolación a 256 micropasos; False: usar los micropasos configurados",
+            "Português": "True: interpolação para 256 micropassos; False: usar os micropassos configurados"
+        },
+        "Standstill current (A RMS)": {
+            "Español": "Corriente en reposo (A RMS)",
+            "Português": "Corrente em repouso (A RMS)"
+        },
+        "Standstill current (A RMS); commented: follow run_current": {
+            "Español": "Corriente en reposo (A RMS); comentada: usar run_current",
+            "Português": "Corrente em repouso (A RMS); comentada: usar run_current"
+        },
+        "0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)": {
+            "Español": "0: spreadCycle (par/precisión); 999999: stealthChop (más silencioso)",
+            "Português": "0: spreadCycle (torque/precisão); 999999: stealthChop (mais silencioso)"
+        },
+        "Other positive stealthchop_threshold values use stealthChop below that speed (mm/s) and spreadCycle above.": {
+            "Español": "Otros valores positivos de stealthchop_threshold usan stealthChop por debajo de esa velocidad (mm/s) y spreadCycle por encima.",
+            "Português": "Outros valores positivos de stealthchop_threshold usam stealthChop abaixo dessa velocidade (mm/s) e spreadCycle acima."
+        },
+        "Prefer one mode for all speeds; switching modes during motion may give poor results.": {
+            "Español": "Prefiere un modo para todas las velocidades; cambiar de modo durante el movimiento puede dar malos resultados.",
+            "Português": "Prefira um modo para todas as velocidades; mudar de modo durante o movimento pode dar resultados ruins."
+        },
         "Motor hold current in amps": {
             "Español": "Corriente de retención del motor (Amperios)",
             "Português": "Corrente de retenção do motor (Amperes)"

@@ -373,7 +373,7 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 {%- endif %}
 {%- endif %}
 
-{%- if user.z_motors | int >= 2 and not (user.kinematics == 'corexy' and user.z_motors | int >= 3) %}
+{%- if user.probe_configuration.kind != 'none' and user.z_motors | int >= 2 and not (user.kinematics == 'corexy' and user.z_motors | int == 4) %}
 {%- set bx = user.x_size | int %}
 {%- set by = user.y_size | int %}
 
@@ -411,7 +411,7 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 # retry_tolerance: 0.0075                       # Maximum acceptable difference between Z motors (mm). Typical values: 0.005–0.02
 {%- endif %}
 
-{%- if user.kinematics == 'corexy' and user.z_motors | int >= 3 %}
+{%- if user.probe_configuration.kind != 'none' and user.kinematics == 'corexy' and user.z_motors | int == 4 %}
 {%- set bx = user.x_size | int %}
 {%- set by = user.y_size | int %}
 
@@ -503,6 +503,12 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 # --------------------------------------------------
 
 {%- set d_type = 'tmc2208' if user.driver_type == 'TMC2225' else user.driver_type | lower %}
+{%- set editable_tmc = d_type in ['tmc2208', 'tmc2209', 'tmc2130', 'tmc5160'] %}
+{%- if editable_tmc %}
+# Commented options keep Klipper defaults; uncomment to customize.
+# Other positive stealthchop_threshold values use stealthChop below that speed (mm/s) and spreadCycle above.
+# Prefer one mode for all speeds; switching modes during motion may give poor results.
+{%- endif %}
 
 {% set tmc_x = pins._tmc_sections.get(d_type + ' stepper_x', {}) -%}
 {% set has_pins_x = (user.driver_mode == 'UART' and 'uart_pin' in tmc_x) or (user.driver_mode == 'SPI' and 'cs_pin' in tmc_x) -%}
@@ -529,14 +535,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- endif %}
 {%- endif %}
 {%- for key, value in tmc_x.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
-{{ prefix_x }}{{ key }}: {{ value }}
+{{ prefix_x }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
 {{ prefix_x }}run_current: {{ user.run_current_x }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if editable_tmc and 'interpolate' not in tmc_x %}
+# interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
+{%- endif %}
 {%- if user.value_provenance.get('hold_current_x') != 'KLIPPER_DEFAULT' %}
-{{ prefix_x }}hold_current: {{ user.hold_current_x }} # Motor hold current in amps
+{{ prefix_x }}hold_current: {{ user.hold_current_x }} # Standstill current (A RMS)
+{%- elif editable_tmc %}
+# hold_current: {{ user.run_current_x }} # Standstill current (A RMS); commented: follow run_current
 {%- endif %}
 {%- if user.value_provenance.get('stealthchop_threshold_x') != 'KLIPPER_DEFAULT' %}
-{{ prefix_x }}stealthchop_threshold: {{ user.stealthchop_threshold_x }} # Set to 0 to use spreadCycle mode
+{{ prefix_x }}stealthchop_threshold: {{ user.stealthchop_threshold_x }} # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
+{%- elif editable_tmc %}
+# stealthchop_threshold: 0 # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 {%- endif %}
 
 {% set tmc_y = pins._tmc_sections.get(d_type + ' stepper_y', {}) -%}
@@ -564,14 +577,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- endif %}
 {%- endif %}
 {%- for key, value in tmc_y.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
-{{ prefix_y }}{{ key }}: {{ value }}
+{{ prefix_y }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
 {{ prefix_y }}run_current: {{ user.run_current_y }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if editable_tmc and 'interpolate' not in tmc_y %}
+# interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
+{%- endif %}
 {%- if user.value_provenance.get('hold_current_y') != 'KLIPPER_DEFAULT' %}
-{{ prefix_y }}hold_current: {{ user.hold_current_y }} # Motor hold current in amps
+{{ prefix_y }}hold_current: {{ user.hold_current_y }} # Standstill current (A RMS)
+{%- elif editable_tmc %}
+# hold_current: {{ user.run_current_y }} # Standstill current (A RMS); commented: follow run_current
 {%- endif %}
 {%- if user.value_provenance.get('stealthchop_threshold_y') != 'KLIPPER_DEFAULT' %}
-{{ prefix_y }}stealthchop_threshold: {{ user.stealthchop_threshold_y }} # Set to 0 to use spreadCycle mode
+{{ prefix_y }}stealthchop_threshold: {{ user.stealthchop_threshold_y }} # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
+{%- elif editable_tmc %}
+# stealthchop_threshold: 0 # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 {%- endif %}
 
 {% set tmc_z = pins._tmc_sections.get(d_type + ' stepper_z', {}) -%}
@@ -599,14 +619,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- endif %}
 {%- endif %}
 {%- for key, value in tmc_z.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
-{{ prefix_z }}{{ key }}: {{ value }}
+{{ prefix_z }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
 {{ prefix_z }}run_current: {{ user.run_current_z }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if editable_tmc and 'interpolate' not in tmc_z %}
+# interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
+{%- endif %}
 {%- if user.value_provenance.get('hold_current_z') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z }}hold_current: {{ user.hold_current_z }} # Motor hold current in amps
+{{ prefix_z }}hold_current: {{ user.hold_current_z }} # Standstill current (A RMS)
+{%- elif editable_tmc %}
+# hold_current: {{ user.run_current_z }} # Standstill current (A RMS); commented: follow run_current
 {%- endif %}
 {%- if user.value_provenance.get('stealthchop_threshold_z') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z }}stealthchop_threshold: {{ user.stealthchop_threshold_z }} # Set to 0 to use spreadCycle mode
+{{ prefix_z }}stealthchop_threshold: {{ user.stealthchop_threshold_z }} # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
+{%- elif editable_tmc %}
+# stealthchop_threshold: 0 # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 {%- endif %}
 
 {%- if user.z_motors | int >= 2 %}
@@ -636,14 +663,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- endif %}
 {%- endif %}
 {%- for key, value in tmc_z1.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
-{{ prefix_z1 }}{{ key }}: {{ value }}
+{{ prefix_z1 }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
 {{ prefix_z1 }}run_current: {{ user.run_current_z1 }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if editable_tmc and 'interpolate' not in tmc_z1 %}
+# interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
+{%- endif %}
 {%- if user.value_provenance.get('hold_current_z1') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z1 }}hold_current: {{ user.hold_current_z1 }} # Motor hold current in amps
+{{ prefix_z1 }}hold_current: {{ user.hold_current_z1 }} # Standstill current (A RMS)
+{%- elif editable_tmc %}
+# hold_current: {{ user.run_current_z1 }} # Standstill current (A RMS); commented: follow run_current
 {%- endif %}
 {%- if user.value_provenance.get('stealthchop_threshold_z1') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z1 }}stealthchop_threshold: {{ user.stealthchop_threshold_z1 }} # Set to 0 to use spreadCycle mode
+{{ prefix_z1 }}stealthchop_threshold: {{ user.stealthchop_threshold_z1 }} # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
+{%- elif editable_tmc %}
+# stealthchop_threshold: 0 # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 {%- endif %}
 {%- endif %}
 
@@ -674,14 +708,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- endif %}
 {%- endif %}
 {%- for key, value in tmc_z2.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
-{{ prefix_z2 }}{{ key }}: {{ value }}
+{{ prefix_z2 }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
 {{ prefix_z2 }}run_current: {{ user.run_current_z2 }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if editable_tmc and 'interpolate' not in tmc_z2 %}
+# interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
+{%- endif %}
 {%- if user.value_provenance.get('hold_current_z2') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z2 }}hold_current: {{ user.hold_current_z2 }} # Motor hold current in amps
+{{ prefix_z2 }}hold_current: {{ user.hold_current_z2 }} # Standstill current (A RMS)
+{%- elif editable_tmc %}
+# hold_current: {{ user.run_current_z2 }} # Standstill current (A RMS); commented: follow run_current
 {%- endif %}
 {%- if user.value_provenance.get('stealthchop_threshold_z2') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z2 }}stealthchop_threshold: {{ user.stealthchop_threshold_z2 }} # Set to 0 to use spreadCycle mode
+{{ prefix_z2 }}stealthchop_threshold: {{ user.stealthchop_threshold_z2 }} # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
+{%- elif editable_tmc %}
+# stealthchop_threshold: 0 # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 {%- endif %}
 {%- endif %}
 
@@ -712,14 +753,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- endif %}
 {%- endif %}
 {%- for key, value in tmc_z3.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
-{{ prefix_z3 }}{{ key }}: {{ value }}
+{{ prefix_z3 }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
 {{ prefix_z3 }}run_current: {{ user.run_current_z3 }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if editable_tmc and 'interpolate' not in tmc_z3 %}
+# interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
+{%- endif %}
 {%- if user.value_provenance.get('hold_current_z3') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z3 }}hold_current: {{ user.hold_current_z3 }} # Motor hold current in amps
+{{ prefix_z3 }}hold_current: {{ user.hold_current_z3 }} # Standstill current (A RMS)
+{%- elif editable_tmc %}
+# hold_current: {{ user.run_current_z3 }} # Standstill current (A RMS); commented: follow run_current
 {%- endif %}
 {%- if user.value_provenance.get('stealthchop_threshold_z3') != 'KLIPPER_DEFAULT' %}
-{{ prefix_z3 }}stealthchop_threshold: {{ user.stealthchop_threshold_z3 }} # Set to 0 to use spreadCycle mode
+{{ prefix_z3 }}stealthchop_threshold: {{ user.stealthchop_threshold_z3 }} # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
+{%- elif editable_tmc %}
+# stealthchop_threshold: 0 # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 {%- endif %}
 {%- endif %}
 
@@ -748,14 +796,21 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- endif %}
 {%- endif %}
 {%- for key, value in tmc_e.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
-{{ prefix_e }}{{ key }}: {{ value }}
+{{ prefix_e }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
 {{ prefix_e }}run_current: {{ user.run_current_e }} # motor current (A) --- manual configuration --- (check motor specs)
+{%- if editable_tmc and 'interpolate' not in tmc_e %}
+# interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
+{%- endif %}
 {%- if user.value_provenance.get('hold_current_e') != 'KLIPPER_DEFAULT' %}
-{{ prefix_e }}hold_current: {{ user.hold_current_e }} # Motor hold current in amps
+{{ prefix_e }}hold_current: {{ user.hold_current_e }} # Standstill current (A RMS)
+{%- elif editable_tmc %}
+# hold_current: {{ user.run_current_e }} # Standstill current (A RMS); commented: follow run_current
 {%- endif %}
 {%- if user.value_provenance.get('stealthchop_threshold_e') != 'KLIPPER_DEFAULT' %}
-{{ prefix_e }}stealthchop_threshold: {{ user.stealthchop_threshold_e }} # Set to 0 to use spreadCycle mode
+{{ prefix_e }}stealthchop_threshold: {{ user.stealthchop_threshold_e }} # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
+{%- elif editable_tmc %}
+# stealthchop_threshold: 0 # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 {%- endif %}
 
 {%- endif %}
