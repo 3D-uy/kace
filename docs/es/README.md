@@ -88,7 +88,7 @@ Conserva la referencia fijada existente y puede diferir del código actual.
 Requiere `curl` y `sha256sum`. Revisa el script antes de ejecutarlo.
 
 ```bash
-KACE_COMMIT='042fcc9cba81e4f4a2d927480853584754fc9f62'
+KACE_COMMIT='ea6278df3a765d81f5423003dc91c0e5b339d68e'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
