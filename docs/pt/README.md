@@ -198,3 +198,7 @@ Relate bugs e sugira melhorias pelas [issues do KACE](https://github.com/3D-uy/k
 O KACE é open source sob a [GNU GPL v3](../../LICENSE).
 
 Correções no código-fonte: redirecionamentos do Moonraker são rejeitados. Consulte os [contratos de desenvolvimento](../DEVELOPMENT.md) para operações remotas e limites de validação. O candidato para download não muda até preparar uma nova release.
+
+## Diagnóstico de reinicializações
+
+Novas execuções do bootstrap configuram um diário persistente do Linux com orçamento de 64 MiB, retenção de sete dias e sincronização a cada 30 segundos. Após uma inicialização interrompida, use `journalctl -b -1`; registros não sincronizados antes de um travamento ou corte podem ser perdidos. Isso não diagnostica nem corrige a causa de um travamento do host.

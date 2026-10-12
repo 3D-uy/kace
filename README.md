@@ -200,3 +200,7 @@ Report bugs and suggest improvements through [KACE issues](https://github.com/3D
 KACE is open source under the [GNU GPL v3](LICENSE).
 
 Source corrections: Moonraker redirects are rejected. See [development contracts](docs/DEVELOPMENT.md) for remote-operation and validation limits. The downloadable candidate is unchanged until a new release is prepared.
+
+## Restart diagnostics
+
+New bootstrap runs configure a persistent Linux journal with a 64 MiB budget, seven-day retention and 30-second synchronization. After an interrupted boot, use `journalctl -b -1`; records not flushed before a hard lock or power loss can still be missing. This does not diagnose or fix the cause of a host freeze.
