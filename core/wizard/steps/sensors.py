@@ -2,7 +2,7 @@ import re
 import os
 from core.menu import autocomplete_select, simple_input, yes_no, numbered_select
 from core.translations import t, get_lang
-from core.exceptions import WizardExit
+from core.exceptions import GenerationError, WizardExit
 from core.validators import questionary_pin_validator, questionary_thermistor_validator
 from core.probe_offset_visualizer import run_probe_offset_step
 from core.profile_values import mark_user_override
@@ -29,6 +29,87 @@ from core.probe_configuration import (
 def _get_parsed(user_data):
     import core.wizard
     return core.wizard.get_current_board_parsed(user_data)
+
+
+def _probe_allocation_sections(user_data):
+    """Project discovery examples onto the current mapped driver selection."""
+    parsed = user_data.get("board_parsed")
+    if parsed is None:
+        parsed = _get_parsed(user_data)
+    if not isinstance(parsed, dict):
+        raise GenerationError("The selected board pin map is invalid.")
+    binding = user_data.get("_board_parsed_for")
+    if binding is not None and binding != user_data.get("board"):
+        raise GenerationError("The selected board pin map belongs to another board.")
+    from core.tmc_socket import SOURCE as TMC_SOCKET_SOURCE
+    socket_source = parsed.get(TMC_SOCKET_SOURCE)
+    if (isinstance(socket_source, dict) and user_data.get("board")
+            and socket_source.get("profile") != user_data["board"]):
+        raise GenerationError("The selected socket pin map belongs to another board.")
+    # Legacy standalone validation calls have no selected driver. Retain their
+    # conservative known consumers instead of silently releasing unknown wiring.
+    if not user_data.get("driver_type"):
+        if user_data.get("driver_mode"):
+            raise GenerationError("Select a driver type before selecting its communication mode.")
+        return parsed
+    from core.profile_values import canonical_tmc_model, resolve_tmc_sections
+    try:
+        model = canonical_tmc_model(user_data["driver_type"])
+        if model not in ("tmc2208", "tmc2209", "tmc2130", "tmc5160", "none (standard)", "a4988", "drv8825"):
+            raise GenerationError("The selected driver type is invalid.")
+        selected = resolve_tmc_sections(parsed, user_data)
+        if model.startswith("tmc") and user_data.get("driver_mode") != "Standalone":
+            count = int(user_data.get("z_motors") or 1)
+            if not 1 <= count <= 4:
+                raise GenerationError("The selected Z motor count is invalid.")
+            targets = ["stepper_x", "stepper_y", "stepper_z", "extruder"]
+            targets += [f"stepper_z{i}" for i in range(1, count)]
+            # Generation permits a partial native TMC set (for example, an
+            # X/Y SPI chain alongside ordinary Z/extruder drivers). Keep that
+            # contract; a wholly unknown selected circuit still fails closed.
+            if not selected and any(target in parsed for target in targets):
+                raise GenerationError("Selected TMC pin map is incomplete.")
+    except (TypeError, ValueError) as exc:
+        raise GenerationError("The selected driver pin map is invalid.") from exc
+    sections = {name: options for name, options in parsed.items()
+                if not str(name).startswith("tmc")}
+    sections.update(selected)
+    return sections
+
+
+def _get_probe_input_candidates(user_data):
+    """Offer declared inputs only; a reused endstop does not define probe polarity."""
+    try:
+        sections = _probe_allocation_sections(user_data)
+        aliases = PinAliases({name: options for name, options in sections.items()
+                              if isinstance(options, dict)})
+    except (GenerationError, PinAliasError):
+        return []
+    check = make_pin_validator_with_collision_check(user_data, for_custom_probe=True)
+    inputs = (("probe", "pin", "wizard.custom_probe_existing_input", "probe"),
+              ("bltouch", "sensor_pin", "wizard.custom_probe_dedicated_pin", "bltouch"),
+              ("stepper_z", "endstop_pin", "wizard.custom_probe_z_endstop_input", "z_endstop"))
+    candidates, seen = [], set()
+    for section, field, label, source in inputs:
+        options = sections.get(section, {})
+        pin = options.get(field) if isinstance(options, dict) else None
+        if (not isinstance(pin, str) or not pin.strip() or "TODO" in pin.upper()
+                or "virtual_endstop" in pin.lower() or check(pin) is not True):
+            continue
+        try:
+            chip, physical = aliases.resolve(pin)
+        except PinAliasError:
+            continue
+        if (chip, physical) in seen:
+            continue
+        base_pin = physical if chip == "mcu" else f"{chip}:{physical}"
+        _, pullup, inverted = _split_probe_pin_modifiers(pin)
+        if source == "z_endstop":
+            pullup = inverted = False
+        candidates.append({"name": t(label), "pin": base_pin, "pullup": pullup,
+                           "inverted": inverted, "source": source})
+        seen.add((chip, physical))
+    return candidates
 
 
 
@@ -145,64 +226,91 @@ def _step_guided_custom_probe_offsets(user_data):
 
 
 def _step_custom_probe_pin(user_data):
-    """Offer declared probe inputs and revalidate each selection before storing."""
-    dedicated = _get_dedicated_probe_pin(user_data)
-    candidates = _get_unused_pins(user_data)
-    if dedicated:
-        dedicated_pin, pullup, inverted = dedicated
-        aliases = PinAliases({name: options for name, options in _get_parsed(user_data).items()
-                              if isinstance(options, dict)})
-        candidates = [(t("wizard.custom_probe_dedicated_pin"), dedicated_pin)] + [
-            candidate for candidate in candidates
-            if aliases.resolve(candidate[1]) != aliases.resolve(dedicated_pin)
-        ]
-    if candidates:
-        choices = [
-            {"name": f"{friendly} ({pin})" if friendly != pin else pin, "value": pin}
-            for friendly, pin in candidates
-        ]
-        choices.extend([
-            {"name": t("wizard.custom_probe_pin_manual"), "value": "__manual__"},
-            _back_choice(), _quit_choice(),
-        ])
-        answer = autocomplete_select(t("wizard.custom_probe_pin"), choices=choices, default=0)
-        if answer == _QUIT or answer is None:
-            raise WizardExit()
-        if answer == _BACK:
-            return _BACK
-        if answer != "__manual__":
-            validation = make_pin_validator_with_collision_check(user_data, for_custom_probe=True)(answer)
-            if validation is not True:
-                print(f"\n[!] {validation}\n")
-                return "__retry__"
-            if dedicated and answer == dedicated[0]:
-                base_pin, pullup, inverted = dedicated
+    """Prioritize declared inputs; keep connector aliases in an advanced submenu."""
+    while True:
+        candidates = _get_probe_input_candidates(user_data)
+        advanced = _get_unused_pins(user_data, for_custom_probe=True)
+        try:
+            aliases = PinAliases({name: options for name, options in _probe_allocation_sections(user_data).items()
+                                  if isinstance(options, dict)})
+            primary_ids = {aliases.resolve(candidate["pin"]) for candidate in candidates}
+            advanced = [item for item in advanced if aliases.resolve(item[1]) not in primary_ids]
+        except (GenerationError, PinAliasError):
+            candidates, advanced = [], []
+        selected_candidate = None
+        selected_advanced = None
+        answer = "__manual__"
+        if candidates or advanced:
+            choices = [{"name": f"{item['name']} — {item['pin']}", "value": item["pin"]}
+                       for item in candidates]
+            if advanced:
+                choices.append({"name": t("wizard.custom_probe_advanced_pins"), "value": "__advanced__"})
+            choices.extend([
+                {"name": t("wizard.custom_probe_pin_manual"), "value": "__manual__"},
+                _back_choice(), _quit_choice(),
+            ])
+            print(t("wizard.custom_probe_connector_hint"))
+            answer = autocomplete_select(t("wizard.custom_probe_pin"), choices=choices, default=0)
+            if answer == _QUIT or answer is None:
+                raise WizardExit()
+            if answer == _BACK:
+                return _BACK
+            if answer == "__advanced__":
+                advanced_choices = [{"name": f"{friendly} ({pin})" if friendly != pin else pin,
+                                     "value": pin} for friendly, pin in advanced]
+                advanced_choices += [_back_choice(), _quit_choice()]
+                answer = autocomplete_select(t("wizard.custom_probe_advanced_prompt"),
+                                             choices=advanced_choices, default=0)
+                if answer == _QUIT or answer is None:
+                    raise WizardExit()
+                if answer == _BACK:
+                    continue
+                selected_advanced = next((item for item in advanced if item[1] == answer), None)
             else:
-                base_pin, pullup, inverted = _split_probe_pin_modifiers(answer)
-            user_data["custom_probe_pin"] = base_pin
+                selected_candidate = next((item for item in candidates if item["pin"] == answer), None)
+        if answer == "__manual__":
+            answer = simple_input(
+                t("wizard.custom_probe_pin_manual_prompt"),
+                default=user_data.get("custom_probe_pin", ""),
+                validate=make_pin_validator_with_collision_check(user_data, for_custom_probe=True),
+                back_value=_BACK,
+            )
+            if answer is None or str(answer).strip().lower() in ("<", "back", "volver") or answer == _BACK:
+                return _BACK
+        value = str(answer).strip()
+        # Re-read the mapped consumers and firmware evidence after interaction.
+        validation = make_pin_validator_with_collision_check(user_data, for_custom_probe=True)(value)
+        if validation is not True:
+            print(f"\n[!] {validation}\n")
+            return "__retry__"
+        if selected_candidate is not None and selected_candidate not in _get_probe_input_candidates(user_data):
+            print(f"\n[!] {t('wizard.custom_probe_input_changed')}\n")
+            return "__retry__"
+        if selected_advanced is not None and selected_advanced not in _get_unused_pins(user_data, for_custom_probe=True):
+            print(f"\n[!] {t('wizard.custom_probe_input_changed')}\n")
+            return "__retry__"
+        base_pin, pullup, inverted = _split_probe_pin_modifiers(value)
+        if selected_candidate is not None:
+            pullup, inverted = selected_candidate["pullup"], selected_candidate["inverted"]
+        try:
+            current_aliases = PinAliases({name: options for name, options in _probe_allocation_sections(user_data).items()
+                                          if isinstance(options, dict)})
+            chip, physical = current_aliases.resolve(base_pin)
+            base_pin = physical if chip == "mcu" else f"{chip}:{physical}"
+            previous = user_data.get("custom_probe_pin")
+            same_input = bool(previous) and current_aliases.resolve(previous) == (chip, physical)
+        except (GenerationError, PinAliasError) as exc:
+            print(f"\n[!] {exc}\n")
+            return "__retry__"
+        # A changed GPIO must not inherit signal defaults from another sensor.
+        user_data["custom_probe_pin"] = base_pin
+        if same_input and not value.startswith(("^", "!")):
             user_data.setdefault("custom_probe_pullup", pullup)
             user_data.setdefault("custom_probe_inverted", inverted)
-            return "done"
-
-    value = simple_input(
-        t("wizard.custom_probe_pin_manual_prompt"),
-        default=user_data.get("custom_probe_pin", ""),
-        validate=make_pin_validator_with_collision_check(user_data, for_custom_probe=True),
-        back_value=_BACK,
-    )
-    if value == _BACK:
-        return _BACK
-    if value is None or str(value).strip().lower() in ("<", "back", "volver"):
-        return _BACK
-    validation = make_pin_validator_with_collision_check(user_data, for_custom_probe=True)(str(value).strip())
-    if validation is not True:
-        print(f"\n[!] {validation}\n")
-        return "__retry__"
-    base_pin, pullup, inverted = _split_probe_pin_modifiers(str(value).strip())
-    user_data["custom_probe_pin"] = base_pin
-    user_data.setdefault("custom_probe_pullup", pullup)
-    user_data.setdefault("custom_probe_inverted", inverted)
-    return "done"
+        else:
+            user_data["custom_probe_pullup"] = pullup
+            user_data["custom_probe_inverted"] = inverted
+        return "done"
 
 
 def _split_probe_pin_modifiers(pin: str) -> tuple[str, bool, bool]:
@@ -215,7 +323,10 @@ def _split_probe_pin_modifiers(pin: str) -> tuple[str, bool, bool]:
 
 def _get_dedicated_probe_pin(user_data) -> tuple[str, bool, bool] | None:
     """Offer the declared sensor only after checking the custom probe transition."""
-    probe_section = _get_parsed(user_data).get("bltouch", {})
+    try:
+        probe_section = _probe_allocation_sections(user_data).get("bltouch", {})
+    except GenerationError:
+        return None
     sensor_pin = probe_section.get("sensor_pin") if isinstance(probe_section, dict) else None
     if not sensor_pin or "TODO" in str(sensor_pin).upper():
         return None
@@ -394,7 +505,7 @@ def _pin_allocations(parsed_board, *, ignored_fields=()):
     return resolver, used
 
 
-def _get_unused_pins(user_data) -> list:
+def _get_unused_pins(user_data, *, for_custom_probe=False) -> list:
     """List board-declared aliases without a known configuration consumer.
 
     Never synthesize pads from an MCU family. Check known firmware reservations
@@ -402,8 +513,10 @@ def _get_unused_pins(user_data) -> list:
     Manual wiring selection remains available when the board declares no aliases.
     """
     try:
-        resolver, used_pins = _pin_allocations(_get_parsed(user_data))
-    except PinAliasError:
+        ignored = (("bltouch", "sensor_pin"), ("probe", "pin"),
+                   ("stepper_z", "endstop_pin")) if for_custom_probe else ()
+        resolver, used_pins = _pin_allocations(_probe_allocation_sections(user_data), ignored_fields=ignored)
+    except (GenerationError, PinAliasError):
         # The manual validator reports the invalid table instead of offering
         # candidates based on an ambiguous or reserved assignment.
         return []
@@ -417,7 +530,7 @@ def _get_unused_pins(user_data) -> list:
 
     unused = []
     seen = set()
-    check = make_pin_validator_with_collision_check(user_data)
+    check = make_pin_validator_with_collision_check(user_data, for_custom_probe=for_custom_probe)
     for friendly, token in candidates:
         try:
             chip, physical = resolver.resolve(token)
@@ -497,12 +610,11 @@ def make_pin_validator_with_collision_check(user_data, *, for_custom_probe=False
     buses remain consumer-owned. A newly selected probe cannot share those
     lines. Alias metadata and duplicate-use permissions allocate no pin.
     """
-    parsed_board = _get_parsed(user_data)
     alias_error = None
     from core.firmware_workflow import generation_pin_reservations, validate_checkpoint, FirmwareWorkflowError
     from firmware.identity import FirmwareIdentityError
-    from core.exceptions import GenerationError
     try:
+        parsed_board = _probe_allocation_sections(user_data)
         # The guided custom probe replaces either existing probe input and
         # uses a virtual Z endstop. No motor, heater, control output or other
         # consumer is exempt; the final generated configuration is rechecked.
@@ -520,14 +632,14 @@ def make_pin_validator_with_collision_check(user_data, *, for_custom_probe=False
         else:
             # Board examples may contain other driver models or unused Z
             # sockets. Use the same selected-model projection as generation.
-            from core.profile_values import resolve_tmc_sections
             # Other peripheral examples have not necessarily been selected.
             # Their authoritative bus check uses rendered/expanded config later.
             bus_sections = {name: options for name, options in parsed_board.items()
                             if isinstance(options, dict)
                             and (name == "board_pins" or name.startswith("board_pins "))}
             if user_data.get("driver_mode") == "SPI":
-                bus_sections.update(resolve_tmc_sections(parsed_board, user_data))
+                bus_sections.update({name: options for name, options in parsed_board.items()
+                                     if str(name).startswith("tmc") and isinstance(options, dict)})
             reservations = generation_pin_reservations(user_data, config=bus_sections)
     except (PinAliasError, FirmwareWorkflowError, FirmwareIdentityError, GenerationError) as exc:
         alias_error = str(exc)
@@ -547,7 +659,7 @@ def make_pin_validator_with_collision_check(user_data, *, for_custom_probe=False
         if any(char in bare for char in "^~!"):
             return "Invalid Klipper pin format: use [^~][!][chip:]pin"
         if for_custom_probe and val_strip.startswith("~"):
-            return "This guided probe cannot preserve pull-down (~); use the custom configuration input."
+            return t("wizard.custom_probe_pull_down_unsupported")
         if alias_error:
             return alias_error
         try:

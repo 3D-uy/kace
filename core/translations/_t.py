@@ -81,6 +81,26 @@ def translate_comment(comment, lang):
             "Español": "Ubicación del fin de carrera (generalmente 0)",
             "Português": "Localização do fim de curso (geralmente 0)"
         },
+        "Explicit homing direction": {
+            "Español": "Dirección de homing explícita",
+            "Português": "Direção de homing explícita"
+        },
+        "Automatic homing: Klipper infers direction from the endstop and travel limits.": {
+            "Español": "Homing automático: Klipper deduce la dirección del endstop y los límites de recorrido.",
+            "Português": "Homing automático: Klipper deduz a direção pelo endstop e pelos limites de curso."
+        },
+        "true = toward position_max; false = toward position_min. Uncomment to override.": {
+            "Español": "true = hacia position_max; false = hacia position_min. Descomenta para fijarla manualmente.",
+            "Português": "true = em direção a position_max; false = em direção a position_min. Descomente para definir manualmente."
+        },
+        "Automatic probe homing: Klipper uses probe:z_virtual_endstop and Z travel limits.": {
+            "Español": "Homing automático con sonda: Klipper usa probe:z_virtual_endstop y los límites de Z.",
+            "Português": "Homing automático com sonda: Klipper usa probe:z_virtual_endstop e os limites de Z."
+        },
+        "Optional override: true = toward position_max; false = toward position_min.": {
+            "Español": "Opción manual: true = hacia position_max; false = hacia position_min.",
+            "Português": "Opção manual: true = em direção a position_max; false = em direção a position_min."
+        },
         "Maximum valid X position": {
             "Español": "Posición máxima válida en X",
             "Português": "Posição máxima válida em X"

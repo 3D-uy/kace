@@ -53,6 +53,9 @@ position_endstop: 0                             # Location of the endstop (usual
 position_min: 0                                 # Minimum valid X position
 position_max: 235                               # Maximum valid X position
 homing_speed: 50                                # Maximum velocity (in mm/s) of the stepper when homing
+# Automatic homing: Klipper infers direction from the endstop and travel limits.
+# true = toward position_max; false = toward position_min. Uncomment to override.
+# homing_positive_dir: false
 
 [stepper_y]
 step_pin: PB8                                   # Step pin for the Y stepper driver
@@ -65,6 +68,9 @@ position_endstop: 0                             # Location of the endstop (usual
 position_min: 0                                 # Minimum valid Y position
 position_max: 235                               # Maximum valid Y position
 homing_speed: 50                                # Maximum velocity (in mm/s) of the stepper when homing
+# Automatic homing: Klipper infers direction from the endstop and travel limits.
+# true = toward position_max; false = toward position_min. Uncomment to override.
+# homing_positive_dir: false
 
 [stepper_z]
 step_pin: PB6                                   # Step pin for the Z stepper driver
@@ -75,6 +81,8 @@ rotation_distance: 8                            # Distance in mm the axis travel
 endstop_pin: probe:z_virtual_endstop            # Endstop pin. Add or remove "!" to invert logic
 position_min: 0                                 # Minimum valid Z position
 position_max: 250                               # Maximum valid Z position
+# Automatic probe homing: Klipper uses probe:z_virtual_endstop and Z travel limits.
+# homing_positive_dir:                          # Optional override: true = toward position_max; false = toward position_min.
 
 [extruder]
 step_pin: PB4                                   # Step pin for the extruder driver

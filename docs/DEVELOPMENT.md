@@ -44,6 +44,27 @@ probeable bed is printable area intersected with probe reach. Consumers must use
 the shared model and reject an empty intersection. These bounds do not imply
 IDEX/toolchanger support or authorize motion outside mechanical travel.
 
+Primary XYZ homing direction is selectable in the profile editor and motion
+wizard: automatic, toward minimum or toward maximum. Automatic uses Klipper's
+endstop/travel inference, recalculated after geometry edits, and leaves a localized
+commented `homing_positive_dir` example for physical endstops. For probe-based Z,
+the comment leaves the optional Boolean blank because Klipper uses the probe's
+effective trigger position rather than the replaced physical endstop. Imported
+or user-selected explicit directions remain active; an ambiguous automatic
+physical direction requires a minimum/maximum choice. Existing destination and
+user-include overrides retain their ownership and are checked by the effective
+configuration review, which rejects invalid ranges and contradictory directions.
+
+Custom-probe input selection uses the selected board/socket assignments and the
+same reviewed TMC projection as generation. Commented examples of other drivers
+do not claim pins. Declared probe/BLTouch sensor inputs and a physical Z endstop
+that the probe replaces are offered before manual entry; other declared aliases
+are available through an advanced menu. Every choice is revalidated against
+real consumers, MCU/alias identity and firmware reservations. Reusing an endstop
+GPIO does not copy its inversion to a different sensor or establish electrical
+compatibility. Klipper's [probe contract](https://www.klipper3d.org/Config_Reference.html#probe)
+remains authoritative; generated and effective include validation stay required.
+
 Optional automatic leveling examples follow the resolved probe selection, not
 the presence of probe pins in a board file. Without a selected probe, KACE omits
 the commented `z_tilt` and `quad_gantry_level` examples. With a probe and multiple

@@ -9,6 +9,14 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 ## [0.9.4-rc.3] - 2026-10-03
 
+- Select custom-probe inputs from the effective board/socket and driver choices;
+  prioritize declared sensor and replaced Z-endstop inputs, with expansion aliases
+  in an advanced menu. Keep actual pin collisions and firmware reservations blocked.
+- Select automatic, minimum or maximum homing direction for each primary axis;
+  automatic settings remain commented with EN/ES/PT guidance and are recalculated
+  after geometry edits. Preserve explicitly imported or selected directions.
+- Preserve verified relay settings when bootstrap is relaunched after its boot
+  options were cleaned up; reject inconsistent saved state before file changes.
 - Resolve UART/SPI wiring by reviewed removable-driver socket when an official
   board profile uses another TMC chip example, including SKR 1.4 Turbo with Z1
   connected to E1. Cross-model mappings still require explicit motor currents.

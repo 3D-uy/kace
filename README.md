@@ -90,7 +90,7 @@ It keeps the existing pinned reference and may differ from the current source.
 Requires `curl` and `sha256sum`. Review the script before running it.
 
 ```bash
-KACE_COMMIT='ea6278df3a765d81f5423003dc91c0e5b339d68e'
+KACE_COMMIT='6b439b1e88f7ca69005394dd5be236b7ff1a4905'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT

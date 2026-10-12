@@ -53,6 +53,9 @@ position_endstop: 0                             # Location of the endstop (usual
 position_min: 0                                 # Minimum valid X position
 position_max: 235                               # Maximum valid X position
 homing_speed: 50                                # Maximum velocity (in mm/s) of the stepper when homing
+# Automatic homing: Klipper infers direction from the endstop and travel limits.
+# true = toward position_max; false = toward position_min. Uncomment to override.
+# homing_positive_dir: false
 
 [stepper_y]
 step_pin: gpio6                                 # Step pin for the Y stepper driver
@@ -65,6 +68,9 @@ position_endstop: 0                             # Location of the endstop (usual
 position_min: 0                                 # Minimum valid Y position
 position_max: 235                               # Maximum valid Y position
 homing_speed: 50                                # Maximum velocity (in mm/s) of the stepper when homing
+# Automatic homing: Klipper infers direction from the endstop and travel limits.
+# true = toward position_max; false = toward position_min. Uncomment to override.
+# homing_positive_dir: false
 
 [stepper_z]
 step_pin: gpio19                                # Step pin for the Z stepper driver
@@ -76,6 +82,9 @@ endstop_pin: ^gpio25                            # Endstop pin. Add or remove "!"
 position_endstop: 0.0                           # Location of the endstop (usually 0)
 position_min: 0                                 # Minimum valid Z position
 position_max: 300                               # Maximum valid Z position
+# Automatic homing: Klipper infers direction from the endstop and travel limits.
+# true = toward position_max; false = toward position_min. Uncomment to override.
+# homing_positive_dir: false
 
 [extruder]
 step_pin: gpio14                                # Step pin for the extruder driver
