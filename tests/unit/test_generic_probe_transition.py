@@ -37,6 +37,7 @@ def test_existing_probe_cannot_bypass_firmware_reservations(tmp_path, resume):
 def test_manual_choice_reuses_pin_and_keeps_signal_flags():
     user = {}
     with patch("core.wizard.steps.sensors._get_parsed", return_value={"probe": {"pin": "^!PB8"}}), \
+         patch("core.wizard.steps.sensors.autocomplete_select", return_value="__manual__"), \
          patch("core.wizard.steps.sensors.simple_input", return_value="^!PB8"):
         assert _step_custom_probe_pin(user) == "done"
     assert user["custom_probe_pin"] == "PB8"
@@ -50,6 +51,7 @@ def test_new_consumer_during_prompt_is_rechecked():
         parsed["fan"] = {"pin": "PB8"}
         return "PB8"
     with patch("core.wizard.steps.sensors._get_parsed", return_value=parsed), \
+         patch("core.wizard.steps.sensors.autocomplete_select", return_value="__manual__"), \
          patch("core.wizard.steps.sensors.simple_input", side_effect=answer):
         assert _step_custom_probe_pin(user) == "__retry__"
     assert "custom_probe_pin" not in user

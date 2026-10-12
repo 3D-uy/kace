@@ -30,6 +30,82 @@ _PRINTER_PROFILES_DB = None
 _INTERACTIVE_MODE = True
 
 
+def _homing_direction_mode(data, axis, defaults=None, parsed=None):
+    """Retain explicit source choices and distinguish them from automatic inference."""
+    key = f"homing_positive_dir_{axis}"
+    if (data.get("_value_provenance") or {}).get(key) == ValueProvenance.INFERRED.value:
+        return "auto"
+    value = data.get(key)
+    if value in (None, ""):
+        value = (defaults or {}).get(key)
+    if value in (None, ""):
+        value = (parsed or {}).get(f"stepper_{axis}", {}).get("homing_positive_dir")
+    if value in (None, ""):
+        return "auto"
+    text = str(value).strip().lower()
+    if text not in ("true", "false"):
+        raise GenerationError(f"{key} must be True or False.")
+    return "True" if text == "true" else "False"
+
+
+def _homing_direction_inferred(data, axis):
+    return infer_homing_positive_dir(
+        data.get(f"{axis}_position_endstop"),
+        data.get(f"{axis}_position_min"),
+        data.get(f"{axis}_position_max"),
+    )
+
+
+def _homing_direction_label(mode, inferred, axis):
+    if mode == "auto":
+        direction = (t("wizard.homing.positive", axis=axis.upper()) if inferred == "True"
+                     else t("wizard.homing.negative", axis=axis.upper()) if inferred == "False"
+                     else t("wizard.homing.unresolved"))
+        return t("wizard.homing.automatic_direction", direction=direction)
+    return t("wizard.homing.maximum" if mode == "True" else "wizard.homing.minimum", axis=axis.upper())
+
+
+def _select_homing_direction(data, axis, defaults=None, parsed=None):
+    mode = _homing_direction_mode(data, axis, defaults, parsed)
+    inferred = _homing_direction_inferred(data, axis)
+    if axis == "z" and mode == "auto":
+        print(f"{DIM}{t('wizard.homing.z_probe_hint')}{RESET}")
+    while True:
+        answer = numbered_select(
+            t("wizard.homing.choose", axis=axis.upper()),
+            choices=[
+                {"name": _homing_direction_label("auto", inferred, axis), "value": "auto"},
+                {"name": t("wizard.homing.minimum", axis=axis.upper()), "value": "False"},
+                {"name": t("wizard.homing.maximum", axis=axis.upper()), "value": "True"},
+                _back_choice(), _quit_choice(),
+            ],
+            default=("auto", "False", "True").index(mode),
+            require_explicit=inferred is None and mode == "auto",
+        )
+        if answer in (_QUIT, None):
+            raise WizardExit()
+        if answer == "auto" and inferred is None:
+            print(f"{WARNING}{t('wizard.homing.ambiguous', axis=axis.upper())}{RESET}")
+            continue
+        if answer in ("auto", "False", "True", _BACK):
+            return answer
+
+
+def _apply_homing_direction(data, axis, mode):
+    key = f"homing_positive_dir_{axis}"
+    if mode == "auto":
+        data.pop(key, None)
+        inferred = _homing_direction_inferred(data, axis)
+        if inferred is not None:
+            data[key] = inferred
+        provenance = dict(data.get("_value_provenance") or {})
+        provenance[key] = ValueProvenance.INFERRED.value
+        data["_value_provenance"] = provenance
+    else:
+        data[key] = mode
+        mark_user_override(data, key)
+
+
 def _z_mechanics_input(option, value):
     text = str(value).strip()
     if option == "gear_ratio" and not text:
@@ -285,6 +361,18 @@ def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict
                 for label, val, comment_key in axis_rows:
                     if val is not None:
                         print_val(label, val, comment_key)
+                homing_data = dict(defaults)
+                homing_data.update(user_data or {})
+                for field in ("position_min", "position_max", "position_endstop"):
+                    key = f"{axis}_{field}"
+                    if key not in homing_data and axis_data.get(field) is not None:
+                        homing_data[key] = axis_data[field]
+                mode = _homing_direction_mode(homing_data, axis, defaults, parsed)
+                print_val(t("wizard.homing.axis_label", axis=axis.upper()),
+                          _homing_direction_label(mode, _homing_direction_inferred(homing_data, axis), axis),
+                          "wizard.homing.comment")
+                if axis == "z" and mode == "auto":
+                    print(f"  {DIM}{t('wizard.homing.z_probe_hint')}{RESET}")
                 print("")
 
     # ── Build Volume ──────────────────────────────────────────────────────────
@@ -418,6 +506,25 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             Choice(title=_ansi_choice(f"{B}{t('choice.save_continue')}{R}"), value="save"),
             Choice(title=_ansi_choice(f"{B}{t('choice.back_discard')}{R}"), value="back")
         ]
+
+        homing_data = dict(staged_defaults)
+        homing_data.update(staged_user_data)
+        for axis in ("x", "y", "z"):
+            for field in ("position_min", "position_max", "position_endstop"):
+                key = f"{axis}_{field}"
+                value = staged_parsed.get(f"stepper_{axis}", {}).get(field)
+                if key not in homing_data and value is not None:
+                    homing_data[key] = value
+            mode = _homing_direction_mode(staged_user_data, axis, staged_defaults, staged_parsed)
+            label = _homing_direction_label(mode, _homing_direction_inferred(homing_data, axis), axis)
+            insert_at = next(i for i, choice in enumerate(choices)
+                             if getattr(choice, "value", None) == f"{axis}_position_endstop") + 1
+            choices.insert(insert_at, Choice(
+                title=_row(t("wizard.homing.axis_label", axis=axis.upper()), label, "wizard.homing.comment"),
+                value=f"homing_positive_dir_{axis}",
+            ))
+            if axis == "z" and mode == "auto":
+                print(f"  {D}{t('wizard.homing.z_probe_hint')}{R}")
 
         prop = numbered_select(
             t("wizard.profile_editor_prompt"),
@@ -556,6 +663,21 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 sx[field] = val_clean
                 
                 pass
+
+        elif prop in ("homing_positive_dir_x", "homing_positive_dir_y", "homing_positive_dir_z"):
+            axis = prop.rsplit("_", 1)[1]
+            answer = _select_homing_direction(homing_data, axis, staged_defaults, staged_parsed)
+            if answer == _BACK:
+                continue
+            # Automatic mode removes the old source directive; generation re-infers
+            # from the current geometry rather than retaining an imported override.
+            if answer == "auto":
+                staged_defaults.pop(prop, None)
+                staged_parsed.setdefault(f"stepper_{axis}", {}).pop("homing_positive_dir", None)
+            else:
+                staged_defaults[prop] = answer
+                staged_parsed.setdefault(f"stepper_{axis}", {})["homing_positive_dir"] = answer
+            _apply_homing_direction(staged_user_data, axis, answer)
 
         elif prop == "hotend_thermistor":
             th_choices = list(THERMISTOR_PRESETS) + ["Other (Manual Entry)"]
@@ -896,50 +1018,26 @@ def _step_z_limits(user_data):
 
 
 def _step_homing_directions(user_data):
-    """Infer homing directions and ask only when geometry is ambiguous."""
-    from core.translations import get_lang
-
-    language = get_lang()
-    prompts = {
-        "English": "Does axis {axis} home toward position_max?",
-        "Español": "¿El eje {axis} hace homing hacia position_max?",
-        "Português": "O eixo {axis} faz homing em direção a position_max?",
-    }
-    positive = {"English": "Yes, toward maximum", "Español": "Sí, hacia el máximo", "Português": "Sim, em direção ao máximo"}
-    negative = {"English": "No, toward minimum", "Español": "No, hacia el mínimo", "Português": "Não, em direção ao mínimo"}
-    provenance = dict(user_data.get("_value_provenance") or {})
-
+    """Offer automatic/manual directions, committing only after every axis is reviewed."""
+    staged = copy.deepcopy(user_data)
     for axis in ("x", "y", "z"):
         key = f"homing_positive_dir_{axis}"
-        if user_data.get(key) not in (None, ""):
-            continue
-        inferred = infer_homing_positive_dir(
-            user_data.get(f"{axis}_position_endstop"),
-            user_data.get(f"{axis}_position_min"),
-            user_data.get(f"{axis}_position_max"),
-        )
-        if inferred is not None:
-            user_data[key] = inferred
-            provenance[key] = ValueProvenance.INFERRED.value
-            continue
         if os.environ.get("KACE_AUTO") == "1":
-            raise GenerationError(
-                f"Cannot infer {key}; run the interactive wizard or provide it explicitly."
-            )
-        answer = numbered_select(
-            prompts.get(language, prompts["English"]).format(axis=axis.upper()),
-            choices=[
-                {"name": positive.get(language, positive["English"]), "value": "True"},
-                {"name": negative.get(language, negative["English"]), "value": "False"},
-                _back_choice(),
-            ],
-            default=1,
-        )
+            answer = _homing_direction_mode(staged, axis, parsed=staged.get("_profile_parsed"))
+            if answer == "auto" and _homing_direction_inferred(staged, axis) is None:
+                raise GenerationError(
+                    f"Cannot infer {key}; run the interactive wizard or provide it explicitly."
+                )
+        else:
+            answer = _select_homing_direction(staged, axis, parsed=staged.get("_profile_parsed"))
         if answer == _BACK:
             return _BACK
-        user_data[key] = answer
-        mark_user_override(user_data, key)
-        provenance = dict(user_data.get("_value_provenance") or {})
-
-    user_data["_value_provenance"] = provenance
+        previous_mode = _homing_direction_mode(staged, axis, parsed=staged.get("_profile_parsed"))
+        _apply_homing_direction(staged, axis, answer)
+        if answer == previous_mode and answer != "auto":
+            previous_provenance = (user_data.get("_value_provenance") or {}).get(key)
+            if previous_provenance == ValueProvenance.PROFILE.value:
+                staged["_value_provenance"][key] = previous_provenance
+    user_data.clear()
+    user_data.update(staged)
     return "done"

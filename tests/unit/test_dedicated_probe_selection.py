@@ -97,13 +97,15 @@ def test_secondary_mcu_with_same_gpio_is_not_removed_from_the_menu():
               "board_pins": {"aliases": "ALIAS=PB8"},
               "board_pins tool": {"mcu": "toolhead", "aliases": "INPUT=PB8"}}
     with patch("core.wizard.steps.sensors._get_parsed", return_value=parsed), patch(
-        "core.wizard.steps.sensors.autocomplete_select", return_value="toolhead:PB8"
+        "core.wizard.steps.sensors.autocomplete_select", side_effect=["__advanced__", "toolhead:PB8"]
     ) as select:
         user = {}
         assert _step_custom_probe_pin(user) == "done"
-    values = [item["value"] for item in select.call_args.kwargs["choices"]]
-    assert "PB8" in values and "toolhead:PB8" in values
-    assert "ALIAS" not in values
+    primary = [item["value"] for item in select.call_args_list[0].kwargs["choices"]]
+    advanced = [item["value"] for item in select.call_args_list[1].kwargs["choices"]]
+    assert "PB8" in primary and "__advanced__" in primary
+    assert "toolhead:PB8" not in primary and "toolhead:PB8" in advanced
+    assert "ALIAS" not in primary and "ALIAS" not in advanced
     assert user["custom_probe_pin"] == "toolhead:PB8"
     assert user["custom_probe_pullup"] is False
 

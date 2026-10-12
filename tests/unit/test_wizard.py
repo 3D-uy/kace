@@ -952,13 +952,15 @@ class TestBLTouchWizardPrompt(unittest.TestCase):
         self.assertEqual(mock_input.call_args.kwargs["default"], 2)
 
     @patch("core.wizard.steps.sensors._get_unused_pins", return_value=[("PROBE", "PA1")])
-    @patch("core.wizard.steps.sensors.autocomplete_select", return_value="PA1")
+    @patch("core.wizard.steps.sensors.autocomplete_select", side_effect=["__advanced__", "PA1"])
     def test_guided_custom_probe_prefers_board_derived_pin_choices(self, mock_select, mock_unused):
         from core.wizard import _step_custom_probe_pin
 
         user_data = {}
         self.assertEqual(_step_custom_probe_pin(user_data), "done")
         self.assertEqual(user_data["custom_probe_pin"], "PA1")
+        primary = mock_select.call_args_list[0].kwargs["choices"]
+        self.assertEqual(primary[0]["value"], "__advanced__")
         choices = mock_select.call_args.kwargs["choices"]
         self.assertEqual(choices[0]["value"], "PA1")
 

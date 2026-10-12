@@ -80,7 +80,7 @@ def test_wizard_prompts_for_middle_half_and_retains_user_choice():
     with patch.dict('os.environ', {'KACE_AUTO': '0'}), patch(
         'core.wizard.steps.motion.numbered_select', return_value='True') as select:
         assert _step_homing_directions(user) == 'done'
-    select.assert_called_once()
+    assert select.call_count == 3
     assert user['homing_positive_dir_x'] == 'True'
     assert user['_value_provenance']['homing_positive_dir_x'] == 'USER_OVERRIDE'
 

@@ -116,6 +116,7 @@ FIELDS = (
 
 _FIELD_BY_KEY = {field.key: field for field in FIELDS}
 _HOMING_VALUE_KEYS = {f"{option}_{axis}" for option in HOMING_OPTIONS for axis in ("x", "y", "z")}
+_HOMING_DIRECTION_KEYS = {f"homing_positive_dir_{axis}" for axis in ("x", "y", "z")}
 _OPTIONAL_VALUE_KEYS = _HOMING_VALUE_KEYS | {"minimum_cruise_ratio"} | {"extruder_" + option for option in EXTRUDER_OPTIONS}
 _TMC_TARGETS = ("x", "y", "z", "z1", "z2", "z3", "e")
 _TMC_VALUE_OPTIONS = ("run_current", "hold_current", "stealthchop_threshold")
@@ -811,6 +812,10 @@ def resolve_generation_values(
                 provenance[key] = ValueProvenance.PROFILE.value
             else:
                 provenance[key] = ValueProvenance.UNRESOLVED.value
+        elif explicit_source == ValueProvenance.INFERRED.value and key in _HOMING_DIRECTION_KEYS:
+            # Automatic is a policy, not a cached Boolean. Recompute below from
+            # the resolved limits, even when an imported profile was explicit.
+            provenance[key] = ValueProvenance.UNRESOLVED.value
         elif explicit_source == ValueProvenance.INFERRED.value and key not in _TMC_VALUE_KEYS:
             if supplied not in (None, ""):
                 resolved[key] = str(supplied).strip()

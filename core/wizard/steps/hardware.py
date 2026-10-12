@@ -130,6 +130,7 @@ def _step_board(user_data, suggested_configs, board_configs):
     else:
         user_data["board_raw_config"] = None
         user_data["board_parsed"]     = {}
+    user_data["_board_parsed_for"] = ans
 
     return ans
 
@@ -322,6 +323,7 @@ def _step_z_socket_assignment(user_data):
     if parsed_data is None:
         parsed_data = parse_config(raw_cfg, user_data.get('board', ''), keep_comments=True)
         user_data['board_parsed'] = parsed_data
+        user_data['_board_parsed_for'] = user_data.get('board', '')
 
     available_driver_sockets = list(get_reusable_driver_sockets(raw_cfg, user_data.get('board', '')))
 
