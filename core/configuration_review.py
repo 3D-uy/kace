@@ -12,7 +12,7 @@ from typing import Callable, Iterable
 
 from core.managed_config import HARDWARE_REMOTE, MACROS_REMOTE, ManagedConfigPlan, effective_hardware_text
 from core.profile_values import infer_homing_positive_dir
-from core.probe_configuration import is_probe_virtual_endstop
+from core.probe_configuration import is_probe_virtual_endstop, validate_probe_homing_geometry
 from core.config_sections import section_identity
 
 
@@ -324,6 +324,11 @@ def validate_configuration_plan(
             "physical-z-position",
             "Physical Z homing requires position_endstop in [stepper_z].",
         ))
+
+    try:
+        validate_probe_homing_geometry(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("homing-z-geometry", str(exc)))
 
     for axis in ("x", "y", "z"):
         if axis == "z" and virtual_z:

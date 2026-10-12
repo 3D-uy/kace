@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 from core.firmware_workflow import (
     CheckpointCorrupt,
+    CheckpointConflict,
     CheckpointIncompatible,
     DeploymentInvariantError,
     FirmwareWorkflowError,
@@ -17,12 +19,16 @@ from core.firmware_workflow import (
     deployment_blockers,
     enforce_deployment_invariants,
     load_checkpoint,
+    restore_wizard_data,
     transition_checkpoint,
     verify_reappeared_mcu,
     verify_running_firmware,
     write_checkpoint,
 )
 from core.mcu_monitor import McuIdentity
+from core.custom_probe import (
+    CustomProbeConfig, GuidedCustomProbeSettings, parse_custom_probe_config,
+)
 
 
 def physical_identity(path, port="usb-1", serial="original"):
@@ -174,6 +180,140 @@ class FirmwareWorkflowTests(unittest.TestCase):
         self.assertEqual(resumed["wizard_data"]["x_size"], "300")
         self.assertNotIn("password", resumed["wizard_data"])
         self.assertEqual(resumed["state"], FirmwareWorkflowState.AWAITING_FLASH.value)
+
+    def test_custom_probe_source_survives_durable_resume_verbatim(self):
+        source = ("# Keep spacing and macro body\n[probe]\npin: ^P1.27\n"
+                  "x_offset: -9\ny_offset: -11\nz_offset: 0\n"
+                  "custom_option: keep this\n\n[gcode_macro PROBE_HELPER]\n"
+                  "gcode:\n    RESPOND MSG=\"unchanged\"\n")
+        user_data = {**base_user_data(), "probe": "Custom Probe",
+                     "custom_probe": parse_custom_probe_config(source)}
+        checkpoint = create_checkpoint(user_data, identity_reader=identity_reader())
+        path = self.root / "custom-workflow.json"
+        write_checkpoint(checkpoint, str(path))
+        loaded = load_checkpoint(str(path))
+        before = path.read_bytes()
+        restored = restore_wizard_data(loaded["wizard_data"])
+        self.assertEqual(loaded["wizard_data"]["custom_probe"], {"config_text": source})
+        self.assertIsInstance(restored["custom_probe"], CustomProbeConfig)
+        self.assertEqual(restored["custom_probe"].config_text, source)
+        self.assertEqual(restored["custom_probe"].x_offset, -9)
+        self.assertEqual(restored["custom_probe"].y_offset, -11)
+        self.assertEqual(restored["custom_probe"].z_offset, 0)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertNotIn("password", restored)
+        self.assertEqual(loaded["state"], FirmwareWorkflowState.HARDWARE_SELECTED.value)
+        self.assertIsNone(loaded["artifact"])
+
+    def test_legacy_guided_custom_probe_can_resume_without_raw_payload(self):
+        settings = GuidedCustomProbeSettings(pin="^P1.27", x_offset=-9,
+                                             y_offset=-11, z_offset=0)
+        user_data = {**base_user_data(), "probe": "Custom Probe",
+                     "custom_probe_settings": asdict(settings)}
+        checkpoint = create_checkpoint(user_data, identity_reader=identity_reader())
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.ARTIFACT_READY,
+                                           artifact=artifact(self.root))
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.AWAITING_FLASH)
+        path = self.root / "legacy-custom-workflow.json"
+        write_checkpoint(checkpoint, str(path))
+        loaded = load_checkpoint(str(path))
+        restored = restore_wizard_data(loaded["wizard_data"])
+        self.assertEqual(restored["custom_probe"].config_text, settings.to_config().config_text)
+        self.assertEqual(restored["custom_probe_settings"], settings)
+        updated = transition_checkpoint(loaded, FirmwareWorkflowState.AWAITING_FLASH,
+                                        user_data=restored)
+        write_checkpoint(updated, str(path))
+        reloaded = load_checkpoint(str(path))
+        self.assertEqual(reloaded["sequence"], loaded["sequence"] + 1)
+        self.assertEqual(reloaded["wizard_data"]["custom_probe"],
+                         {"config_text": settings.to_config().config_text})
+        self.assertEqual(reloaded["hardware"], loaded["hardware"])
+        self.assertEqual(reloaded["artifact"], loaded["artifact"])
+        self.assertEqual(reloaded["state"], FirmwareWorkflowState.AWAITING_FLASH.value)
+
+    def test_resume_probe_kind_matches_generator_precedence(self):
+        source = "[probe]\npin: P1.27\nx_offset: -9\ny_offset: -11\nz_offset: 0\n"
+        saved = {"probe_kind": "custom", "probe": "None",
+                 "custom_probe": {"config_text": source}}
+        self.assertIsInstance(restore_wizard_data(saved)["custom_probe"], CustomProbeConfig)
+        saved.update(probe_kind="none", probe="Custom Probe")
+        self.assertEqual(restore_wizard_data(saved)["custom_probe"], {"config_text": source})
+
+    def test_custom_probe_resume_derives_offsets_and_policy_from_raw_source(self):
+        source = "[probe]\npin: P1.27\nx_offset: -9\ny_offset: -11\nz_offset: 0\n"
+        saved = {"probe": "Custom Probe", "custom_probe": {
+            "config_text": source, "primary_section": "anything", "x_offset": 100,
+            "y_offset": 200, "z_offset": 300, "policy": {"primary_sections": ["printer"]},
+        }}
+        restored = restore_wizard_data(saved)
+        self.assertEqual(restored["custom_probe"].primary_section, "probe")
+        self.assertEqual(restored["custom_probe"].x_offset, -9)
+        self.assertEqual(restored["custom_probe"].y_offset, -11)
+        self.assertEqual(restored["custom_probe"].z_offset, 0)
+        self.assertEqual(saved["custom_probe"]["x_offset"], 100)
+
+    def test_invalid_custom_probe_resume_never_falls_back_to_guided_settings(self):
+        guided = asdict(GuidedCustomProbeSettings(pin="P1.27", x_offset=0, y_offset=0))
+        for raw in ({}, {"config_text": "[printer]\nkinematics: cartesian"},
+                    {"config_text": "[probe]\nz_offset: nan"}, "not an object"):
+            with self.subTest(raw=raw), self.assertRaisesRegex(
+                FirmwareWorkflowError, "Saved custom probe rejected"
+            ):
+                restore_wizard_data({"probe": "Custom Probe", "custom_probe": raw,
+                                     "custom_probe_settings": guided})
+
+    def test_invalid_legacy_guided_probe_is_refused(self):
+        settings = asdict(GuidedCustomProbeSettings(pin="P1.27", x_offset=0, y_offset=0))
+        for changes in ({"x_offset": float("inf")}, {"samples": 0},
+                        {"samples_result": "invalid"}, {"unexpected": "value"},
+                        {"pin": "P1.27\n[printer]\nkinematics: cartesian"}):
+            with self.subTest(changes=changes), self.assertRaisesRegex(
+                FirmwareWorkflowError, "Saved custom probe rejected"
+            ):
+                restore_wizard_data({"probe": "Custom Probe",
+                                     "custom_probe_settings": {**settings, **changes}})
+        with self.assertRaisesRegex(FirmwareWorkflowError, "unavailable"):
+            restore_wizard_data({"probe": "Custom Probe"})
+
+    def test_rehydrated_custom_probe_preserves_checkpoint_integrity_and_stale_writer_guard(self):
+        settings = GuidedCustomProbeSettings(pin="P1.27", x_offset=0, y_offset=0)
+        checkpoint = create_checkpoint({**base_user_data(), "probe": "Custom Probe",
+                                        "custom_probe": settings.to_config()})
+        path = self.root / "custom-cas.json"
+        write_checkpoint(checkpoint, str(path))
+        first = load_checkpoint(str(path))
+        stale = load_checkpoint(str(path))
+        fresh = transition_checkpoint(first, FirmwareWorkflowState.HARDWARE_SELECTED,
+                                      user_data=restore_wizard_data(first["wizard_data"]))
+        write_checkpoint(fresh, str(path))
+        with self.assertRaises(CheckpointConflict):
+            write_checkpoint(transition_checkpoint(stale, FirmwareWorkflowState.HARDWARE_SELECTED,
+                user_data=restore_wizard_data(stale["wizard_data"])), str(path))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["wizard_data"]["custom_probe"]["config_text"] += "\n# tampered"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        with self.assertRaises(CheckpointCorrupt):
+            load_checkpoint(str(path))
+
+    def test_cli_rejects_invalid_resumed_probe_before_generation_or_deployment(self):
+        import kace
+
+        checkpoint = create_checkpoint(base_user_data())
+        checkpoint["wizard_data"].update(probe="Custom Probe", custom_probe={"config_text": ""})
+        with patch.object(kace, "_resume_firmware_workflow", return_value=(checkpoint, "continue")), \
+                patch.object(kace, "checkpoint_revision", return_value=("unused", None)), \
+                patch.object(kace, "print_kace_banner"), \
+                patch.object(kace, "print_workflow_result") as outcome, \
+                patch.object(kace, "fetch_raw_config") as fetch, \
+                patch.object(kace, "generate_config") as generate, \
+                patch.object(kace, "deploy_firmware_installation") as deploy:
+            with self.assertRaises(SystemExit) as raised:
+                kace.main()
+        self.assertNotEqual(raised.exception.code, 0)
+        self.assertIn("Saved custom probe rejected", outcome.call_args.args[0].detail)
+        fetch.assert_not_called()
+        generate.assert_not_called()
+        deploy.assert_not_called()
 
     def test_corrupt_and_incompatible_checkpoints_are_rejected(self):
         checkpoint = awaiting_flash(self.root)

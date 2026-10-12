@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Mapping
 from configparser import ConfigParser
+import math
 from typing import Optional, Protocol, runtime_checkable
 
 from core.custom_probe import CustomProbeConfig
@@ -39,6 +40,30 @@ def is_probe_virtual_endstop(token: str) -> bool:
     """
     from core.pin_validator import PinAliases
     return PinAliases.split_pin(token) == ("probe", "z_virtual_endstop")
+
+
+def validate_probe_homing_geometry(sections: Mapping) -> None:
+    """Check the probe trigger position against the effective Z rail limits."""
+    rail = sections.get("stepper_z", {})
+    if not is_probe_virtual_endstop(rail.get("endstop_pin", "")):
+        return
+    probe = sections.get("probe", sections.get("bltouch", {}))
+    if "z_offset" not in probe:
+        # Pin-only fragments cannot establish the effective homing geometry.
+        return
+    try:
+        minimum = float(rail.get("position_min", "0"))
+        maximum = float(rail["position_max"])
+        trigger = float(probe["z_offset"])
+        if (not all(math.isfinite(value) for value in (minimum, maximum, trigger))
+                or not minimum < maximum or not minimum <= trigger <= maximum):
+            raise ValueError()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GenerationError(
+            "[stepper_z] probe:z_virtual_endstop requires finite position_min < "
+            "position_max and the probe z_offset within that range "
+            "(position_min defaults to 0). Resolve the Z limits or calibrate the probe offset."
+        ) from exc
 
 
 def _bltouch_boolean(option: str, value: object) -> bool:

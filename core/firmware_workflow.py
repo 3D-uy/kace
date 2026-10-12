@@ -224,15 +224,58 @@ def _jsonable(value: Any) -> Any:
 
 def persistable_wizard_data(user_data: Mapping[str, Any]) -> dict[str, Any]:
     """Return wizard decisions only, excluding credentials and runtime objects."""
+    from core.custom_probe import CustomProbeConfig, parse_custom_probe_config
+
     result: dict[str, Any] = {}
     for key, value in user_data.items():
         if key in _SECRET_KEYS or key in _RUNTIME_KEYS:
+            continue
+        if key == "custom_probe" and isinstance(value, CustomProbeConfig):
+            # Persist the source, not parser metadata or an extensible policy.
+            # Its policy contains frozensets, which are not checkpoint JSON.
+            try:
+                validated = parse_custom_probe_config(value.config_text)
+            except ValueError as exc:
+                raise FirmwareWorkflowError(f"Custom probe cannot be saved: {exc}") from exc
+            result[key] = {"config_text": validated.config_text}
             continue
         try:
             result[key] = _jsonable(value)
         except (TypeError, ValueError):
             # Runtime helpers are reconstructed from validated persisted facts.
             continue
+    return result
+
+
+def restore_wizard_data(saved: Mapping[str, Any]) -> dict[str, Any]:
+    """Reconstruct custom probe input without changing checkpoint evidence."""
+    from core.custom_probe import (
+        GuidedCustomProbeSettings, parse_custom_probe_config,
+    )
+    from core.probe_configuration import normalize_probe_kind, PROBE_KIND_CUSTOM
+
+    result = dict(saved)
+    if normalize_probe_kind(result.get("probe_kind") or result.get("probe")) != PROBE_KIND_CUSTOM:
+        return result
+    try:
+        raw = result.get("custom_probe")
+        if raw is not None:
+            if not isinstance(raw, Mapping):
+                raise ValueError("saved custom probe must contain its configuration text")
+            # Always parse with the current default policy. Saved offsets,
+            # section names and policy metadata cannot grant authority.
+            result["custom_probe"] = parse_custom_probe_config(raw.get("config_text"))
+        else:
+            # Legacy checkpoints dropped CustomProbeConfig but retained the
+            # guided settings. Revalidate that typed input before rendering.
+            settings = result.get("custom_probe_settings")
+            if not isinstance(settings, Mapping):
+                raise ValueError("saved custom probe configuration is unavailable")
+            settings = GuidedCustomProbeSettings(**dict(settings))
+            result["custom_probe_settings"] = settings
+            result["custom_probe"] = settings.to_config()
+    except (TypeError, ValueError) as exc:
+        raise FirmwareWorkflowError(f"Saved custom probe rejected: {exc}") from exc
     return result
 
 

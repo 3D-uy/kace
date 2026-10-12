@@ -35,6 +35,73 @@ def virtual(text):
 
 
 @pytest.mark.parametrize("kind", PROBES)
+@pytest.mark.parametrize("minimum,offset,valid", [
+    ("0.5", "0", False), ("0", "0", True), ("-2", "0", True),
+    ("0.5", "1", True), ("0", "9999", False), ("nan", "1", False),
+    ("0", "nan", False),
+])
+def test_virtual_trigger_must_fit_effective_z_limits(base, kind, minimum, offset, valid):
+    text = re.sub(r"(?m)^position_min:.*$", "position_min: " + minimum,
+                  virtual(base))
+    text += "\n" + PROBES[kind].replace("z_offset: 1", "z_offset: " + offset)
+    text += "# PROBE_CALIBRATE\n"
+    errors = validate_configuration_plan(plan(text)).errors
+    assert ("homing-z-geometry" in {error.code for error in errors}) is not valid
+
+
+@pytest.mark.parametrize("kind", PROBES)
+@pytest.mark.parametrize("minimum,maximum,offset,valid", [
+    (None, "250", "0", True), (None, "250", "-0.1", False),
+    ("0.5", "250", "0.5", True), ("0", "250", "250", True),
+    ("0", "nan", "1", False), ("0", "inf", "1", False),
+    ("250", "250", "250", False), ("251", "250", "250", False),
+])
+def test_virtual_trigger_default_minimum_and_range_boundaries(
+        base, kind, minimum, maximum, offset, valid):
+    def limits(match):
+        body = re.sub(r"(?m)^position_min:.*\n", "", match.group())
+        body = re.sub(r"(?m)^position_max:.*$", "position_max: " + maximum, body)
+        if minimum is not None:
+            body += "position_min: " + minimum + "\n"
+        return body
+    text = re.sub(r"(?ms)^\[stepper_z\].*?(?=^\[|\Z)", limits, virtual(base))
+    text += "\n" + PROBES[kind].replace("z_offset: 1", "z_offset: " + offset)
+    text += "# PROBE_CALIBRATE\n"
+    errors = validate_configuration_plan(plan(text)).errors
+    assert ("homing-z-geometry" in {error.code for error in errors}) is not valid
+
+
+@pytest.mark.parametrize("noop", [False, True])
+def test_invalid_included_probe_offset_blocks_publication_and_restart(base, tmp_path, noop):
+    generated = virtual(base) + "\n" + PROBES["probe"] + "# PROBE_CALIBRATE\n"
+    remote = {"printer.cfg": (generated + "\n[include user.cfg]\n").encode(),
+              "user.cfg": b"[include limits.cfg]\n",
+              "limits.cfg": b"[stepper_z]\nposition_min: 0.5\n[probe]\nz_offset: 0\n"}
+    if noop:
+        remote.update({a.remote_name: a.content for a in plan(generated, remote).artifacts})
+        assert not plan(generated, remote).changed_artifacts
+    transport = FakeTransport(remote.copy())
+    result = ConfigDeploymentTransaction(transport, generated.encode(), None,
+        activation="firmware", confirm=lambda _: True, verify_existing_ready=noop,
+        snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
+    assert result.state == ConfigTransactionState.PRECONDITION_FAILED
+    assert transport.files == remote
+    assert not any(call[0] in {"upload", "delete", "restart"} for call in transport.calls)
+
+
+def test_invalid_probe_homing_generation_writes_no_artifacts(tmp_path):
+    from core.exceptions import GenerationError
+    parsed = _parsed(bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"})
+    user = _user(probe="BLTouch", probe_x_offset="-38", probe_y_offset="0",
+                 z_position_min="0.5", z_position_endstop="0.5")
+    with pytest.raises(GenerationError, match="probe z_offset within"):
+        generate_config(parsed, user, output_path=str(tmp_path / "printer.cfg"), verbose=False)
+    assert list(tmp_path.iterdir()) == []
+    user["z_position_min"] = "0"
+    assert generate_config(parsed, user, output_path=str(tmp_path / "printer.cfg"), verbose=False)
+
+
+@pytest.mark.parametrize("kind", PROBES)
 @pytest.mark.parametrize("safe", [False, True])
 def test_virtual_homing_with_probe_remains_valid(base, kind, safe):
     text = virtual(base) + "\n" + PROBES[kind] + MESH + (SAFE if safe else "") + "# PROBE_CALIBRATE\n"

@@ -9,6 +9,10 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 ## [0.9.4-rc.3] - 2026-10-03
 
+- Reject probe-based Z homing when its trigger offset falls outside the effective
+  travel limits, before publication or restart; preserve explicit geometry.
+- Preserve and revalidate custom-probe input when resuming pending installation,
+  including recovery of older guided-probe checkpoints.
 - Retain bounded Linux system diagnostics across reboots; configure journald before package installation and stop on activation failure or a conflicting storage override.
 - Select custom-probe inputs from the effective board/socket and driver choices;
   prioritize declared sensor and replaced Z-endstop inputs, with expansion aliases
