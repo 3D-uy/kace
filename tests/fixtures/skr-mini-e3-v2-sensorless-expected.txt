@@ -114,6 +114,9 @@ max_temp: 130                                   # Maximum safe temperature
 # --------------------------------------------------
 # TMC Drivers
 # --------------------------------------------------
+# Commented options keep Klipper defaults; uncomment to customize.
+# Other positive stealthchop_threshold values use stealthChop below that speed (mm/s) and spreadCycle above.
+# Prefer one mode for all speeds; switching modes during motion may give poor results.
 
 [tmc2209 stepper_x]
 uart_pin: PC11                                  # UART communication pin
@@ -122,6 +125,9 @@ uart_address: 0
 diag_pin: ^PC0
 driver_sgthrs: 255
 run_current: 0.580                              # motor current (A) --- manual configuration --- (check motor specs)
+# interpolate: True                             # True: interpolate to 256 microsteps; False: use configured microsteps
+# hold_current: 0.580                           # Standstill current (A RMS); commented: follow run_current
+# stealthchop_threshold: 0                      # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 
 [tmc2209 stepper_y]
 uart_pin: PC11                                  # UART communication pin
@@ -130,18 +136,27 @@ uart_address: 2
 diag_pin: ^PC1
 driver_sgthrs: 255
 run_current: 0.580                              # motor current (A) --- manual configuration --- (check motor specs)
+# interpolate: True                             # True: interpolate to 256 microsteps; False: use configured microsteps
+# hold_current: 0.580                           # Standstill current (A RMS); commented: follow run_current
+# stealthchop_threshold: 0                      # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 
 [tmc2209 stepper_z]
 uart_pin: PC11                                  # UART communication pin
 tx_pin: PC10                                    # UART TX pin
 uart_address: 1
 run_current: 0.580                              # motor current (A) --- manual configuration --- (check motor specs)
+# interpolate: True                             # True: interpolate to 256 microsteps; False: use configured microsteps
+# hold_current: 0.580                           # Standstill current (A RMS); commented: follow run_current
+# stealthchop_threshold: 0                      # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 
 [tmc2209 extruder]
 uart_pin: PC11                                  # UART communication pin
 tx_pin: PC10                                    # UART TX pin
 uart_address: 3
 run_current: 0.650                              # motor current (A) --- manual configuration --- (check motor specs)
+# interpolate: True                             # True: interpolate to 256 microsteps; False: use configured microsteps
+# hold_current: 0.650                           # Standstill current (A RMS); commented: follow run_current
+# stealthchop_threshold: 0                      # 0: spreadCycle (torque/accuracy); 999999: stealthChop (quieter)
 
 # --------------------------------------------------
 # EXP1 / EXP2 Pinout

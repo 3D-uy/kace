@@ -492,25 +492,59 @@ class TestGenerateConfigZMotors(unittest.TestCase):
         self.assertIn("[stepper_z3]", output)
 
     def test_two_motors_z_tilt_template_comment_present(self):
-        """With z_motors='2', the z_tilt commented template block must be present."""
+        """Two Z motors with a probe receive the optional z_tilt example."""
         parsed = _parsed(
-            stepper_z1={"step_pin": "PF1", "dir_pin": "PF2", "enable_pin": "!PF3"}
+            stepper_z1={"step_pin": "PF1", "dir_pin": "PF2", "enable_pin": "!PF3"},
+            bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"},
         )
-        output = _generate(parsed, _user(z_motors="2"))
+        output = _generate(parsed, _user(z_motors="2", probe="BLTouch"))
         self.assertIn("z_tilt", output)
 
     def test_corexy_four_motors_quad_gantry_comment_present(self):
-        """CoreXY + z_motors >= 3 must emit the quad_gantry_level comment block."""
+        """CoreXY with four Z motors and a probe receives the optional QGL example."""
         parsed = _parsed(
             stepper_z1={"step_pin": "PF1", "dir_pin": "PF2", "enable_pin": "!PF3"},
             stepper_z2={"step_pin": "PG1", "dir_pin": "PG2", "enable_pin": "!PG3"},
             stepper_z3={"step_pin": "PH1", "dir_pin": "PH2", "enable_pin": "!PH3"},
+            bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"},
         )
         output = _generate(
             parsed,
-            _user(kinematics="corexy", z_motors="4"),
+            _user(kinematics="corexy", z_motors="4", probe="BLTouch"),
         )
         self.assertIn("quad_gantry_level", output)
+
+    def test_leveling_examples_follow_selected_probe_and_z_motors(self):
+        """Board probe pins alone must not advertise automatic leveling."""
+        custom = parse_custom_probe_config(
+            "[probe]\npin: ^PB8\nx_offset: -12\ny_offset: 6\nz_offset: 0\n"
+        )
+        for kinematics in ("cartesian", "corexy"):
+            for motors in (1, 2, 3, 4):
+                for probe in ("None", "BLTouch", "CR-Touch", "Inductive", "Custom Probe"):
+                    with self.subTest(kinematics=kinematics, motors=motors, probe=probe):
+                        parsed = _parsed(
+                            bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"},
+                            probe={"sensor_pin": "^PB8"},
+                        )
+                        for index, port in enumerate(("PF", "PG", "PH"), start=1):
+                            if index < motors:
+                                parsed[f"stepper_z{index}"] = {
+                                    "step_pin": f"{port}1", "dir_pin": f"{port}2",
+                                    "enable_pin": f"!{port}3",
+                                }
+                        output = _generate(parsed, _user(
+                            kinematics=kinematics, z_motors=str(motors),
+                            probe=probe, custom_probe=custom,
+                        ))
+                        has_probe = probe != "None"
+                        qgl = kinematics == "corexy" and motors == 4
+                        self.assertEqual("# [z_tilt]" in output, has_probe and motors >= 2 and not qgl)
+                        self.assertEqual("# [quad_gantry_level]" in output, has_probe and qgl)
+                        self.assertNotIn("\n[z_tilt]", output)
+                        self.assertNotIn("\n[quad_gantry_level]", output)
+                        if motors > 1:
+                            self.assertIn(f"[stepper_z{motors - 1}]", output)
 
 
 # ── generate_config() — TMC driver branch ────────────────────────────────────
@@ -994,9 +1028,10 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
         from core.translations import set_lang, get_lang
         orig_lang = get_lang()
         parsed = _parsed(
-            stepper_z1={"step_pin": "PF1", "dir_pin": "PF2", "enable_pin": "!PF3"}
+            stepper_z1={"step_pin": "PF1", "dir_pin": "PF2", "enable_pin": "!PF3"},
+            bltouch={"sensor_pin": "^PB8", "control_pin": "PB9"},
         )
-        user = _user(z_motors="2")
+        user = _user(z_motors="2", probe="BLTouch")
         try:
             set_lang("Español")
             output = _generate(parsed, user)
