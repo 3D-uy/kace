@@ -112,6 +112,41 @@ def test_advanced_selection_is_revalidated_against_new_consumer():
     assert {k: v for k, v in user.items() if k != "board_parsed"} == {k: v for k, v in before.items() if k != "board_parsed"}
 
 
+@pytest.mark.parametrize("new_aliases", ["", "EXP1_1=PB11", "RENAMED=PB10"])
+def test_advanced_declaration_change_retries_even_when_original_gpio_remains_free(new_aliases, capsys):
+    board = {"probe": {"pin": "PB8"}, "board_pins": {"aliases": "EXP1_1=PB10"}}
+    user = context(board)
+    user.update(custom_probe_pin="PB9", custom_probe_pullup=True, custom_probe_inverted=True)
+    previous_selection = {key: value for key, value in user.items() if key != "board_parsed"}
+    count = 0
+    def choose(*args, **kwargs):
+        nonlocal count
+        count += 1
+        if count == 1:
+            return "__advanced__"
+        assert any(choice["value"] == "PB10" and "EXP1_1" in choice["name"]
+                   for choice in kwargs["choices"])
+        board["board_pins"]["aliases"] = new_aliases
+        # Allocation alone cannot detect removal/remapping of a menu declaration.
+        assert sensors.make_pin_validator_with_collision_check(user, for_custom_probe=True)("PB10") is True
+        return "PB10"
+    with patch.object(sensors, "autocomplete_select", side_effect=choose):
+        assert sensors._step_custom_probe_pin(user) == "__retry__"
+    assert {key: value for key, value in user.items() if key != "board_parsed"} == previous_selection
+    from core.translations import t
+    assert t("wizard.custom_probe_input_changed") in capsys.readouterr().out
+
+
+def test_advanced_unchanged_declaration_can_be_selected():
+    board = {"probe": {"pin": "PB8"}, "board_pins": {"aliases": "EXP1_1=PB10"}}
+    user = context(board)
+    with patch.object(sensors, "autocomplete_select", side_effect=["__advanced__", "PB10"]):
+        assert sensors._step_custom_probe_pin(user) == "done"
+    assert user["custom_probe_pin"] == "PB10"
+    assert user["custom_probe_pullup"] is False
+    assert user["custom_probe_inverted"] is False
+
+
 def test_manual_selection_after_compact_menu_uses_custom_transition_and_explicit_modifiers():
     board = {"stepper_z": {"endstop_pin": "!PB8"}}
     user = context(board)

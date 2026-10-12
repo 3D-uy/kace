@@ -237,6 +237,7 @@ def _step_custom_probe_pin(user_data):
         except (GenerationError, PinAliasError):
             candidates, advanced = [], []
         selected_candidate = None
+        selected_advanced = None
         answer = "__manual__"
         if candidates or advanced:
             choices = [{"name": f"{item['name']} — {item['pin']}", "value": item["pin"]}
@@ -263,6 +264,7 @@ def _step_custom_probe_pin(user_data):
                     raise WizardExit()
                 if answer == _BACK:
                     continue
+                selected_advanced = next((item for item in advanced if item[1] == answer), None)
             else:
                 selected_candidate = next((item for item in candidates if item["pin"] == answer), None)
         if answer == "__manual__":
@@ -281,6 +283,9 @@ def _step_custom_probe_pin(user_data):
             print(f"\n[!] {validation}\n")
             return "__retry__"
         if selected_candidate is not None and selected_candidate not in _get_probe_input_candidates(user_data):
+            print(f"\n[!] {t('wizard.custom_probe_input_changed')}\n")
+            return "__retry__"
+        if selected_advanced is not None and selected_advanced not in _get_unused_pins(user_data, for_custom_probe=True):
             print(f"\n[!] {t('wizard.custom_probe_input_changed')}\n")
             return "__retry__"
         base_pin, pullup, inverted = _split_probe_pin_modifiers(value)
