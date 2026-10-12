@@ -93,6 +93,7 @@ def test_relaunch_without_seed_preserves_config_and_revision(shell, tmp_path, po
         assert "RESOLVED:true:printer:21:true:true:on:false:1" in result.stdout
         assert config.read_bytes() == original_config
         assert state_path.read_bytes() == original_state
+        assert not list(tmp_path.rglob("*.kace-power-backup.*"))
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
@@ -104,7 +105,6 @@ def test_relaunch_preserves_saved_formatting_and_extra_metadata(shell, tmp_path,
     result = resume(shell, config, home)
     assert result.returncode == 0, result.stdout + result.stderr
     assert state_path.read_bytes() == original
-        assert not list(tmp_path.rglob("*.kace-power-backup.*"))
 
 
 INVALID_STATES = [
