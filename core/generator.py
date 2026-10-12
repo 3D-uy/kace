@@ -23,6 +23,7 @@ from core.probe_configuration import (
     resolve_probe_configuration,
     selected_bltouch_flags,
     validate_bltouch_flags,
+    validate_probe_homing_geometry,
     selected_bltouch_hardware_options,
     validate_bltouch_hardware_options,
 )
@@ -541,6 +542,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     validate_probe_sampling(rendered_sections, expected=pins_ctx['_bltouch_sampling'])
     validate_motion_timing(rendered_sections)
     validate_homing_options(rendered_sections)
+    validate_probe_homing_geometry(rendered_sections)
     validate_primary_extruder_options(rendered_sections)
     validate_bed_circuit(rendered_sections, required=True)
     from core.board_auxiliary import validate_replicape_platform

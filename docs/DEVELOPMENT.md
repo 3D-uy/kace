@@ -54,6 +54,12 @@ or user-selected explicit directions remain active; an ambiguous automatic
 physical direction requires a minimum/maximum choice. Existing destination and
 user-include overrides retain their ownership and are checked by the effective
 configuration review, which rejects invalid ranges and contradictory directions.
+For probe-based Z homing, the effective probe `z_offset` must also lie within
+the Z travel limits (`position_min` defaults to zero). Generation and deployment
+review reject an incompatible range before publishing files or restarting Klipper;
+explicit profile/user limits are not silently adjusted. Custom-probe checkpoints
+retain the original raw block and reparse it when resuming; older guided checkpoints
+reconstruct and validate their saved settings before generation.
 
 Custom-probe input selection uses the selected board/socket assignments and the
 same reviewed TMC projection as generation. Commented examples of other drivers

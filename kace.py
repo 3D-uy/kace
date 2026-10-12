@@ -142,6 +142,7 @@ from core.firmware_workflow import (
     checkpoint_revision,
     extract_mcu_serial,
     load_checkpoint,
+    restore_wizard_data,
     transition_checkpoint,
     verify_reappeared_mcu,
     write_checkpoint,
@@ -396,7 +397,10 @@ def main():
     # always reconstructed or revalidated.
     user_data = {"make_command": _make_command}
     if workflow_checkpoint is not None and resume_action != "new":
-        user_data.update(workflow_checkpoint.get("wizard_data") or {})
+        try:
+            user_data.update(restore_wizard_data(workflow_checkpoint.get("wizard_data") or {}))
+        except FirmwareWorkflowError as exc:
+            _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc)))
         user_data["make_command"] = _make_command
         user_data["workflow_checkpoint"] = workflow_checkpoint
         if resume_action == "compile":
