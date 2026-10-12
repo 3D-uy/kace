@@ -9,6 +9,8 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 ## [0.9.4-rc.3] - 2026-10-03
 
+- Preserve verified relay settings when bootstrap is relaunched after its boot
+  options were cleaned up; reject inconsistent saved state before file changes.
 - Resolve UART/SPI wiring by reviewed removable-driver socket when an official
   board profile uses another TMC chip example, including SKR 1.4 Turbo with Z1
   connected to E1. Cross-model mappings still require explicit motor currents.

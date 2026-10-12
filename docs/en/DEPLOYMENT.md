@@ -271,6 +271,16 @@ their adjacent `.kace-power-backup.*` backups. It reports prior absence or each
 backup path and requires manual recovery when bytes differ, without restarting
 Moonraker under a false restoration claim.
 
+After successful installation removes `kace-bootstrap.txt`, a later bootstrap
+launch recovers the complete versioned relay settings from `power.json` when no
+explicit relay choice was supplied. It verifies the active managed block before
+creating backups or changing configuration, and leaves that block in place.
+Missing, partial, legacy or inconsistent saved settings require manual recovery;
+they must not silently disable a previously configured relay. An explicit
+`POWER_RELAY=false` in the boot options still requests disabling the managed
+device. A fresh host without saved settings or any power section defaults to no
+relay. This does not restore an already missing block or qualify physical power.
+
 AVRDUDE consumes the exact bytes rehashed after operator confirmation through
 stdin (`flash:w:-:i`); it never reopens the staged filename. Legacy Octopus v1.1
 F446/F429 verification accepts only the pinned Kconfig model spellings for those
