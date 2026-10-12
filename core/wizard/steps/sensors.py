@@ -64,10 +64,11 @@ def _probe_allocation_sections(user_data):
                 raise GenerationError("The selected Z motor count is invalid.")
             targets = ["stepper_x", "stepper_y", "stepper_z", "extruder"]
             targets += [f"stepper_z{i}" for i in range(1, count)]
-            missing = [f"{model} {target}" for target in targets
-                       if target in parsed and f"{model} {target}" not in selected]
-            if missing:
-                raise GenerationError("Selected TMC pin map is incomplete: " + ", ".join(missing))
+            # Generation permits a partial native TMC set (for example, an
+            # X/Y SPI chain alongside ordinary Z/extruder drivers). Keep that
+            # contract; a wholly unknown selected circuit still fails closed.
+            if not selected and any(target in parsed for target in targets):
+                raise GenerationError("Selected TMC pin map is incomplete.")
     except (TypeError, ValueError) as exc:
         raise GenerationError("The selected driver pin map is invalid.") from exc
     sections = {name: options for name, options in parsed.items()
