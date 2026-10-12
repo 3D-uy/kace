@@ -24,6 +24,8 @@ class TestPortabilityGuard(unittest.TestCase):
             "/" + "home/user.name/repo",
             "/" + "Desktop/fixture.txt",
             "." + "Documents.fixture.txt",
+            "." + "tool-cache/attachments/fixture.png",
+            "." + "tool-cache" + separator + "attachments" + separator + "fixture.png",
         )
         for sample in samples:
             with self.subTest(sample=sample):

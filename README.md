@@ -90,7 +90,7 @@ It keeps the existing pinned reference and may differ from the current source.
 Requires `curl` and `sha256sum`. Review the script before running it.
 
 ```bash
-KACE_COMMIT='6b439b1e88f7ca69005394dd5be236b7ff1a4905'
+KACE_COMMIT='d55efce4c34c75bc558bc03478cb3fe64bb3afa3'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
@@ -200,3 +200,7 @@ Report bugs and suggest improvements through [KACE issues](https://github.com/3D
 KACE is open source under the [GNU GPL v3](LICENSE).
 
 Source corrections: Moonraker redirects are rejected. See [development contracts](docs/DEVELOPMENT.md) for remote-operation and validation limits. The downloadable candidate is unchanged until a new release is prepared.
+
+## Restart diagnostics
+
+New bootstrap runs configure a persistent Linux journal with a 64 MiB budget, seven-day retention and 30-second synchronization. After an interrupted boot, use `journalctl -b -1`; records not flushed before a hard lock or power loss can still be missing. This does not diagnose or fix the cause of a host freeze.

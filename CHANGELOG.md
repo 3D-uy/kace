@@ -9,6 +9,7 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 ## [0.9.4-rc.3] - 2026-10-03
 
+- Retain bounded Linux system diagnostics across reboots; configure journald before package installation and stop on activation failure or a conflicting storage override.
 - Select custom-probe inputs from the effective board/socket and driver choices;
   prioritize declared sensor and replaced Z-endstop inputs, with expansion aliases
   in an advanced menu. Keep actual pin collisions and firmware reservations blocked.

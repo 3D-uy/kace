@@ -88,7 +88,7 @@ Conserva la referencia fijada existente y puede diferir del código actual.
 Requiere `curl` y `sha256sum`. Revisa el script antes de ejecutarlo.
 
 ```bash
-KACE_COMMIT='6b439b1e88f7ca69005394dd5be236b7ff1a4905'
+KACE_COMMIT='d55efce4c34c75bc558bc03478cb3fe64bb3afa3'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
@@ -198,3 +198,7 @@ Reporta errores y propone mejoras mediante los [issues de KACE](https://github.c
 KACE es software open source bajo la [GNU GPL v3](../../LICENSE).
 
 Correcciones en fuente: se rechazan redirecciones de Moonraker. Consultá los [contratos de desarrollo](../DEVELOPMENT.md) para operaciones remotas y límites de validación. El candidato descargable no cambia hasta preparar una nueva release.
+
+## Diagnóstico de reinicios
+
+Las nuevas ejecuciones de bootstrap configuran un diario persistente de Linux con un presupuesto de 64 MiB, retención de siete días y sincronización cada 30 segundos. Tras un arranque interrumpido, usa `journalctl -b -1`; los registros no sincronizados antes de un bloqueo o corte pueden perderse. Esto no diagnostica ni corrige la causa de un bloqueo del host.

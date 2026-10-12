@@ -281,3 +281,17 @@ Regenerate the runtime lock before the development lock, whose constraints use
 `requirements.txt`. Shared versions, including wcwidth, must agree; the
 `test_dependency_locks.py` regression enforces this. Dependency updates must be
 validated on Python 3.11 and by installing the hashed locks in clean environments.
+
+## Persistent restart diagnostics
+
+Bootstrap owns `/etc/systemd/journald.conf.d/60-kace-diagnostics.conf` and enables
+it before package installation. It sets persistent storage, a 64 MiB disk budget,
+128 MiB free-space reserve, seven-day retention and 30-second synchronization.
+Only systemd-journald is restarted; flushing/synchronization failures and a later
+administrator override of Storage stop bootstrap with `SYSTEM_JOURNAL`. Existing
+unowned files at that path are not replaced. The regression uses fake services
+and temporary directories: `tests/regression/test_bootstrap_journal.py`.
+
+This captures future boots only and cannot recover volatile history or guarantee
+the last records before a hard lock/power loss. Confirm persistence across a real
+reboot separately during hardware E2E. `journalctl -b -1` reads the prior boot.
