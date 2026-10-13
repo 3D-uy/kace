@@ -43,10 +43,18 @@ Its terminal wizard prepares MCU firmware where supported and takes you through 
 
 The terminal wizard offers **English, Spanish and Portuguese**, with **Beginner** and **Advanced** modes.
 
-> **Hardware selection** → **Guided configuration** → **Generate Klipper config**<br>
-> → **Build MCU firmware** → **Review** → **Apply** → **Verify**
+> **Hardware selection** → **Guided configuration** → **Check geometry**<br>
+> → **Firmware steps** → **Generate Klipper config** → **Review** → **Apply** → **Verify**
 
 Firmware steps depend on the selected supported target and workflow.
+
+With probe-based Z homing, KACE checks that the probe's trigger offset lies inside
+the Z travel limits before preparing firmware. An incompatible imported minimum
+requires an explicit review; KACE does not silently change it or invent a measured
+offset. If firmware is already verified in an unfinished installation, run `kace`
+and choose **Review Z minimum** to correct the saved minimum while preserving the
+firmware evidence. Continue the configuration and verification steps afterward;
+this edit does not complete the installation. See [recovery details](docs/DEVELOPMENT.md).
 
 The multi-Z review compares mechanics and assigned sockets side by side (with wrapping on narrow terminals). Choose Confirm and continue, Edit additional motors, or Back explicitly. Confirmation keeps the choices in the wizard; it does not write the printer configuration.
 

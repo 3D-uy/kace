@@ -43,10 +43,18 @@ Su asistente de terminal prepara firmware MCU cuando está admitido y te acompa�
 
 El asistente de terminal ofrece **español, inglés y portugués**, con modos **Principiante** y **Avanzado**.
 
-> **Elegir hardware** → **Configuración guiada** → **Generar configuración Klipper**<br>
-> → **Compilar firmware MCU** → **Revisar** → **Aplicar** → **Verificar**
+> **Elegir hardware** → **Configuración guiada** → **Comprobar geometría**<br>
+> → **Pasos de firmware** → **Generar configuración Klipper** → **Revisar** → **Aplicar** → **Verificar**
 
 Los pasos de firmware dependen del destino admitido y del flujo elegido.
+
+Con homing Z mediante sonda, KACE comprueba que su offset de activación esté dentro
+del recorrido Z antes de preparar firmware. Un mínimo importado incompatible
+requiere revisión explícita; KACE no lo cambia silenciosamente ni inventa un
+offset medido. Si el firmware ya está verificado en una instalación inconclusa,
+ejecuta `kace` y elige **Revisar mínimo de Z** para corregir el mínimo guardado
+conservando la evidencia de firmware. Continúa después la configuración y las
+verificaciones; esa edición no completa la instalación. Ver [recuperación (EN)](../DEVELOPMENT.md).
 
 <!-- Insertar aquí una captura real del asistente/revisión: docs/assets/kace-wizard.png.
      Incluir texto alternativo y la versión de KACE capturada. No usar un mockup como captura del producto. -->

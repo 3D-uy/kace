@@ -11,7 +11,6 @@ from core.capabilities import (
     validate_kinematics,
 )
 from core.profile_values import (
-    ValueProvenance,
     require_resolved_homing_values,
     require_resolved_safety_values,
     resolve_generation_values,
@@ -19,6 +18,7 @@ from core.profile_values import (
 )
 from core.probe_configuration import (
     apply_probe_compatibility_context,
+    apply_probe_homing_defaults,
     is_probe_virtual_endstop,
     resolve_probe_configuration,
     selected_bltouch_flags,
@@ -300,13 +300,7 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     probe_configuration = resolve_probe_configuration(user_ctx)
     apply_probe_compatibility_context(user_ctx, probe_configuration)
     user_ctx["probe_configuration"] = probe_configuration
-    if (
-        user_ctx.get("probe_uses_virtual_z_endstop")
-        and value_provenance.get("z_position_min") == ValueProvenance.SAFE_DEFAULT.value
-    ):
-        # A small negative calibration range is the safe contextual default for
-        # probe-based Z homing. Never replace an explicit profile/user value.
-        user_ctx["z_position_min"] = "-2"
+    apply_probe_homing_defaults(user_ctx, value_provenance)
 
     normalize_and_validate_configuration(user_ctx)
     validate_display_selection(user_ctx, parsed_data)

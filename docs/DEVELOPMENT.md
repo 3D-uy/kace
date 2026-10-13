@@ -57,7 +57,20 @@ configuration review, which rejects invalid ranges and contradictory directions.
 For probe-based Z homing, the effective probe `z_offset` must also lie within
 the Z travel limits (`position_min` defaults to zero). Generation and deployment
 review reject an incompatible range before publishing files or restarting Klipper;
-explicit profile/user limits are not silently adjusted. Custom-probe checkpoints
+explicit profile/user limits are not silently adjusted. The wizard checks this
+geometry after probe selection, before firmware preparation. An incompatible
+range shows the Z minimum/maximum and effective probe offset, then offers an
+explicit minimum edit; a valid profile remains unchanged. This does not measure
+or calibrate the probe offset, permit motion, or replace effective include review.
+
+An interactive pending `MCU_VERIFIED` workflow offers **Review Z minimum**;
+continuing also rechecks the saved geometry before generation. The review edits
+only the Z minimum, validates a copy, and persists an accepted change with the
+existing checkpoint's revision guard in the same state. Cancellation leaves the
+saved checkpoint unchanged. Hardware, firmware artifact, delivery and identity
+evidence are preserved, not renewed; the edit does not clear a saved error or
+establish `COMPLETE`. Generation, effective review, activation and loaded
+configuration/firmware verification remain required. Custom-probe checkpoints
 retain the original raw block and reparse it when resuming; older guided checkpoints
 reconstruct and validate their saved settings before generation.
 

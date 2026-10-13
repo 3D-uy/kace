@@ -10,6 +10,13 @@ Existen configuración guiada, publicación revisada, recuperación persistente,
 
 El mapeo revisado de conectores TMC extraíbles cubre diez perfiles exactos; los ajustes eléctricos entre modelos siguen requiriendo revisión del usuario. Ver [alcance (EN)](../TMC_SOCKET_MAPPING.md).
 
+La geometría Z de la sonda se revisa antes de preparar firmware; los flujos
+inconclusos con firmware verificado pueden revisar su mínimo Z guardado sin
+descartar esa evidencia. La calificación aún debe comprobar rechazo temprano,
+cancelación, corrección guardada y activación/verificación completas sobre el
+candidato exacto; estas comprobaciones no calibran la sonda ni completan solas
+una instalación.
+
 ## 🧭 Prioridades
 
 | Prioridad | Resultado requerido | Referencia |

@@ -92,6 +92,10 @@ from core.wizard.steps.software import (
     _step_display,
     _step_web_ui,
 )
+from core.wizard.steps.probe_homing import (
+    review_probe_homing_geometry,
+    validate_wizard_probe_homing_geometry,
+)
 
 
 def discover_mcu():
@@ -172,7 +176,7 @@ def run_wizard(user_data_arg=None):
     New step order (all hardware decisions first):
       board → z_motors → z_socket_assignment → driver_type → driver_mode
       → printer_profile → profile_review → kinematics → x/y/z_volume
-      → probe → probe_offsets → hotend_therm → bed_therm → display → web_ui
+      → probe → probe_offsets → probe_homing → hotend_therm → bed_therm → display → web_ui
 
     The wizard now also handles Z socket wiring and display setup internally,
     so kace.py only handles file generation and deployment after the wizard
@@ -273,6 +277,7 @@ def run_wizard(user_data_arg=None):
         "custom_probe_offsets",
         "bltouch_pins",
         "probe_offsets",
+        "probe_homing",
         "hotend_therm",
         "bed_therm",
         "display",
@@ -411,11 +416,11 @@ def run_wizard(user_data_arg=None):
         },
         "custom_probe_review": {
             "prompt": lambda ud: _step_custom_probe_review(ud),
-            "next": lambda ans, ud: "hotend_therm",
+            "next": lambda ans, ud: "probe_homing",
         },
         "custom_probe_offsets": {
             "prompt": lambda ud: _step_custom_probe_offsets(ud),
-            "next":   lambda ans, ud: "hotend_therm"
+            "next":   lambda ans, ud: "probe_homing"
         },
         "bltouch_pins": {
             "prompt": lambda ud: _step_bltouch_pins(ud),
@@ -423,6 +428,9 @@ def run_wizard(user_data_arg=None):
         },
         "probe_offsets": {
             "prompt": lambda ud: _step_probe_offsets(ud)
+        },
+        "probe_homing": {
+            "prompt": lambda ud: "done" if review_probe_homing_geometry(ud) else _BACK,
         },
         "hotend_therm": {
             "visible": lambda ud: "hotend_thermistor" not in ud.get("_authoritative", set()),

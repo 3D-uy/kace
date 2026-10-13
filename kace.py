@@ -6,6 +6,7 @@ __version__ = _read_version()
 import os
 import sys
 import time
+from copy import deepcopy
 
 # ── Normalize stdout/stderr to UTF-8 (critical for Windows) ──
 try:
@@ -212,6 +213,8 @@ def _resume_firmware_workflow():
     }:
         choices.append({"name": t("firmware.resume.obtain"), "value": "obtain"})
         choices.append({"name": t("firmware.resume.verify"), "value": "verify"})
+    if state is FirmwareWorkflowState.MCU_VERIFIED:
+        choices.append({"name": t("firmware.resume.review_z"), "value": "review_z"})
     if get_mode() == "Advanced":
         choices.append({"name": t("firmware.resume.compile"), "value": "compile"})
     choices.append({"name": t("firmware.resume.new"), "value": "new"})
@@ -403,6 +406,13 @@ def main():
             _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc)))
         user_data["make_command"] = _make_command
         user_data["workflow_checkpoint"] = workflow_checkpoint
+        if resume_action == "review_z" and FirmwareWorkflowState(
+            workflow_checkpoint["state"]
+        ) is not FirmwareWorkflowState.MCU_VERIFIED:
+            _finish(failed(
+                WorkflowOutcome.PRECONDITION_FAILED,
+                "Z minimum review requires the MCU_VERIFIED checkpoint.",
+            ))
         if resume_action == "compile":
             workflow_checkpoint = transition_checkpoint(
                 workflow_checkpoint,
@@ -441,6 +451,8 @@ def main():
             _finish(cancelled("Wizard cancelled."))
         except (KeyboardInterrupt, EOFError):
             _finish(cancelled("Wizard interrupted."))
+        except GenerationError as exc:
+            _finish(failed(WorkflowOutcome.GENERATION_FAILED, str(exc)))
         except ImportError as e:
             print(f"\n\033[91mERROR:\033[0m {t('kace.missing_dep', error=e)}")
             print(f"\033[93m{t('kace.missing_dep_hint')}\033[0m")
@@ -522,6 +534,38 @@ def main():
 
     time.sleep(0.5)
     print(f"\033[92m[*]\033[0m {t('kace.fetching_cfg_done', board=user_data['board'])}")
+
+    # Review printer geometry before compiling firmware or regenerating config.
+    # A saved MCU verification remains authoritative while only the selected
+    # Z minimum changes; cancellation must not publish a checkpoint revision.
+    from core.wizard.steps.probe_homing import (
+        review_probe_homing_geometry, validate_wizard_probe_homing_geometry,
+    )
+    try:
+        saved_state = FirmwareWorkflowState(workflow_checkpoint["state"]) if workflow_checkpoint else None
+        if saved_state in {None, FirmwareWorkflowState.MCU_VERIFIED}:
+            reviewed_data = deepcopy(user_data)
+            if not review_probe_homing_geometry(reviewed_data, force=resume_action == "review_z"):
+                _finish(cancelled(t("wizard.probe_homing.cancelled")))
+            validate_wizard_probe_homing_geometry(reviewed_data)
+            if reviewed_data != user_data:
+                user_data = reviewed_data
+                if workflow_checkpoint is not None:
+                    workflow_checkpoint = transition_checkpoint(
+                        workflow_checkpoint,
+                        FirmwareWorkflowState.MCU_VERIFIED,
+                        user_data=user_data,
+                        last_error=workflow_checkpoint.get("last_error", ""),
+                    )
+                    _persist_workflow(workflow_checkpoint, user_data)
+        else:
+            # Config already generated in later states is not silently replaced
+            # by a geometry edit during a retry.
+            validate_wizard_probe_homing_geometry(user_data)
+    except (WizardExit, KeyboardInterrupt, EOFError):
+        _finish(cancelled(t("wizard.probe_homing.cancelled")))
+    except GenerationError as exc:
+        _finish(failed(WorkflowOutcome.GENERATION_FAILED, str(exc)))
 
     # ==========================================
     # PHASE 2: FIRMWARE COMPILATION & DEPLOYMENT
