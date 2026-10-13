@@ -10,6 +10,12 @@ Guided configuration, reviewed publication, durable recovery, firmware identity 
 
 Reviewed removable TMC socket mapping covers ten exact source profiles; cross-model electrical settings still require user review. See [mapping scope](docs/TMC_SOCKET_MAPPING.md).
 
+Probe Z geometry is reviewed before firmware preparation; unfinished workflows
+with verified firmware can review their saved Z minimum without discarding that
+evidence. Qualification must still exercise the early rejection, cancellation,
+saved correction and full activation/verification on the exact candidate; these
+checks do not calibrate the probe or complete an installation by themselves.
+
 ## 🧭 Priorities
 
 | Priority | Required result | Reference |

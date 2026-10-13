@@ -66,6 +66,19 @@ def validate_probe_homing_geometry(sections: Mapping) -> None:
         ) from exc
 
 
+def apply_probe_homing_defaults(user_ctx: dict, value_provenance: Mapping) -> None:
+    """Apply the existing probe calibration range only to unresolved defaults."""
+    from core.profile_values import ValueProvenance
+
+    if (
+        user_ctx.get("probe_uses_virtual_z_endstop")
+        and value_provenance.get("z_position_min") == ValueProvenance.SAFE_DEFAULT.value
+    ):
+        # Preserve explicit profile/user limits. This is a pre-calibration
+        # movement allowance, not a measured probe offset.
+        user_ctx["z_position_min"] = "-2"
+
+
 def _bltouch_boolean(option: str, value: object) -> bool:
     token = str(value).strip().lower()
     if token not in ConfigParser.BOOLEAN_STATES:

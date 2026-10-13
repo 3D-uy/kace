@@ -212,6 +212,9 @@ def test_real_cli_resume_rechecks_saved_artifact_before_deployment(state, raw, r
         from tests.unit.test_fixed_pwm_beepers import board_case
         raw, board, choices = board_case(PROFILE)
         user.update(choices, board_raw_config=raw, board_parsed=board, mcu_type="stm32h743")
+        # The BX raw probe owns XY offsets; discard offsets from the unrelated base fixture.
+        user.pop("probe_x_offset", None)
+        user.pop("probe_y_offset", None)
         content = generate_config(board, choices, output_path=str(tmp_path / "good.cfg"), verbose=False)["content"]
         saved_artifact = re.sub(r"(?ms)^\[" + re.escape(reason) + r"\][^\n]*\n.*?(?=^\[|\Z)", "", content).encode()
     firmware = tmp_path / "firmware.bin"

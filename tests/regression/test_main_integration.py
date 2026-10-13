@@ -785,6 +785,294 @@ class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
                 self.assertEqual(path.read_bytes(), original)
 
 
+class TestProbeHomingCheckpointResume(_HeadlessMixin, unittest.TestCase):
+    """Review printer travel without invalidating already verified firmware."""
+
+    def _saved_checkpoint(self, state="MCU_VERIFIED", *, minimum="0.5", mode="Beginner"):
+        from core.firmware_workflow import (
+            FirmwareWorkflowState, transition_checkpoint, write_checkpoint,
+        )
+        from core.profile_values import HARDWARE_SOURCE_POLICY
+        checkpoint = TestPreparedFirmwareView._saved_checkpoint(self, state)
+        saved = dict(checkpoint["wizard_data"], z_position_min=minimum,
+                     z_position_max="250", z_position_endstop="0.5", mode=mode)
+        saved["_profile_parsed"] = {"stepper_z": {
+            "position_min": minimum, "position_max": "250", "position_endstop": "0.5",
+        }}
+        saved["hardware_source_policy"] = HARDWARE_SOURCE_POLICY
+        saved["_value_provenance"] = {"z_position_min": "PROFILE"}
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState(checkpoint["state"]),
+                                           user_data=saved, last_error="probe geometry requires review")
+        write_checkpoint(checkpoint)
+        return checkpoint
+
+    def _main_patches(self, stack, *, action="review_z", review=None):
+        from core.firmware_workflow import load_checkpoint
+        import kace
+
+        stack.enter_context(patch.dict(os.environ, {"KACE_AUTO": "0"}))
+        stack.enter_context(patch("firmware.detector.discover_mcu_hardware", return_value={}))
+        stack.enter_context(patch("kace.print_kace_banner"))
+        stack.enter_context(patch("kace.check_display_compatibility", return_value=[]))
+        stack.enter_context(patch("kace.print_summary"))
+        stack.enter_context(patch("kace.time.sleep"))
+        stack.enter_context(patch("kace.yes_no", return_value=True))
+        stack.enter_context(patch("kace.numbered_select", side_effect=[action, "none"]))
+        stack.enter_context(patch("builtins.print"))
+        generation = stack.enter_context(patch("kace.generate_config", side_effect=_write_mock_generated_config))
+        guards = {name: stack.enter_context(patch(target)) for name, target in {
+            "wizard": "kace.run_wizard", "compile": "core.firmware_wizard.run_firmware_wizard",
+            "flash": "kace.execute_firmware_deployment", "verify_mcu": "kace.verify_reappeared_mcu",
+            "manual_flash": "kace._wait_for_manual_flash", "deploy": "kace.deploy_moonraker",
+        }.items()}
+        if review is not None:
+            stack.enter_context(patch("core.wizard.steps.probe_homing.review_probe_homing_geometry",
+                                      side_effect=review))
+        revisions = []
+        persist = kace._persist_workflow
+
+        def record(checkpoint, *args, **kwargs):
+            result = persist(checkpoint, *args, **kwargs)
+            revisions.append(load_checkpoint())
+            return result
+
+        stack.enter_context(patch("kace._persist_workflow", side_effect=record))
+        return generation, guards, revisions
+
+    def test_review_z_is_offered_only_for_verified_mcu_in_both_modes(self):
+        import kace
+        for mode in ("Beginner", "Advanced"):
+            for state in ("AWAITING_FLASH", "MCU_VERIFIED", "READY_TO_DEPLOY"):
+                with self.subTest(mode=mode, state=state):
+                    self._saved_checkpoint(state, mode=mode)
+                    with patch.dict(os.environ, {"KACE_AUTO": "0"}), \
+                            patch("firmware.detector.discover_mcu_hardware", return_value={}), \
+                            patch("kace.numbered_select", return_value="continue") as select:
+                        _, action = kace._resume_firmware_workflow()
+                    self.assertEqual(action, "continue")
+                    choices = [item["value"] for item in select.call_args.kwargs["choices"]]
+                    self.assertEqual("review_z" in choices, state == "MCU_VERIFIED")
+
+    def test_review_and_continue_preserves_verified_firmware_without_repeating_wizard(self):
+        from contextlib import ExitStack
+        from core.firmware_workflow import load_checkpoint
+        import kace
+
+        for action in ("review_z", "continue"):
+            with self.subTest(action=action):
+                original = self._saved_checkpoint()
+                forces = []
+
+                def review(data, *, force=False):
+                    forces.append(force)
+                    data["z_position_min"] = "0"
+                    data["_value_provenance"]["z_position_min"] = "USER_OVERRIDE"
+                    return True
+
+                with ExitStack() as stack:
+                    generate, guards, revisions = self._main_patches(stack, action=action, review=review)
+                    with self.assertRaises(SystemExit) as exit_result:
+                        kace.main()
+                self.assertEqual(exit_result.exception.code, 0)
+                self.assertEqual(forces, [action == "review_z"])
+                self.assertEqual(revisions[0]["state"], "MCU_VERIFIED")
+                self.assertEqual(revisions[0]["sequence"], original["sequence"] + 1)
+                self.assertEqual(revisions[0]["last_error"], original["last_error"])
+                self.assertEqual(revisions[0]["wizard_data"]["z_position_min"], "0")
+                self.assertEqual(revisions[0]["wizard_data"]["_value_provenance"]["z_position_min"],
+                                 "USER_OVERRIDE")
+                for revision in revisions:
+                    self.assertEqual(revision["hardware"], original["hardware"])
+                    self.assertEqual(revision["artifact"], original["artifact"])
+                    self.assertEqual(revision["workflow_id"], original["workflow_id"])
+                generate.assert_called_once()
+                self.assertEqual(generate.call_args.args[1]["z_position_min"], "0")
+                self.assertEqual(load_checkpoint()["state"], "READY_TO_DEPLOY")
+                for guard in guards.values():
+                    guard.assert_not_called()
+
+    def test_cancelled_or_interrupted_review_preserves_checkpoint_bytes_and_sequence(self):
+        from contextlib import ExitStack
+        from core.firmware_workflow import load_checkpoint
+        import kace
+
+        for interrupted in (False, True):
+            with self.subTest(interrupted=interrupted):
+                original = self._saved_checkpoint()
+                path = Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+                before = path.read_bytes()
+
+                def cancel_review(data, *, force=False):
+                    # Even an interrupted editor must not mutate the loaded
+                    # checkpoint through nested dictionaries shared by resume.
+                    data["z_position_min"] = "0"
+                    data["_value_provenance"]["z_position_min"] = "USER_OVERRIDE"
+                    data["workflow_checkpoint"]["hardware"]["verified_serial_path"] = "changed"
+                    if interrupted:
+                        raise KeyboardInterrupt
+                    return False
+
+                with ExitStack() as stack:
+                    generate, guards, revisions = self._main_patches(stack, review=cancel_review)
+                    with self.assertRaises(SystemExit) as exit_result:
+                        kace.main()
+                self.assertEqual(exit_result.exception.code, 2)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(load_checkpoint()["sequence"], original["sequence"])
+                self.assertEqual(revisions, [])
+                generate.assert_not_called()
+                for guard in guards.values():
+                    guard.assert_not_called()
+
+    def test_unchanged_review_does_not_publish_a_new_mcu_verified_revision(self):
+        from contextlib import ExitStack
+        import kace
+
+        original = self._saved_checkpoint(minimum="0")
+        with ExitStack() as stack:
+            generate, guards, revisions = self._main_patches(stack, review=lambda data, **kwargs: True)
+            with self.assertRaises(SystemExit) as exit_result:
+                kace.main()
+        self.assertEqual(exit_result.exception.code, 0)
+        self.assertEqual([revision["state"] for revision in revisions],
+                         ["CONFIG_GENERATED", "READY_TO_DEPLOY"])
+        self.assertEqual(revisions[0]["sequence"], original["sequence"] + 1)
+        generate.assert_called_once()
+        for guard in guards.values():
+            guard.assert_not_called()
+
+    def test_invalid_saved_geometry_in_auto_mode_does_not_create_consent(self):
+        from contextlib import ExitStack
+        import kace
+
+        self._saved_checkpoint()
+        path = Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+        before = path.read_bytes()
+        with ExitStack() as stack:
+            generate, guards, revisions = self._main_patches(stack, action="continue")
+            stack.enter_context(patch.dict(os.environ, {"KACE_AUTO": "1"}))
+            prompt = stack.enter_context(patch("core.menu.simple_input",
+                                               side_effect=AssertionError("auto requested an edit")))
+            with self.assertRaises(SystemExit) as exit_result:
+                kace.main()
+        self.assertEqual(exit_result.exception.code, 20)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(revisions, [])
+        prompt.assert_not_called()
+        generate.assert_not_called()
+        for guard in guards.values():
+            guard.assert_not_called()
+
+    def test_invalid_wizard_bypass_is_blocked_before_new_firmware_checkpoint_or_compile(self):
+        import kace
+
+        user_data = dict(_WIZARD_USER_DATA_WITH_PARSED, mcu_type="lpc1769", mcu_hint="usb",
+                         z_position_min="0.5", z_position_max="250")
+        user_data["_value_provenance"] = {"z_position_min": "USER_OVERRIDE"}
+        with patch("kace._resume_firmware_workflow", return_value=(None, "new")), \
+                patch("kace.print_kace_banner"), \
+                patch("kace.run_wizard", return_value=user_data), \
+                patch("kace.check_display_compatibility", return_value=[]), \
+                patch("kace.time.sleep"), \
+                patch("builtins.print"), \
+                patch("kace.create_checkpoint") as create, \
+                patch("kace.generate_config") as generate, \
+                patch("core.firmware_wizard.run_firmware_wizard") as compile_firmware, \
+                patch("kace.execute_firmware_deployment") as flash:
+            with self.assertRaises(SystemExit) as exit_result:
+                kace.main()
+        self.assertEqual(exit_result.exception.code, 20)
+        self.assertFalse(Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"]).exists())
+        create.assert_not_called()
+        generate.assert_not_called()
+        compile_firmware.assert_not_called()
+        flash.assert_not_called()
+
+    def test_wizard_geometry_rejection_emits_typed_failure_before_firmware_work(self):
+        from core.exceptions import GenerationError
+        from core.workflow_outcome import WorkflowOutcome
+        import kace
+
+        message = "Probe z_offset lies outside the selected Z travel limits."
+        with patch("kace._resume_firmware_workflow", return_value=(None, "new")), \
+                patch("kace.print_kace_banner"), \
+                patch("kace.run_wizard", side_effect=GenerationError(message)), \
+                patch("kace.print_workflow_result") as outcome, \
+                patch("kace.create_checkpoint") as create, \
+                patch("kace.generate_config") as generate, \
+                patch("core.firmware_wizard.run_firmware_wizard") as compile_firmware, \
+                patch("kace.execute_firmware_deployment") as flash:
+            with self.assertRaises(SystemExit) as exit_result:
+                kace.main()
+        self.assertEqual(exit_result.exception.code, 20)
+        outcome.assert_called_once()
+        result = outcome.call_args.args[0]
+        self.assertEqual(result.outcome, WorkflowOutcome.GENERATION_FAILED)
+        self.assertEqual(result.detail, message)
+        self.assertFalse(Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"]).exists())
+        create.assert_not_called()
+        generate.assert_not_called()
+        compile_firmware.assert_not_called()
+        flash.assert_not_called()
+
+    def test_invalid_edited_geometry_is_refused_before_checkpoint_or_artifact_writes(self):
+        from contextlib import ExitStack
+        import kace
+
+        self._saved_checkpoint()
+        path = Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+        before = path.read_bytes()
+
+        def invalid_review(data, **kwargs):
+            data["z_position_min"] = "1"
+            data["_value_provenance"]["z_position_min"] = "USER_OVERRIDE"
+            return True
+
+        with ExitStack() as stack:
+            generate, guards, revisions = self._main_patches(stack, review=invalid_review)
+            with self.assertRaises(SystemExit) as exit_result:
+                kace.main()
+        self.assertEqual(exit_result.exception.code, 20)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(revisions, [])
+        generate.assert_not_called()
+        for guard in guards.values():
+            guard.assert_not_called()
+
+    def test_concurrent_checkpoint_update_is_preserved_and_blocks_generation(self):
+        from contextlib import ExitStack
+        from core.firmware_workflow import (
+            FirmwareWorkflowState, load_checkpoint, transition_checkpoint, write_checkpoint,
+        )
+        import kace
+
+        original = self._saved_checkpoint()
+
+        def review_after_concurrent_write(data, **kwargs):
+            concurrent = load_checkpoint()
+            write_checkpoint(transition_checkpoint(concurrent, FirmwareWorkflowState.MCU_VERIFIED,
+                                                  last_error="concurrent checkpoint update"))
+            data["z_position_min"] = "0"
+            data["_value_provenance"]["z_position_min"] = "USER_OVERRIDE"
+            return True
+
+        with ExitStack() as stack:
+            generate, guards, revisions = self._main_patches(stack, review=review_after_concurrent_write)
+            with self.assertRaises(SystemExit) as exit_result:
+                kace.main()
+        self.assertEqual(exit_result.exception.code, 10)
+        current = load_checkpoint()
+        self.assertEqual(current["sequence"], original["sequence"] + 1)
+        self.assertEqual(current["last_error"], "concurrent checkpoint update")
+        self.assertEqual(current["wizard_data"]["z_position_min"], "0.5")
+        self.assertEqual(current["hardware"], original["hardware"])
+        self.assertEqual(current["artifact"], original["artifact"])
+        self.assertEqual(revisions, [])
+        generate.assert_not_called()
+        for guard in guards.values():
+            guard.assert_not_called()
+
+
 class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
     """The structured terminal result must control the process exit code."""
 

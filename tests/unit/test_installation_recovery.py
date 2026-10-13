@@ -211,7 +211,8 @@ class RecoveryPresentationTests(unittest.TestCase):
             with patch('kace.load_checkpoint', return_value=checkpoint), patch('firmware.detector.discover_mcu_hardware', return_value={}), patch('kace.numbered_select', return_value='continue') as select, patch.dict(os.environ, {'KACE_AUTO': '0'}):
                 kace._resume_firmware_workflow()
             choices = select.call_args.kwargs['choices']
-            self.assertEqual([item['value'] for item in choices], ['continue', 'new'])
+            expected = ['continue', 'review_z', 'new'] if state == 'MCU_VERIFIED' else ['continue', 'new']
+            self.assertEqual([item['value'] for item in choices], expected)
             self.assertNotIn(state, select.call_args.args[0])
 
     def test_pending_workflow_is_checked_before_dashboard(self):

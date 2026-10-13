@@ -9,6 +9,11 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 ## [0.9.4-rc.3] - 2026-10-03
 
+- Review incompatible probe Z geometry in the wizard before preparing firmware,
+  with an explicit minimum edit instead of silently changing imported limits.
+- Review the saved Z minimum in pending `MCU_VERIFIED` workflows while preserving
+  firmware and identity evidence; cancellation leaves the checkpoint unchanged
+  and correction still requires configuration activation and verification.
 - Reject probe-based Z homing when its trigger offset falls outside the effective
   travel limits, before publication or restart; preserve explicit geometry.
 - Preserve and revalidate custom-probe input when resuming pending installation,

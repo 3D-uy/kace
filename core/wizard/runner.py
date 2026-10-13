@@ -43,6 +43,7 @@ PHASE_MAP = {
     "custom_probe_offsets": "Sensors",
     "bltouch_pins": "Sensors",
     "probe_offsets": "Sensors",
+    "probe_homing": "Sensors",
     "hotend_therm": "Sensors",
     "bed_therm": "Sensors",
     "display": "Software",

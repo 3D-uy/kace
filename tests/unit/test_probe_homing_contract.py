@@ -1,6 +1,7 @@
 """Probe availability is independent of the physical Z homing switch."""
 import pytest
 import re
+import copy
 
 from core.configuration_review import build_configuration_review, validate_configuration_plan
 from core.generator import generate_config
@@ -16,6 +17,171 @@ PROBES = {
 }
 MESH = "[bed_mesh]\nmesh_min: 20,20\nmesh_max: 200,200\nprobe_count: 3,3\n"
 SAFE = "[safe_z_home]\nhome_xy_position: 100,100\n"
+
+
+def wizard_probe_data(minimum="0.5", offset="0"):
+    from core.custom_probe import parse_custom_probe_config
+    from core.profile_values import mark_profile_values
+    profile = {"stepper_z": {"position_min": minimum, "position_max": "350", "position_endstop": "0.5"}}
+    user = _user(board_parsed=_parsed(), _profile_parsed=profile,
+                 probe="Custom Probe", probe_kind="custom",
+                 custom_probe=parse_custom_probe_config(
+                     "[probe]\npin: ^PB8\nx_offset: 0\ny_offset: 0\nz_offset: " + offset),
+                 z_position_min=minimum, z_position_max="350")
+    mark_profile_values(user, profile)
+    return user
+
+
+def test_early_probe_review_requires_confirmed_override_and_preserves_probe(monkeypatch):
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data()
+    original_probe = user["custom_probe"].config_text
+    monkeypatch.delenv("KACE_AUTO", raising=False)
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *args, **kwargs: "edit")
+    monkeypatch.setattr(probe_homing, "simple_input", lambda *args, **kwargs: "0")
+    monkeypatch.setattr(probe_homing, "yes_no", lambda *args, **kwargs: True)
+    assert probe_homing.review_probe_homing_geometry(user)
+    assert user["z_position_min"] == "0"
+    assert user["_value_provenance"]["z_position_min"] == "USER_OVERRIDE"
+    assert user["_profile_parsed"]["stepper_z"]["position_min"] == "0.5"
+    assert user["custom_probe"].config_text == original_probe
+    probe_homing.validate_wizard_probe_homing_geometry(user)
+
+
+@pytest.mark.parametrize("cancel_at", ["menu", "input", "confirm"])
+def test_early_probe_review_cancellation_preserves_nested_decisions(monkeypatch, cancel_at):
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data()
+    original = copy.deepcopy(user)
+    choices = iter(["edit", "cancel"] if cancel_at == "confirm" else ["cancel" if cancel_at == "menu" else "edit"])
+    monkeypatch.delenv("KACE_AUTO", raising=False)
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *args, **kwargs: next(choices))
+    monkeypatch.setattr(probe_homing, "simple_input", lambda *args, **kwargs: "<" if cancel_at == "input" else "0")
+    monkeypatch.setattr(probe_homing, "yes_no", lambda *args, **kwargs: False)
+    assert not probe_homing.review_probe_homing_geometry(user)
+    assert user == original
+
+
+@pytest.mark.parametrize("minimum,offset", [("0.5", "1"), ("0", "0"), ("-2", "-1")])
+def test_early_probe_review_preserves_compatible_profile_without_prompt(monkeypatch, minimum, offset):
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data(minimum, offset)
+    original = copy.deepcopy(user)
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *args, **kwargs: pytest.fail("Valid profile should not prompt"))
+    assert probe_homing.review_probe_homing_geometry(user)
+    assert user == original
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "350", "0.5", ""])
+def test_early_probe_review_rejects_invalid_minimum_without_committing(monkeypatch, value):
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data()
+    original = copy.deepcopy(user)
+    actions = iter(["edit", "cancel"])
+    monkeypatch.delenv("KACE_AUTO", raising=False)
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *args, **kwargs: next(actions))
+    monkeypatch.setattr(probe_homing, "simple_input", lambda *args, **kwargs: value)
+    monkeypatch.setattr(probe_homing, "yes_no", lambda *args, **kwargs: pytest.fail("Invalid edit must not request confirmation"))
+    assert not probe_homing.review_probe_homing_geometry(user)
+    assert user == original
+
+
+def test_early_probe_review_automatic_mode_never_changes_invalid_profile(monkeypatch):
+    from core.exceptions import GenerationError
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data()
+    original = copy.deepcopy(user)
+    monkeypatch.setenv("KACE_AUTO", "1")
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *args, **kwargs: pytest.fail("No automatic consent"))
+    with pytest.raises(GenerationError, match="probe z_offset within"):
+        probe_homing.review_probe_homing_geometry(user)
+    assert user == original
+
+
+@pytest.mark.parametrize("key", ["z_position_min", "z_position_max"])
+@pytest.mark.parametrize("source", ["unresolved_stale", "unresolved_missing", "profile_missing", "override_blank"])
+def test_early_probe_review_rejects_unresolved_z_limits_without_stale_fallback(monkeypatch, key, source):
+    from core.exceptions import GenerationError
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data("0", "0")
+    if source.startswith("unresolved"):
+        user["_value_provenance"][key] = "UNRESOLVED"
+        if source == "unresolved_missing":
+            user.pop(key)
+    elif source == "profile_missing":
+        user["_profile_parsed"]["stepper_z"].pop(key.removeprefix("z_"))
+    else:
+        user["_value_provenance"][key] = "USER_OVERRIDE"
+        user[key] = ""
+    original = copy.deepcopy(user)
+    monkeypatch.delenv("KACE_AUTO", raising=False)
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *args, **kwargs: pytest.fail("Unresolved inputs cannot be reviewed as valid limits"))
+    for check in (probe_homing.validate_wizard_probe_homing_geometry, probe_homing.review_probe_homing_geometry):
+        with pytest.raises(GenerationError, match=key + " is unresolved"):
+            check(user)
+        assert user == original
+
+
+def test_early_probe_review_contextual_default_matches_generator(tmp_path):
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data(offset="-1")
+    user["_profile_parsed"]["stepper_z"].pop("position_min")
+    user["_value_provenance"]["z_position_min"] = "SAFE_DEFAULT"
+    user["z_position_min"] = "0"
+    original = copy.deepcopy(user)
+    probe_homing.validate_wizard_probe_homing_geometry(user)
+    assert probe_homing.review_probe_homing_geometry(user)
+    assert user == original
+    content = generate_config(user["board_parsed"], user,
+        output_path=str(tmp_path / "printer.cfg"), verbose=False)["content"]
+    assert "position_min: -2" in content
+
+
+def test_forced_review_of_valid_geometry_does_not_invent_an_override(monkeypatch):
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data("0", "0")
+    original = copy.deepcopy(user)
+    monkeypatch.delenv("KACE_AUTO", raising=False)
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *args, **kwargs: "continue")
+    monkeypatch.setattr(probe_homing, "simple_input", lambda *args, **kwargs: pytest.fail("No edit selected"))
+    assert probe_homing.review_probe_homing_geometry(user, force=True)
+    assert user == original
+
+
+@pytest.mark.parametrize("step", ["custom_probe_review", "custom_probe_offsets", "probe_offsets"])
+def test_every_probe_branch_checks_homing_before_following_wizard_steps(monkeypatch, step):
+    import core.wizard as wizard
+    from core.exceptions import GenerationError
+    user = wizard_probe_data()
+    user["start_step"] = step
+    monkeypatch.setenv("KACE_AUTO", "1")
+    monkeypatch.setattr(wizard, "discover_mcu", lambda: {})
+    monkeypatch.setattr(wizard, "fetch_config_list", lambda: [])
+    monkeypatch.setattr(wizard, "_step_" + step, lambda data: "done")
+    monkeypatch.setattr(wizard, "_step_therm", lambda *args: pytest.fail("Must reject before next phase"))
+    with pytest.raises(GenerationError, match="probe z_offset within"):
+        wizard.run_wizard(user)
+
+
+@pytest.mark.parametrize("kind", ["BLTouch", "CR-Touch", "Inductive"])
+def test_early_structured_probe_uses_rendered_precalibration_offset(kind):
+    from core.exceptions import GenerationError
+    from core.wizard.steps import probe_homing
+    user = wizard_probe_data()
+    user["probe"] = kind
+    user.pop("probe_kind")
+    user.pop("custom_probe")
+    with pytest.raises(GenerationError, match="probe z_offset within"):
+        probe_homing.validate_wizard_probe_homing_geometry(user)
+
+
+def test_homing_review_messages_have_all_supported_languages():
+    from core.translations import UI_STRINGS
+    keys = [key for key in UI_STRINGS if key.startswith("wizard.probe_homing.")
+            or key.startswith("wizard.step.probe_homing.") or key == "firmware.resume.review_z"]
+    assert keys
+    for key in keys:
+        assert set(UI_STRINGS[key]) == {"English", "Español", "Português"}
 
 
 @pytest.fixture

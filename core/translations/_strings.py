@@ -3,6 +3,56 @@
 # Each entry maps language name -> display string.
 
 UI_STRINGS: dict = {
+    "firmware.resume.review_z": {
+        "English": "Review Z minimum",
+        "Español": "Revisar mínimo de Z",
+        "Português": "Revisar mínimo de Z",
+    },
+    "wizard.step.probe_homing.header": {
+        "English": "Probe Z homing range",
+        "Español": "Recorrido Z para homing con sonda",
+        "Português": "Curso Z para homing com sonda",
+    },
+    "wizard.step.probe_homing.hint": {
+        "English": "The probe offset must lie within the Z travel limits.",
+        "Español": "El offset de la sonda debe quedar dentro del recorrido Z.",
+        "Português": "O offset da sonda deve estar dentro do curso Z.",
+    },
+    "wizard.probe_homing.summary": {
+        "English": "Z minimum: {minimum} mm | Z maximum: {maximum} mm | Probe z_offset: {offset} mm. This offset is a configuration value, not proof of calibration.",
+        "Español": "Mínimo Z: {minimum} mm | Máximo Z: {maximum} mm | z_offset de sonda: {offset} mm. Este offset es un valor de configuración, no acredita una calibración.",
+        "Português": "Mínimo Z: {minimum} mm | Máximo Z: {maximum} mm | z_offset da sonda: {offset} mm. Este offset é um valor de configuração, não comprova uma calibração.",
+    },
+    "wizard.probe_homing.invalid": {
+        "English": "The Z limits must be finite, minimum < maximum, and contain the probe z_offset. Review the Z minimum or return to review the probe; an unknown calibrated offset must not be invented.",
+        "Español": "Los límites Z deben ser finitos, mínimo < máximo, y contener el z_offset de la sonda. Revisá el mínimo Z o volvé a revisar la sonda; no inventes un offset calibrado desconocido.",
+        "Português": "Os limites Z devem ser finitos, mínimo < máximo, e conter o z_offset da sonda. Revise o mínimo Z ou volte para revisar a sonda; não invente um offset calibrado desconhecido.",
+    },
+    "wizard.probe_homing.edit": {
+        "English": "Edit Z minimum",
+        "Español": "Editar mínimo de Z",
+        "Português": "Editar mínimo de Z",
+    },
+    "wizard.probe_homing.cancel": {
+        "English": "Cancel review / go back",
+        "Español": "Cancelar revisión / volver",
+        "Português": "Cancelar revisão / voltar",
+    },
+    "wizard.probe_homing.confirm": {
+        "English": "Change Z minimum from {old} to {new} mm? The probe offset is preserved.",
+        "Español": "¿Cambiar el mínimo Z de {old} a {new} mm? Se conserva el offset de la sonda.",
+        "Português": "Alterar o mínimo Z de {old} para {new} mm? O offset da sonda é preservado.",
+    },
+    "wizard.probe_homing.manual": {
+        "English": "Review the Z minimum interactively; automatic mode cannot confirm this edit.",
+        "Español": "Revisá el mínimo Z de forma interactiva; el modo automático no puede confirmar este cambio.",
+        "Português": "Revise o mínimo Z de forma interativa; o modo automático não pode confirmar esta alteração.",
+    },
+    "wizard.probe_homing.cancelled": {
+        "English": "Z review cancelled. The saved workflow and firmware are preserved.",
+        "Español": "Revisión Z cancelada. Se conservan el flujo guardado y el firmware.",
+        "Português": "Revisão Z cancelada. O fluxo salvo e o firmware são preservados.",
+    },
     "menu.yes_no_default_yes": {
         "English": "[y/n] (Enter: yes)",
         "Español": "[s/n] (Enter: sí)",

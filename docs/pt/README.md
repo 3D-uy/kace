@@ -43,10 +43,18 @@ Seu assistente de terminal prepara firmware MCU quando suportado e acompanha a a
 
 O assistente de terminal oferece **português, inglês e espanhol**, com modos **Iniciante** e **Avançado**.
 
-> **Escolher hardware** → **Configuração guiada** → **Gerar configuração Klipper**<br>
-> → **Compilar firmware MCU** → **Revisar** → **Aplicar** → **Verificar**
+> **Escolher hardware** → **Configuração guiada** → **Verificar geometria**<br>
+> → **Etapas de firmware** → **Gerar configuração Klipper** → **Revisar** → **Aplicar** → **Verificar**
 
 As etapas de firmware dependem do alvo suportado e do fluxo escolhido.
+
+Com homing Z por sonda, o KACE verifica se o offset de acionamento está dentro
+do curso Z antes de preparar firmware. Um mínimo importado incompatível exige
+revisão explícita; o KACE não o altera silenciosamente nem inventa um offset
+medido. Se o firmware já foi verificado em uma instalação incompleta, execute
+`kace` e escolha **Revisar mínimo de Z** para corrigir o mínimo salvo preservando
+a evidência de firmware. Continue depois a configuração e as verificações;
+essa edição não conclui a instalação. Veja [recuperação (EN)](../DEVELOPMENT.md).
 
 <!-- Inserir aqui uma captura real do assistente/revisão: docs/assets/kace-wizard.png.
      Incluir texto alternativo e a versão do KACE capturada. Não usar um mockup como captura do produto. -->
@@ -88,7 +96,7 @@ Ele mantém a referência fixada existente e pode diferir do código atual.
 Requer `curl` e `sha256sum`. Revise o script antes de executá-lo.
 
 ```bash
-KACE_COMMIT='ef637c0aa6f992d979c0f28b19e54d5e707b24c0'
+KACE_COMMIT='95dede7906bbe7919b6b7551b18fefd05b99d1c8'
 KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
