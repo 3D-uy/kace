@@ -600,6 +600,13 @@ def validate_checkpoint(
     wizard_data = value.get("wizard_data")
     if not isinstance(hardware, dict) or not isinstance(wizard_data, dict):
         raise CheckpointCorrupt("firmware workflow checkpoint payload is incomplete")
+    if state in {FirmwareWorkflowState.MCU_VERIFIED, FirmwareWorkflowState.CONFIG_GENERATED,
+                 *_DEPLOYABLE_STATES}:
+        verified_serial = hardware.get("verified_serial_path")
+        recorded_at = hardware.get("flash_evidence_recorded_at")
+        if (not isinstance(verified_serial, str) or not verified_serial.strip()
+                or type(recorded_at) is not int or recorded_at <= 0):
+            raise CheckpointCorrupt("firmware workflow checkpoint has incomplete saved MCU verification evidence")
     board = str(hardware.get("board") or "").strip()
     expected_mcu = str(hardware.get("mcu") or "").strip().lower()
     if not board or not expected_mcu or wizard_data.get("board") != board:

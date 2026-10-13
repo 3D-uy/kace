@@ -63,6 +63,10 @@ class FirmwareVerificationError(RuntimeError):
     """The activated MCU does not prove the expected firmware identity."""
 
 
+class ActiveConfigurationVerificationError(ConfigConflictError):
+    """The loaded configuration could not be matched to the reviewed plan."""
+
+
 def read_config_state(transport, generated_hardware: bytes = b"", generated_macros: Optional[bytes] = None) -> dict[str, Optional[bytes]]:
     """Copy a complete byte-level baseline, distinguishing absence from failure."""
     names = ConfigDeploymentTransaction.CANDIDATES
@@ -168,8 +172,9 @@ class ConfigDeploymentTransaction:
     ``validate_activation_target``, ``supports_conditional_write``,
     ``upload_if_unchanged``,
     ``restart``, ``restart_moonraker``, ``moonraker_online`` and
-    ``klipper_state``. Read failures must raise; ``None`` is reserved for a
-    positively confirmed absent file.
+    ``klipper_state``. Finalization also requires ``verify_active_configuration``
+    to raise on missing or mismatched loaded evidence. Read failures must raise;
+    ``None`` is reserved for a positively confirmed absent file.
     """
 
     CANDIDATES = (
@@ -307,6 +312,14 @@ class ConfigDeploymentTransaction:
                    if name not in planned and current[name] != expected]
         if changed:
             raise ConfigConflictError("concurrent configuration modification detected: " + ", ".join(changed))
+
+    def _verify_active_configuration(self) -> None:
+        try:
+            self.transport.verify_active_configuration(self.plan)
+        except Exception as exc:
+            raise ActiveConfigurationVerificationError(
+                f"active configuration verification failed: {exc}"
+            ) from exc
 
     def _rollback(self) -> tuple[Optional[bool], str]:
         if not self._written_names:
@@ -490,6 +503,10 @@ class ConfigDeploymentTransaction:
                 if selected not in {"firmware", "service", "none"}:
                     raise ValueError(f"Unsupported activation mode: {selected}")
                 self.activation = selected
+            if (self.activation != "none" or (
+                not self.plan.changed_artifacts and self.verify_existing_ready
+            )) and not callable(getattr(self.transport, "verify_active_configuration", None)):
+                raise ConfigConflictError("transport cannot verify active configuration")
             current = revalidate_config_state(self.transport, remote)
             require_conditional_writes(self.transport, self.plan, persist_root=self.snapshot_root)
             originals = {
@@ -562,8 +579,7 @@ class ConfigDeploymentTransaction:
                 if not ready:
                     raise RuntimeError(f"Klipper did not become Ready (state={state})")
                 self._verify_firmware()
-                if hasattr(self.transport, "verify_active_configuration"):
-                    self.transport.verify_active_configuration(self.plan)
+                self._verify_active_configuration()
                 self._verify_plan()
                 self._emit("DONE", "configuration already installed; Klipper Ready")
                 return ConfigTransactionResult(
@@ -592,6 +608,7 @@ class ConfigDeploymentTransaction:
             if not ready:
                 raise RuntimeError(f"Klipper did not become Ready (state={state})")
             self._verify_firmware()
+            self._verify_active_configuration()
             self._verify_plan()
             self._emit("DONE", "configuration activated and Klipper Ready")
             return ConfigTransactionResult(
@@ -607,6 +624,8 @@ class ConfigDeploymentTransaction:
             state = (
                 ConfigTransactionState.FIRMWARE_FAILED
                 if isinstance(exc, FirmwareVerificationError)
+                else ConfigTransactionState.VERIFY_FAILED
+                if isinstance(exc, ActiveConfigurationVerificationError)
                 else ConfigTransactionState.ACTIVATION_FAILED
                 if "Ready" in str(exc) or "restart" in str(exc).lower()
                 else ConfigTransactionState.VERIFY_FAILED
@@ -684,12 +703,20 @@ class MoonrakerConfigTransport:
             ))
         except configparser.Error as exc:
             raise ConfigConflictError("expected configuration could not be parsed; explicit activation is required") from exc
-        expected = {section: dict(parser.items(section, raw=True)) for section in parser.sections()}
+        expected = {section: dict(parser.items(section, raw=True)) for section in parser.sections()
+                    if not section.startswith("include ")}
+        # configfile.config is the loaded raw configuration, not the typed
+        # settings/defaults object. Includes and SAVE_CONFIG are already in
+        # the expected text, so extra loaded settings prove a different load.
+        extra_sections = sorted(active.keys() - expected.keys())
+        if extra_sections:
+            raise ConfigConflictError(f"active configuration has unexpected [{extra_sections[0]}]; explicit activation is required")
         for section, options in expected.items():
-            if section.startswith("include "):
-                continue
             if section not in active:
                 raise ConfigConflictError(f"active configuration is missing [{section}]; explicit activation is required")
+            extra_options = sorted(active[section].keys() - options.keys())
+            if extra_options:
+                raise ConfigConflictError(f"active configuration has unexpected [{section}] {extra_options[0]}; explicit activation is required")
             for name, value in options.items():
                 actual = active.get(section, {}).get(name)
                 # configfile.config contains raw parsed strings, not typed

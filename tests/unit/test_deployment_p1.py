@@ -110,7 +110,8 @@ class TransactionIdentityTests(unittest.TestCase):
                 stack.enter_context(patch.object(deployer._MoonrakerClient, "get_mcu_versions", return_value={"mcu": "old-firmware"}))
                 stack.enter_context(patch("core.config_transaction.time.sleep"))
                 if route == "moonraker":
-                    stack.enter_context(patch("core.menu.simple_input", side_effect=["pi.local", "7125", ""]))
+                    stack.enter_context(patch("core.menu.simple_input", side_effect=["pi.local", "7125"]))
+                    stack.enter_context(patch("core.menu.password_input", return_value=""))
                     stack.enter_context(patch("core.moonraker.check_moonraker", return_value=(True, "ok")))
                     stack.enter_context(patch("core.config_transaction.MoonrakerConfigTransport", return_value=transport))
                     result = deployer.deploy_moonraker(user)

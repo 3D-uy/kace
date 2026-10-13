@@ -37,6 +37,7 @@ class FakeTransport:
     def __init__(self, files=None):
         self.destination_key = ("simulated-printer", id(self))
         self.files = dict(files or {})
+        self.active_files = dict(self.files)
         self.calls = []
         self.fail_upload = None
         self.fail_delete = None
@@ -67,6 +68,13 @@ class FakeTransport:
         self.calls.append(("restart", mode))
         if self.fail_restart:
             raise RuntimeError("synthetic restart failure")
+        self.active_files = dict(self.files)
+
+    def verify_active_configuration(self, plan):
+        self.calls.append(("verify_active_configuration",))
+        for artifact in plan.artifacts:
+            if self.active_files.get(artifact.remote_name) != artifact.content:
+                raise ConfigConflictError("synthetic loaded configuration is stale")
 
     def restart_moonraker(self):
         self.calls.append(("restart_moonraker",))
@@ -105,6 +113,90 @@ class TestConfigDeploymentTransaction(unittest.TestCase):
             result = self.run_transaction(transport, root)
         self.assertEqual(result.state, ConfigTransactionState.PRECONDITION_FAILED)
         self.assertFalse(any(call[0] == "upload" for call in transport.calls))
+
+    def test_accepted_restart_without_reload_cannot_commit(self):
+        events = []
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport({"printer.cfg": b"# old configuration\n"})
+            transport.restart = lambda mode: transport.calls.append(("restart", mode))
+            result = self.run_transaction(transport, root,
+                state_sink=lambda state, detail: events.append(state))
+        self.assertFalse(result.ok)
+        self.assertNotIn("DONE", events)
+        self.assertIn(("verify_active_configuration",), transport.calls)
+        self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
+        self.assertIn("verification error", result.detail)
+        self.assertIn("manual recovery", result.detail)
+        self.assertIsNotNone(result.snapshot)
+
+    def test_missing_active_verifier_blocks_before_writes_or_restart(self):
+        for no_changes in (False, True):
+            with self.subTest(no_changes=no_changes), tempfile.TemporaryDirectory() as root:
+                transport = FakeTransport()
+                if no_changes:
+                    self.assertTrue(self.run_transaction(transport, root).ok)
+                transport.calls.clear()
+                transport.verify_active_configuration = None
+                events = []
+                result = self.run_transaction(transport, root,
+                    verify_existing_ready=True,
+                    state_sink=lambda state, detail: events.append(state))
+                self.assertEqual(result.state, ConfigTransactionState.PRECONDITION_FAILED)
+                self.assertIn("active configuration", result.detail)
+                self.assertNotIn("DONE", events)
+                self.assertFalse(any(c[0] in {"upload", "restart"} for c in transport.calls))
+
+    def test_deferred_activation_does_not_require_active_verifier(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport()
+            transport.verify_active_configuration = None
+            result = self.run_transaction(transport, root, activation="none")
+        self.assertTrue(result.pending)
+        self.assertFalse(any(c[0] in {"restart", "verify_active_configuration"} for c in transport.calls))
+
+    def test_active_verification_failure_in_noop_is_not_an_upload_error(self):
+        for error in (TimeoutError("query timeout"), ConfigConflictError("restart did not load configuration")):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as root:
+                transport = FakeTransport()
+                self.assertTrue(self.run_transaction(transport, root).ok)
+                transport.calls.clear()
+                events = []
+                def fail(_plan):
+                    raise error
+                transport.verify_active_configuration = fail
+                result = self.run_transaction(transport, root, verify_existing_ready=True,
+                    state_sink=lambda state, detail: events.append(state))
+                self.assertEqual(result.state, ConfigTransactionState.VERIFY_FAILED)
+                self.assertIsNone(result.rollback_succeeded)
+                self.assertNotIn("DONE", events)
+                self.assertFalse(any(c[0] in {"upload", "delete", "restart"} for c in transport.calls))
+
+    def test_external_edit_during_active_verification_is_preserved(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport()
+            verify = transport.verify_active_configuration
+            def verify_then_edit(plan):
+                verify(plan)
+                transport.files["printer.cfg"] = b"# external edit\n"
+            transport.verify_active_configuration = verify_then_edit
+            events = []
+            result = self.run_transaction(transport, root,
+                state_sink=lambda state, detail: events.append(state))
+        self.assertEqual(result.state, ConfigTransactionState.ROLLBACK_FAILED)
+        self.assertEqual(transport.files["printer.cfg"], b"# external edit\n")
+        self.assertNotIn("DONE", events)
+        self.assertEqual([c for c in transport.calls if c[0] == "restart"], [("restart", "firmware")])
+
+    def test_active_verification_follows_firmware_before_done(self):
+        with tempfile.TemporaryDirectory() as root:
+            transport = FakeTransport()
+            result = self.run_transaction(transport, root,
+                verify_firmware=lambda: transport.calls.append(("verify_firmware",)),
+                state_sink=lambda state, detail: transport.calls.append(("event", state)))
+        self.assertTrue(result.ok, result.detail)
+        self.assertLess(transport.calls.index(("restart", "firmware")), transport.calls.index(("verify_firmware",)))
+        self.assertLess(transport.calls.index(("verify_firmware",)), transport.calls.index(("verify_active_configuration",)))
+        self.assertLess(transport.calls.index(("verify_active_configuration",)), transport.calls.index(("event", "DONE")))
 
     def test_cancel_after_diff_prevents_snapshot_and_write(self):
         with tempfile.TemporaryDirectory() as root:

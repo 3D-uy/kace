@@ -29,7 +29,8 @@ def test_structural_rejection_reports_local_evidence_without_host_cause(tmp_path
 @pytest.mark.parametrize("detail", ["HTTP 401: Unauthorized", "HTTP 503: Service unavailable", "Connection refused"])
 def test_moonraker_probe_failure_retains_api_detail_without_declaring_host_offline(detail):
     with patch("core.config_transaction.local_moonraker_available", return_value=False), \
-         patch("core.menu.simple_input", side_effect=["pi.local", "7125", ""]), \
+         patch("core.menu.simple_input", side_effect=["pi.local", "7125"]), \
+         patch("core.menu.password_input", return_value=""), \
          patch("core.menu.yes_no", return_value=False), \
          patch("core.moonraker.check_moonraker", return_value=(False, detail)), \
          patch("core.deployer._run_config_transaction") as deploy:

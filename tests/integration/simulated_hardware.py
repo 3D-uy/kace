@@ -8,6 +8,7 @@ individual methods.
 
 from __future__ import annotations
 
+import configparser
 import json
 import re
 import threading
@@ -158,6 +159,14 @@ class MoonrakerLab:
         self.power_history: list[str] = []
         self.power_status = "on"
         self.mcu_versions = {"mcu": "previous-firmware"}
+        # Runtime configuration is a separate snapshot, never refreshed by
+        # upload or GET. A successful restart is the only normal load boundary.
+        self.loaded_config = {"printer": {"old": "true"}}
+        self.config_source = lambda: self.files
+        self.load_config_on_restart = True
+        self.loaded_config_override = None
+        self.configfile_available = True
+        self.configfile_queries = 0
         self.klippy_states = deque()
         self.moonraker_available = True
         self.corrupt_download_once: set[str] = set()
@@ -204,6 +213,25 @@ class MoonrakerLab:
 
     def next_klippy_state(self) -> str:
         return self.klippy_states.popleft() if self.klippy_states else "ready"
+
+    def load_configuration(self) -> None:
+        if not self.load_config_on_restart:
+            return
+        if self.loaded_config_override is not None:
+            self.loaded_config = self.loaded_config_override
+            return
+        # These lab scenarios use a single root, without includes/SAVE_CONFIG.
+        # Parse the independently published bytes, not the production plan or
+        # verifier's expected values. Full Klipper parsing has its own suite.
+        parser = configparser.RawConfigParser(
+            strict=False, inline_comment_prefixes=(";", "#")
+        )
+        root = self.config_source()["printer.cfg"].decode("utf-8")
+        parser.read_string("\n".join(line.split("#", 1)[0] for line in root.splitlines()))
+        self.loaded_config = {
+            section: dict(parser.items(section, raw=True))
+            for section in parser.sections()
+        }
 
     def physical_power_action(self, action: str) -> None:
         self.power_history.append(action)
@@ -264,6 +292,15 @@ class _MoonrakerHandler(BaseHTTPRequestHandler):
             self._json({"result": {"objects": list(self.lab.mcu_versions)}})
             return
         if path == "/printer/objects/query":
+            if "configfile" in parsed.query:
+                self.lab.configfile_queries += 1
+                if not self.lab.configfile_available:
+                    self.send_error(503, "simulated configfile unavailable")
+                    return
+                self._json({"result": {"status": {
+                    "configfile": {"config": self.lab.loaded_config}
+                }}})
+                return
             self._json({
                 "result": {
                     "status": {
@@ -310,6 +347,7 @@ class _MoonrakerHandler(BaseHTTPRequestHandler):
         if parsed.path == "/printer/restart":
             self._body()
             self.lab.restarts.append("klipper")
+            self.lab.load_configuration()
             self._json({"result": "ok"})
             return
         if parsed.path == "/machine/services/restart":

@@ -95,7 +95,8 @@ def test_pending_retry_activates_matching_files_and_honors_cancel(tmp_path):
     assert transaction(transport, tmp_path, activation_selector=lambda: "none").pending
     assert transport.active == b"old active config"
     result = transaction(transport, tmp_path, verify_existing_ready=True, verify_firmware=lambda: None)
-    assert result.state is Result.ACTIVATION_FAILED
+    assert result.state is Result.VERIFY_FAILED
+    assert "active configuration verification failed" in result.detail
     assert transport.active == b"old active config"
     assert not any(call[0] == "restart" for call in transport.calls)
     result = transaction(transport, tmp_path, activation_selector=lambda: "firmware")
@@ -282,10 +283,14 @@ def test_real_physical_client_is_blocked_before_firmware(tmp_path):
     cfg = tmp_path / "printer.cfg"
     cfg.write_bytes(b"proposed")
     flash = Mock()
+    active_verifier = Mock(side_effect=AssertionError("No verification before safe publication"))
     client = _MoonrakerClient("never-connect", 7125)
     snapshot = create_snapshot({"printer.cfg": b"original"}, persist_root=str(tmp_path / "snap"))
     with patch("core.moonraker._get", side_effect=AssertionError("No network expected")):
         result = Deployer(client, DeploymentManifest([McuTarget("mcu", "test")], str(cfg)),
-            snapshot=snapshot, firmware_copy=flash, event_sink=lambda _: None).run()
+            snapshot=snapshot, firmware_copy=flash, event_sink=lambda _: None,
+            verify_active_configuration=active_verifier).run()
     assert result.state is DeployState.FAILED_PRECONDITION
+    assert "atomic conditional config upload unavailable" in result.detail
     flash.assert_not_called()
+    active_verifier.assert_not_called()

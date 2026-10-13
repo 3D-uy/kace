@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+import pytest
 from unittest.mock import patch
 
 from core.firmware_workflow import (
@@ -24,6 +25,7 @@ from core.firmware_workflow import (
     verify_reappeared_mcu,
     verify_running_firmware,
     write_checkpoint,
+    validate_checkpoint,
 )
 from core.mcu_monitor import McuIdentity
 from core.custom_probe import (
@@ -83,6 +85,54 @@ def write_config(path: Path, serial: str | None):
         f"[mcu]\nserial: {value}\n\n[printer]\nkinematics: cartesian\n",
         encoding="utf-8",
     )
+
+
+@pytest.mark.parametrize("state", ["MCU_VERIFIED", "CONFIG_GENERATED", "READY_TO_DEPLOY", "DEPLOYING", "COMPLETE"])
+@pytest.mark.parametrize("field,invalid", [
+    ("verified_serial_path", None), ("verified_serial_path", ""),
+    ("verified_serial_path", "  "), ("verified_serial_path", False),
+    ("verified_serial_path", ["/dev/serial/by-id/test"]),
+    ("flash_evidence_recorded_at", None), ("flash_evidence_recorded_at", 0),
+    ("flash_evidence_recorded_at", -1), ("flash_evidence_recorded_at", True),
+    ("flash_evidence_recorded_at", "1"),
+])
+def test_post_verification_checkpoint_requires_saved_evidence(tmp_path, state, field, invalid):
+    checkpoint = awaiting_flash(tmp_path)
+    checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.VERIFYING_MCU)
+    checkpoint = transition_checkpoint(
+        checkpoint, FirmwareWorkflowState.MCU_VERIFIED,
+        verified_serial_path="/dev/serial/by-id/test", flash_evidence_recorded_at=1,
+    )
+    for target in ("CONFIG_GENERATED", "READY_TO_DEPLOY", "DEPLOYING", "COMPLETE"):
+        if checkpoint["state"] == state:
+            break
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState(target))
+    if invalid is None:
+        checkpoint["hardware"].pop(field)
+    else:
+        checkpoint["hardware"][field] = invalid
+    checkpoint.pop("integrity_sha256")
+    checkpoint["integrity_sha256"] = hashlib.sha256(json.dumps(
+        checkpoint, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode()).hexdigest()
+    with pytest.raises(CheckpointCorrupt, match="saved MCU verification evidence"):
+        validate_checkpoint(checkpoint, verify_artifact=False)
+
+
+@pytest.mark.parametrize("state", ["HARDWARE_SELECTED", "COMPILE_REQUIRED", "ARTIFACT_READY", "AWAITING_FLASH", "VERIFYING_MCU"])
+def test_early_checkpoint_does_not_require_saved_verification_evidence(tmp_path, state):
+    checkpoint = create_checkpoint(base_user_data(), identity_reader=identity_reader())
+    if state == "COMPILE_REQUIRED":
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.COMPILE_REQUIRED)
+    elif state not in {"HARDWARE_SELECTED", "COMPILE_REQUIRED"}:
+        checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.ARTIFACT_READY, artifact=artifact(tmp_path))
+        if state != "ARTIFACT_READY":
+            checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.AWAITING_FLASH)
+        if state == "VERIFYING_MCU":
+            checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.VERIFYING_MCU)
+    assert checkpoint["hardware"]["verified_serial_path"] == ""
+    assert checkpoint["hardware"]["flash_evidence_recorded_at"] == 0
+    assert validate_checkpoint(checkpoint, verify_artifact=False)["state"] == state
 
 
 class FirmwareWorkflowTests(unittest.TestCase):

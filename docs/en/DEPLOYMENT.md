@@ -16,6 +16,19 @@ loaded. Explicitly deferred activation remains pending, including on retries.
 The physical installation transaction rechecks its firmware targets after the
 final restart as well.
 
+Before either configuration-only or combined deployment can finish, KACE compares
+Klipper's loaded raw configuration with the complete effective reviewed plan.
+The comparison includes missing and extra sections/options, resolved user includes,
+overrides and preserved SAVE_CONFIG values. Matching files, an accepted RESTART
+command and Ready are not enough: settings removed on disk must also be absent
+from the loaded configuration. No-change retries use the same comparison.
+
+Unavailable or malformed loaded evidence blocks completion. A transport without
+the verifier cannot start a deployment that promises live completion; an explicitly
+deferred offline export remains pending. A failed active-configuration check is
+reported as a verification error and follows the recovery rules below, retaining
+current edits and durable evidence rather than reporting DONE or COMPLETE.
+
 The normal configuration review lists existing settings that will be replaced or
 removed, including their file, section, option and previous/planned values. This
 also covers removed managed sections and customized managed macro bodies; opening
@@ -144,6 +157,12 @@ journalctl logs. A Moonraker connection failure may offer the SFTP transport;
 this changes file transfer, not the activation authority.
 
 ### Moonraker API keys and the effective URL
+
+The API key prompt uses hidden input and preserves the entered value exactly.
+Leave it empty for anonymous access. Cancellation or EOF stops before network
+operations. If the terminal cannot disable echo, KACE cancels with a localized
+message instead of reading the secret visibly; retry in an interactive terminal.
+SSH passwords use the same protected input helper.
 
 The interactive Moonraker deployment entry point (`deploy_moonraker`) **rejects**
 a non-empty API key when the effective endpoint URL does not use `https`.

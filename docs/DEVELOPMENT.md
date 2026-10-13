@@ -36,6 +36,16 @@ writers fail; reconnecting or seeing `Ready` does not replace completion evidenc
 This applies to initial installation and unfinished resumes, not monitoring later
 user edits. See [support](en/SUPPORT_SCOPE.md) and [deployment](en/DEPLOYMENT.md).
 
+Both configuration-only and combined firmware/configuration completion require
+loaded raw configuration to match the effective reviewed plan, including removed
+sections and options. Verification runs after readiness and required firmware
+checks, before the final file recheck and `DONE`. A transport without that
+verification capability fails before writing when completion is requested;
+offline publication with explicitly deferred activation remains pending. Missing,
+malformed or stale loaded evidence is a verification failure, never a substitute
+for readiness. Preserve current files and snapshots under the existing recovery
+rules when a failure cannot be restored safely.
+
 [PrinterMotionSpace](../core/motion_model.py) separates mechanical travel,
 printable bounds and probe reach. Current keys include `x_position_min`,
 `x_position_max`, `x_position_endstop`, `printable_x_min` and `printable_x_max`,
@@ -99,6 +109,15 @@ source/packaged gates in [Release](RELEASE.md). Local publication is atomic per
 file with a cooperative lock, not directory-wide CAS against external editors.
 Recovery preserves live edits when restoration cannot be proven. Do not refactor
 state machines solely because modules are large; use a demonstrated need.
+
+The durable v1 checkpoint reader requires saved MCU verification evidence from
+`MCU_VERIFIED` onward: a non-empty serial path and a positive integer flash
+evidence timestamp. This preserves the transition's existing invariant when a
+checkpoint is read with `verify_artifact=False`, including historical COMPLETE.
+It checks the saved structure without renewing receipts or accessing hardware.
+Studio mirrors this wire requirement and retains historical optional identity
+fields. Producer-generated fixtures and recovery tests verify the boundary;
+BoardContracts, MCU aliases and physical verification remain KACE authority.
 
 ## 🛠️ Environment and dependencies
 

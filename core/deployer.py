@@ -533,6 +533,7 @@ def deploy_moonraker(user_data):
     from urllib.parse import urlsplit
 
     from core.config_transaction import configuration_transport, local_moonraker_available
+    from core.exceptions import WizardExit
     from core.menu import password_input, simple_input, yes_no
     from core.moonraker import DEFAULT_PORT, _base_url, check_moonraker
     from core.translations import t
@@ -557,7 +558,10 @@ def deploy_moonraker(user_data):
     api_key = "" if local_install else user_data.get("moonraker_api_key") or ""
     local_authorized = local_install
     if not local_authorized or not check_moonraker(host, port, api_key=api_key)[0]:
-        api_key = simple_input(t("moonraker.api_key_prompt"), default="") or ""
+        try:
+            api_key = password_input(t("moonraker.api_key_prompt")) or ""
+        except WizardExit:
+            return cancelled("Moonraker deployment cancelled before connecting.")
     if api_key and urlsplit(_base_url(host, port)).scheme != "https":
         return failed(
             WorkflowOutcome.PRECONDITION_FAILED,
@@ -968,6 +972,12 @@ def _deploy_firmware_installation_locked(user_data):
                 "generated hardware configuration failed deployment preflight",
             )
         config_transport = configuration_transport(host, port, api_key)
+        active_config_verifier = getattr(config_transport, "verify_active_configuration", None)
+        if not callable(active_config_verifier):
+            return DeployResult(
+                DeployState.FAILED_PRECONDITION,
+                "transport cannot verify active configuration; firmware deployment was not started",
+            )
         client._config_transport = config_transport
         config_transport.validate_activation_target()
         remote_files = read_config_state(config_transport, generated_hardware, generated_macros)
@@ -1147,6 +1157,7 @@ def _deploy_firmware_installation_locked(user_data):
                 **current_files,
                 **{item.remote_name: item.content for item in config_plan.artifacts},
             }),
+            verify_active_configuration=lambda: active_config_verifier(config_plan),
             mcu_monitor=monitor,
             power_cycle_prompt=(
                 _confirm_power_off

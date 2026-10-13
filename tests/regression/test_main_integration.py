@@ -677,6 +677,57 @@ class TestMainCLIDeploymentSelection(_HeadlessMixin, unittest.TestCase):
 
 
 class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
+    def test_cancelled_api_key_restores_ready_checkpoint_and_emits_cancelled(self):
+        import getpass
+        from contextlib import ExitStack
+        from core.firmware_workflow import load_checkpoint
+        import kace
+
+        for interruption in (KeyboardInterrupt, EOFError, getpass.fallback_getpass):
+            with self.subTest(interruption=interruption.__name__):
+                original = self._saved_checkpoint("READY_TO_DEPLOY")
+                _write_mock_generated_config({}, original["wizard_data"])
+                revisions = []
+                persist = kace._persist_workflow
+
+                def record(checkpoint, *args, **kwargs):
+                    result = persist(checkpoint, *args, **kwargs)
+                    revisions.append(load_checkpoint()["state"])
+                    return result
+
+                with ExitStack() as stack:
+                    stack.enter_context(patch.dict(os.environ, {"KACE_MACHINE_OUTPUT": "1"}))
+                    for name in ("print_kace_banner", "print_summary", "time.sleep"):
+                        stack.enter_context(patch("kace." + name))
+                    stack.enter_context(patch("kace.check_display_compatibility", return_value=[]))
+                    stack.enter_context(patch("kace.numbered_select", return_value="moonraker"))
+                    stack.enter_context(patch("kace._persist_workflow", side_effect=record))
+                    stack.enter_context(patch("core.menu._MOCK_PROMPTS_ACTIVE", False))
+                    stack.enter_context(patch("core.menu._is_auto", return_value=False))
+                    stack.enter_context(patch("core.menu.simple_input", side_effect=["https://pi.local", "7125"]))
+                    stack.enter_context(patch("core.config_transaction.local_moonraker_available", return_value=False))
+                    stack.enter_context(patch("core.menu.getpass.getpass", side_effect=interruption))
+                    visible = stack.enter_context(patch("getpass._raw_input"))
+                    network = stack.enter_context(patch("core.moonraker.check_moonraker"))
+                    deploy = stack.enter_context(patch("core.deployer._run_config_transaction"))
+                    wizard = stack.enter_context(patch("kace.run_wizard"))
+                    output = stack.enter_context(patch("sys.stdout", new_callable=io.StringIO))
+                    with self.assertRaises(SystemExit) as exited:
+                        kace.main()
+                self.assertEqual(exited.exception.code, 2)
+                self.assertEqual(revisions, ["DEPLOYING", "READY_TO_DEPLOY"])
+                saved = load_checkpoint()
+                self.assertEqual(saved["state"], "READY_TO_DEPLOY")
+                self.assertEqual(saved["hardware"], original["hardware"])
+                self.assertEqual(saved["artifact"], original["artifact"])
+                self.assertIn('"outcome":"CANCELLED"', output.getvalue())
+                self.assertNotIn('"outcome":"SUCCESS"', output.getvalue())
+                self.assertNotIn("COMPLETE", revisions)
+                visible.assert_not_called()
+                network.assert_not_called()
+                deploy.assert_not_called()
+                wizard.assert_not_called()
+
     def _saved_checkpoint(self, state):
         import hashlib
         from core.firmware_workflow import (

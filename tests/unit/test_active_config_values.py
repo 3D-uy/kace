@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from core.config_transaction import ConfigConflictError, MoonrakerConfigTransport, ConfigDeploymentTransaction
-from core.managed_config import build_managed_config_plan
+from core.managed_config import build_managed_config_plan, ManagedConfigPlan, PlannedConfigArtifact
 from tests.unit.test_config_transaction import FakeTransport, GENERATED
 
 
@@ -111,3 +111,64 @@ def test_noop_retry_cannot_complete_for_collapsed_commands(tmp_path, matches):
     assert not any(call[0] in ('upload', 'restart') for call in transport.calls)
     assert ('configuration already installed' in result.detail) is matches
     assert ('DONE' in events) is matches
+
+
+def loaded_configuration_with_removed_setting(kind):
+    active = {'mcu': {'serial': '/dev/serial/by-id/test'},
+              'printer': {'kinematics': 'cartesian'}, 'stepper_x': {'step_pin': 'PA1'}}
+    if kind == 'option':
+        active['stepper_x']['homing_positive_dir'] = 'true'
+    elif kind == 'section':
+        active['force_move'] = {'enable_force_move': 'true'}
+    elif kind == 'macro':
+        active['gcode_macro OLD'] = {'gcode': '\nM117 old'}
+    return active
+
+
+@pytest.mark.parametrize('kind', ['option', 'section', 'macro'])
+def test_removed_settings_still_loaded_are_rejected(kind):
+    plan = build_managed_config_plan(GENERATED, None, {})
+    with pytest.raises(ConfigConflictError, match='active configuration'):
+        verify(plan, loaded_configuration_with_removed_setting(kind))
+
+
+@pytest.mark.parametrize('fresh', [False, True], ids=['noop', 'fresh'])
+@pytest.mark.parametrize('stale', [False, True], ids=['loaded-current', 'loaded-stale'])
+@pytest.mark.parametrize('kind', ['option', 'section', 'macro'])
+def test_removed_settings_require_loaded_configuration_on_every_completion(tmp_path, fresh, stale, kind):
+    plan = build_managed_config_plan(GENERATED, None, {})
+    remote = {} if fresh else {a.remote_name: a.content for a in plan.artifacts}
+    transport = FakeTransport(remote)
+    transport.verify_active_configuration = MoonrakerConfigTransport('localhost', 7125).verify_active_configuration
+    active = loaded_configuration_with_removed_setting(kind if stale else None)
+    body = {'result': {'status': {'configfile': {'config': active}}}}
+    events = []
+    with patch('core.moonraker._get', return_value=(True, '', body)):
+        result = ConfigDeploymentTransaction(transport, GENERATED, None,
+            activation='firmware' if fresh else 'none', verify_existing_ready=True,
+            snapshot_root=str(tmp_path/'snapshots'), poll_interval=0,
+            state_sink=lambda state, detail: events.append(state)).run()
+    assert result.ok is (not stale), result
+    assert ('DONE' in events) is (not stale)
+    assert not any(call[0] == 'delete' for call in transport.calls)
+    if not fresh:
+        assert not any(call[0] in ('upload', 'restart') for call in transport.calls)
+    assert transport.files == {a.remote_name: a.content for a in plan.artifacts}
+
+
+@pytest.mark.parametrize('explicit_offset', [False, True])
+def test_complete_raw_comparison_preserves_includes_overrides_and_save_config(explicit_offset):
+    root = b'[mcu]\nserial: test\n[printer]\nmax_velocity: 300\n[include user.cfg]\n'
+    root += b'#*# <---------------------- SAVE_CONFIG ---------------------->\n#*# [probe]\n#*# z_offset = 1.25\n'
+    user = b'[include nested.cfg]\n[printer]\nmax_velocity: 200 # final override\n'
+    nested = b'[probe]\npin: PA2\n[exclude_object]\n[gcode_macro USER]\ngcode:\n    M104 S0\n    M140 S0 ; second command\n'
+    if explicit_offset:
+        user += b'[probe]\nz_offset: 2.0\n'
+    plan = ManagedConfigPlan(
+        artifacts=(PlannedConfigArtifact('printer.cfg', root, None),
+                   PlannedConfigArtifact('moonraker.conf', b'[server]\nport: 7125\n', None)),
+        source_files=(('user.cfg', user), ('nested.cfg', nested)),
+    )
+    verify(plan, {'mcu': {'serial': 'test'}, 'printer': {'max_velocity': '200'},
+                  'probe': {'pin': 'PA2', 'z_offset': '2.0' if explicit_offset else '1.25'},
+                  'exclude_object': {}, 'gcode_macro USER': {'gcode': '\nM104 S0\nM140 S0'}})

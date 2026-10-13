@@ -190,7 +190,12 @@ class JsonEventSink:
 
 
 class Deployer:
-    """Execute one firmware/config transaction from physical reboot to DONE."""
+    """Execute one firmware/config transaction from physical reboot to DONE.
+
+    ``verify_active_configuration`` must raise when the loaded configuration
+    cannot be matched to the reviewed plan. It runs only after activation;
+    ``verify_config_state`` checks published files, including before restart.
+    """
 
     POLL_INTERVAL_S = 1.0
     POLL_BACKOFF_MAX_S = 5.0
@@ -213,6 +218,7 @@ class Deployer:
         snapshot_loader: Optional[Callable[[], object]] = None,
         before_config_upload: Optional[Callable[[], object]] = None,
         verify_config_state: Optional[Callable[[], object]] = None,
+        verify_active_configuration: Optional[Callable[[], object]] = None,
         firmware_copy: Optional[Callable[[], bool]] = None,
         firmware_deploy: Optional[Callable[[], object]] = None,
         monitor_before_firmware: bool = False,
@@ -233,6 +239,7 @@ class Deployer:
         self.snapshot_loader = snapshot_loader
         self.before_config_upload = before_config_upload
         self.verify_config_state = verify_config_state
+        self.verify_active_configuration = verify_active_configuration
         self.firmware_copy = firmware_copy
         self.firmware_deploy = firmware_deploy
         self.monitor_before_firmware = monitor_before_firmware
@@ -463,6 +470,11 @@ class Deployer:
         config_write_started = False
         self._attempted_config_writes = {}
         try:
+            if not callable(self.verify_active_configuration):
+                return self._result(
+                    DeployState.FAILED_PRECONDITION,
+                    "active configuration verifier unavailable; firmware deployment was not started",
+                )
             if self.snapshot_loader is not None:
                 self._transition(DeployState.BACKUP, "capturing pre-deployment configuration")
                 self.snapshot = self.snapshot_loader()
@@ -772,6 +784,20 @@ class Deployer:
                         f"firmware identity changed or is unavailable after activation; {rollback_detail}",
                         versions, rollback_ok,
                     )
+            # Loaded configuration is a post-activation contract. Upload byte
+            # verification also runs before restart and cannot establish it.
+            try:
+                self.verify_active_configuration()
+            except Exception as exc:
+                if config_write_started:
+                    rollback_ok, rollback_detail = self._rollback()
+                else:
+                    rollback_ok, rollback_detail = None, "no configuration files were written"
+                return self._result(
+                    DeployState.CONFIG_ERROR,
+                    f"active configuration verification failed: {exc}; {rollback_detail}",
+                    versions, rollback_ok,
+                )
             upload_ok, detail = self._verify_uploads()
             if not upload_ok:
                 rollback_ok, rollback_detail = self._rollback()

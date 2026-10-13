@@ -244,7 +244,12 @@ class PhysicalPublicationTests(unittest.TestCase):
             if client.remote["untouched.cfg"] != b"reviewed":
                 raise RuntimeError("concurrent modification of untouched.cfg")
         deployer.verify_config_state = verify
-        client.firmware_restart = lambda: client.remote.update({"untouched.cfg": b"external"})
+        restart = client.firmware_restart
+        def restart_then_edit():
+            restart()
+            client.remote["untouched.cfg"] = b"external"
+        client.firmware_restart = restart_then_edit
         result = deployer.run()
         self.assertNotEqual(result.state, DeployState.DONE)
         self.assertIn("untouched.cfg", result.detail)
+        self.assertIn("active_config", client.calls)

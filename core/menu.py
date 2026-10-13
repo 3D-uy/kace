@@ -8,6 +8,7 @@ reliably in any environment: true TTY, bridged PTY, xterm.js SSH, pipes.
 import sys
 import os
 import getpass
+import warnings
 import shutil
 import textwrap
 from core.exceptions import WizardExit
@@ -418,7 +419,7 @@ def autocomplete_select(prompt, choices, default=0):
 def password_input(prompt):
     """
     Replace questionary.password().
-    Uses getpass.getpass() for hidden input.
+    Uses getpass.getpass() for hidden input; refuses echoing fallbacks.
     """
     mock_val = _check_questionary_mock("password_input", prompt)
     if mock_val is not _MOCK_DEFAULT:
@@ -429,7 +430,14 @@ def password_input(prompt):
         
     prompt = prompt.rstrip(" :")
     try:
-        val = getpass.getpass(prompt=f"  {prompt}: ")
+        # getpass otherwise warns and reads with echo when terminal control is
+        # unavailable. Turn that warning into an error before it reads a secret.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            val = getpass.getpass(prompt=f"  {prompt}: ")
+    except (getpass.GetPassWarning, OSError):
+        print(f"  {t('menu.secret_input_unavailable')}")
+        raise WizardExit from None
     except (KeyboardInterrupt, EOFError):
         print()
         # S2-01: Raise WizardExit instead of sys.exit(0).

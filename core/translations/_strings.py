@@ -3,6 +3,11 @@
 # Each entry maps language name -> display string.
 
 UI_STRINGS: dict = {
+    "menu.secret_input_unavailable": {
+        "English": "Cannot disable terminal echo. Secret input cancelled; retry in an interactive terminal.",
+        "Español": "No se puede ocultar la entrada en este terminal. Entrada secreta cancelada; vuelva a intentarlo en un terminal interactivo.",
+        "Português": "Não é possível ocultar a entrada neste terminal. Entrada secreta cancelada; tente novamente em um terminal interativo.",
+    },
     "firmware.resume.review_z": {
         "English": "Review Z minimum",
         "Español": "Revisar mínimo de Z",

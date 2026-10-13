@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import io
 import hashlib
 import json
@@ -9,9 +11,12 @@ import os
 import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
+from core.config_transaction import MoonrakerConfigTransport
 from core.deployer import _MoonrakerClient
+from core.managed_config import ManagedConfigPlan, PlannedConfigArtifact
 from core.mcu_monitor import McuPresenceMonitor
 from core.moonraker_deployer import (
     ConfigArtifact,
@@ -144,6 +149,11 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             config_artifacts=[ConfigArtifact(self.printer_cfg, "printer.cfg")],
         )
         transcript = io.StringIO()
+        with open(self.printer_cfg, "rb") as source:
+            plan = ManagedConfigPlan((PlannedConfigArtifact(
+                "printer.cfg", source.read(), self.snapshot.config_files["printer.cfg"]
+            ),))
+        loaded_transport = MoonrakerConfigTransport(lab.host, lab.port, lab.api_key)
         common = {
             "client": client,
             "manifest": manifest,
@@ -151,6 +161,7 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             "mcu_monitor": monitor,
             "identity_confirmation_prompt": candidate_confirmation,
             "event_sink": JsonEventSink(transcript),
+            "verify_active_configuration": lambda: loaded_transport.verify_active_configuration(plan),
         }
         return common, power, transcript
 
@@ -213,6 +224,8 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             states = [event["state"] for event in events]
             self.assertLess(states.index("FIRMWARE_VERIFIED"), states.index("APPLYING_CONFIG"))
             self.assertEqual(states[-1], "DONE")
+            self.assertGreater(lab.configfile_queries, 0)
+            self.assertEqual(lab.loaded_config, {"printer": {"new": "true"}})
             self.assertEqual(
                 [event["sequence"] for event in events],
                 list(range(1, len(events) + 1)),
@@ -340,6 +353,38 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             self.assertEqual(deployer.snapshot.config_files["printer.cfg"], b"[printer]\nold: true\n")
             self.assertEqual(self._events(transcript)[-1]["state"], "CONFIG_ERROR")
 
+    def test_ready_and_published_bytes_cannot_hide_stale_or_extra_loaded_config(self):
+        artifact = self._artifact()
+        for scenario in ("stale", "extra_option", "extra_macro", "unavailable", "malformed"):
+            with self.subTest(scenario=scenario), MoonrakerLab() as lab:
+                lab.version_after_reconnect = artifact.firmware_identity.reported_version
+                if scenario == "stale":
+                    lab.load_config_on_restart = False
+                elif scenario == "extra_option":
+                    lab.loaded_config_override = {"printer": {"new": "true", "old": "true"}}
+                elif scenario == "extra_macro":
+                    lab.loaded_config_override = {
+                        "printer": {"new": "true"},
+                        "gcode_macro UNREVIEWED": {"gcode": "G28"},
+                    }
+                elif scenario == "unavailable":
+                    lab.configfile_available = False
+                else:
+                    lab.loaded_config_override = {"printer": {"new": True}}
+                deployer, transcript = self._manual_sd_deployer(lab, artifact)
+
+                result = deployer.run()
+
+                self.assertFalse(result.ok)
+                self.assertEqual(result.state, DeployState.CONFIG_ERROR)
+                self.assertNotIn("DONE", [event["state"] for event in self._events(transcript)])
+                self.assertGreater(lab.configfile_queries, 0)
+                self.assertEqual(lab.files["printer.cfg"], b"[printer]\nnew: true\n")
+                self.assertEqual(lab.uploads, ["printer.cfg"])
+                self.assertFalse(result.rollback_succeeded)
+                self.assertIn("manual recovery", result.detail)
+                self.assertEqual(deployer.snapshot.config_files["printer.cfg"], b"[printer]\nold: true\n")
+
     def test_usb_strategy_arms_real_monitor_before_avrdude_and_verifies_build(self):
         artifact = self._artifact(
             filename="klipper.elf.hex",
@@ -466,6 +511,147 @@ class SimulatedFirmwareLabTests(unittest.TestCase):
             self.assertEqual(result.state, DeployState.TIMEOUT)
             self.assertEqual(lab.uploads, [])
             self.assertEqual(self._events(transcript)[-1]["state"], "TIMEOUT")
+
+
+class SimulatedConfigurationCompletionTests(unittest.TestCase):
+    """Connect real publication/HTTP verification to the CLI's durable result."""
+
+    def test_checkpoint_complete_requires_loaded_configuration_and_activation(self):
+        import kace
+        from core.config_transaction import (
+            ConfigDeploymentTransaction, ConfigTransactionState,
+            LocalMoonrakerConfigTransport,
+        )
+        from core.deployer import _config_result_to_workflow
+        from core.firmware_workflow import (
+            create_checkpoint, transition_checkpoint, write_checkpoint,
+            load_checkpoint, FirmwareWorkflowState as State,
+        )
+        from core.translations import get_lang, get_mode, set_lang, set_mode
+        from tests.regression.test_main_integration import _WIZARD_USER_DATA_WITH_PARSED
+        from tests.unit.test_config_transaction import GENERATED
+
+        self.addCleanup(set_lang, get_lang())
+        self.addCleanup(set_mode, get_mode())
+        scenarios = (
+            "fresh_verified", "fresh_stale", "fresh_extra",
+            "noop_verified", "noop_stale", "deferred",
+        )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory, MoonrakerLab() as lab:
+                root = Path(directory)
+                config = root / "config"
+                config.mkdir()
+                live = config / "printer.cfg"
+                live.write_bytes(b"[mcu]\nserial: /dev/null\n[printer]\nkinematics: none\n")
+                lab.loaded_config = {
+                    "mcu": {"serial": "/dev/null"}, "printer": {"kinematics": "none"},
+                }
+                lab.config_source = lambda: {"printer.cfg": live.read_bytes()}
+                transport = LocalMoonrakerConfigTransport(
+                    str(config), lab.host, lab.port, lab.api_key,
+                )
+                # The loopback lab has no Linux root matching the Windows
+                # temporary directory. Only path mapping is simulated; writes,
+                # restart/Ready HTTP, loaded comparator and checkpoint are real.
+                transport.validate_activation_target = lambda: None
+                events = []
+                results = []
+
+                def transaction(activation):
+                    result = ConfigDeploymentTransaction(
+                        transport, GENERATED, None, activation=activation,
+                        verify_existing_ready=True, poll_interval=0,
+                        timeout=1, output=lambda _line: None,
+                        snapshot_root=str(root / "snapshots"),
+                        state_sink=lambda state, _detail: events.append(state),
+                    ).run()
+                    results.append(result)
+                    return result
+
+                if scenario.startswith("noop_"):
+                    self.assertEqual(
+                        transaction("none").state,
+                        ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION,
+                    )
+                    if scenario == "noop_verified":
+                        lab.load_configuration()
+                    events.clear()
+                    results.clear()
+                elif scenario == "fresh_stale":
+                    lab.load_config_on_restart = False
+                elif scenario == "fresh_extra":
+                    lab.loaded_config_override = {
+                        "mcu": {"serial": "/dev/serial/by-id/test"},
+                        "printer": {"kinematics": "cartesian"},
+                        "stepper_x": {"step_pin": "PA1", "position_min": "-100"},
+                    }
+
+                user = copy.deepcopy(_WIZARD_USER_DATA_WITH_PARSED)
+                user.update(mcu_type="lpc1769", mcu_path="/dev/serial/by-id/test", language="English")
+                artifact = root / "firmware.bin"
+                artifact.write_bytes(b"firmware")
+                checkpoint = transition_checkpoint(create_checkpoint(user), State.ARTIFACT_READY, artifact={
+                    "path": str(artifact), "final_filename": "firmware.bin",
+                    "sha256": hashlib.sha256(b"firmware").hexdigest(), "size_bytes": 8,
+                    "method": "MANUAL", "strategy": "SD_CARD", "instructions": [],
+                    "build": {"mcu": "lpc1769"},
+                })
+                checkpoint = transition_checkpoint(checkpoint, State.VERIFYING_MCU)
+                checkpoint = transition_checkpoint(
+                    checkpoint, State.MCU_VERIFIED,
+                    verified_serial_path=user["mcu_path"], flash_evidence_recorded_at=1,
+                )
+                checkpoint = transition_checkpoint(checkpoint, State.CONFIG_GENERATED)
+                checkpoint = transition_checkpoint(checkpoint, State.READY_TO_DEPLOY)
+                checkpoint_path = str(root / "firmware-workflow.json")
+                write_checkpoint(checkpoint, checkpoint_path)
+                generated = root / "generated-printer.cfg"
+                generated.write_bytes(GENERATED)
+                expanduser = os.path.expanduser
+                activation = "none" if scenario == "deferred" else "firmware"
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(patch.dict(os.environ, {
+                        "KACE_AUTO": "1", "KACE_FIRMWARE_WORKFLOW_PATH": checkpoint_path,
+                    }))
+                    stack.enter_context(patch("firmware.detector.discover_mcu_hardware", return_value={}))
+                    for name in ("print_kace_banner", "print_summary"):
+                        stack.enter_context(patch("kace." + name))
+                    stack.enter_context(patch("kace.check_display_compatibility", return_value=[]))
+                    stack.enter_context(patch("kace.os.path.expanduser", side_effect=lambda path:
+                        str(generated) if path == "~/kace/printer.cfg" else expanduser(path)))
+                    stack.enter_context(patch("kace.numbered_select", return_value="moonraker"))
+                    stack.enter_context(patch("kace.deploy_moonraker", side_effect=lambda _user:
+                        _config_result_to_workflow(transaction(activation))))
+                    stack.enter_context(patch("kace.run_wizard", side_effect=AssertionError("must resume")))
+                    output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                    with self.assertRaises(SystemExit) as exited:
+                        kace.main()
+
+                saved = load_checkpoint(checkpoint_path)
+                self.assertEqual(len(results), 1)
+                if scenario.endswith("_verified"):
+                    self.assertEqual(exited.exception.code, 0, output.getvalue())
+                    self.assertEqual(saved["state"], "COMPLETE")
+                    self.assertTrue(results[0].ok)
+                    self.assertIn("DONE", events)
+                else:
+                    self.assertNotEqual(exited.exception.code, 0, output.getvalue())
+                    self.assertEqual(saved["state"], "READY_TO_DEPLOY")
+                    self.assertFalse(results[0].ok)
+                    self.assertNotIn("DONE", events)
+                    self.assertTrue(saved["last_error"])
+                if scenario == "deferred":
+                    self.assertEqual(exited.exception.code, 41)
+                    self.assertEqual(lab.configfile_queries, 0)
+                    self.assertEqual(lab.restarts, [])
+                else:
+                    self.assertGreater(lab.configfile_queries, 0)
+                    self.assertEqual(lab.restarts, [] if scenario.startswith("noop_") else ["klipper"])
+                if scenario in {"fresh_stale", "fresh_extra"}:
+                    self.assertIn(b"[stepper_x]", live.read_bytes())
+                    self.assertFalse(results[0].rollback_succeeded)
+                    self.assertIn("manual recovery", results[0].detail)
 
 
 if __name__ == "__main__":

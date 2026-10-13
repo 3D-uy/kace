@@ -125,6 +125,9 @@ class MoonrakerBoundaryTests(unittest.TestCase):
         )
         self.local_available = local_patch.start()
         self.addCleanup(local_patch.stop)
+        password_patch = patch("core.menu.password_input", return_value="")
+        self.password_prompt = password_patch.start()
+        self.addCleanup(password_patch.stop)
 
     @patch("core.deployer._run_config_transaction", return_value=success("done"))
     @patch("core.config_transaction.configuration_transport")
@@ -142,6 +145,7 @@ class MoonrakerBoundaryTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(prompt.call_count, 1)  # Only the port; no host or API key.
+        self.password_prompt.assert_not_called()
         transport.assert_called_once_with("127.0.0.1", 7125, None)
         for call in check.call_args_list:
             self.assertEqual(call.args, ("127.0.0.1", 7125))
@@ -161,14 +165,16 @@ class MoonrakerBoundaryTests(unittest.TestCase):
         result = deploy_moonraker({})
         self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
 
-    @patch("core.menu.simple_input", side_effect=["http://pi.local", "7125", "secret"])
+    @patch("core.menu.simple_input", side_effect=["http://pi.local", "7125"])
     def test_api_key_over_plain_http_is_hard_block(self, _input):
+        self.password_prompt.return_value = "secret"
         with patch("core.moonraker.check_moonraker") as check:
             result = deploy_moonraker({})
         self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
         check.assert_not_called()
 
     def test_effective_http_url_never_prompts_to_send_api_key(self):
+        self.password_prompt.return_value = "test-key"
         for host, port in (
             ("pi.local", "7125"),
             ("http://pi.local", "7125"),
@@ -176,7 +182,7 @@ class MoonrakerBoundaryTests(unittest.TestCase):
             ("http://pi.local", "443"),
         ):
             with self.subTest(host=host, port=port), \
-                    patch("core.menu.simple_input", side_effect=[host, port, "test-key"]), \
+                    patch("core.menu.simple_input", side_effect=[host, port]), \
                     patch("core.menu.yes_no") as confirm, \
                     patch("core.moonraker._urlopen") as request, \
                     patch("core.config_transaction.configuration_transport") as transport, \
@@ -196,11 +202,12 @@ class MoonrakerBoundaryTests(unittest.TestCase):
             ("127.0.0.1", "7125", "", "http://127.0.0.1:7125/server/info"),
         ):
             with self.subTest(host=host, port=port), \
-                    patch("core.menu.simple_input", side_effect=[host, port, key]), \
+                    patch("core.menu.simple_input", side_effect=[host, port]), \
                     patch("core.menu.yes_no") as confirm, \
                     patch("core.moonraker._urlopen") as request, \
                     patch("core.config_transaction.configuration_transport") as transport, \
                     patch("core.deployer._run_config_transaction") as run:
+                self.password_prompt.return_value = key
                 request.return_value.__enter__.return_value.read.return_value = (
                     b'{"result": {"moonraker_version": "test"}}'
                 )
@@ -219,7 +226,8 @@ class MoonrakerBoundaryTests(unittest.TestCase):
 
     def test_local_failed_anonymous_probe_does_not_send_entered_key(self):
         self.local_available.return_value = True
-        with patch("core.menu.simple_input", side_effect=["7125", "test-key"]), \
+        self.password_prompt.return_value = "test-key"
+        with patch("core.menu.simple_input", side_effect=["7125"]), \
                 patch("core.moonraker.check_moonraker", return_value=(False, "unauthorized")) as check, \
                 patch("core.menu.yes_no") as confirm, \
                 patch("core.config_transaction.configuration_transport") as transport:
@@ -230,10 +238,43 @@ class MoonrakerBoundaryTests(unittest.TestCase):
         confirm.assert_not_called()
         transport.assert_not_called()
 
+    def test_secret_prompt_preserves_exact_key_without_printing_or_saving_it(self):
+        key = "  synthetic-H07-key  "
+        self.password_prompt.return_value = key
+        user = {}
+        with patch("core.menu.simple_input", side_effect=["https://pi.local", "7125"]) as prompt, \
+                patch("core.moonraker.check_moonraker", return_value=(True, "OK")) as check, \
+                patch("core.config_transaction.configuration_transport") as transport, \
+                patch("core.deployer._run_config_transaction", return_value=success("done")), \
+                patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            result = deploy_moonraker(user)
+        self.assertTrue(result.ok)
+        self.assertEqual(prompt.call_count, 2)
+        self.password_prompt.assert_called_once()
+        check.assert_called_once_with("https://pi.local", 7125, api_key=key)
+        transport.assert_called_once_with("https://pi.local", 7125, key)
+        self.assertNotIn("moonraker_api_key", user)
+        self.assertNotIn(key, stdout.getvalue() + stderr.getvalue() + repr(result))
+
+    def test_cancelled_secret_prompt_stops_before_network_or_deployment(self):
+        from core.exceptions import WizardExit
+
+        self.password_prompt.side_effect = WizardExit
+        with patch("core.menu.simple_input", side_effect=["https://pi.local", "7125"]), \
+                patch("core.moonraker.check_moonraker") as check, \
+                patch("core.config_transaction.configuration_transport") as transport, \
+                patch("core.deployer._run_config_transaction") as run:
+            result = deploy_moonraker({})
+        self.assertEqual(result.outcome, WorkflowOutcome.CANCELLED)
+        check.assert_not_called()
+        transport.assert_not_called()
+        run.assert_not_called()
+
     @patch("core.deployer._run_config_transaction", return_value=success("done"))
     @patch("core.menu.numbered_select", return_value="firmware")
     @patch("core.moonraker.check_moonraker", return_value=(True, "OK"))
-    @patch("core.menu.simple_input", side_effect=["pi.local", "7125", ""])
+    @patch("core.menu.simple_input", side_effect=["pi.local", "7125"])
     def test_remote_only_host_is_rejected_before_review(self, _input, _check, _select, run):
         result = deploy_moonraker({})
         self.assertEqual(result.outcome, WorkflowOutcome.PRECONDITION_FAILED)
@@ -243,7 +284,7 @@ class MoonrakerBoundaryTests(unittest.TestCase):
 
     @patch("core.menu.yes_no", return_value=False)
     @patch("core.moonraker.check_moonraker", return_value=(False, "offline"))
-    @patch("core.menu.simple_input", side_effect=["pi.local", "7125", ""])
+    @patch("core.menu.simple_input", side_effect=["pi.local", "7125"])
     def test_unreachable_without_fallback_is_failure(self, _input, _check, _yes):
         result = deploy_moonraker({})
         self.assertEqual(result.outcome, WorkflowOutcome.DEPLOYMENT_FAILED)
@@ -487,11 +528,41 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
             deploy_firmware_installation(self._user())
             options = deployer.call_args.kwargs
             self.assertEqual(options["snapshot"].config_files["printer.cfg"], b"# original\n")
+            active = {"mcu": {"serial": "/dev/serial/by-id/test"},
+                      "printer": {"kinematics": "cartesian"}}
+            body = {"result": {"status": {"configfile": {"config": active}}}}
+            with patch("core.moonraker._get", return_value=(True, "", body)):
+                options["verify_active_configuration"]()
+                active["mcu"]["serial"] = "/dev/stale"
+                with self.assertRaisesRegex(ConfigConflictError, "active configuration differs"):
+                    options["verify_active_configuration"]()
             gate = options["before_config_upload"]
             self.assertEqual(gate()["printer.cfg"], b"# original\n")
             files["printer.cfg"] = b"# edited during firmware operation\n"
             with self.assertRaisesRegex(ConfigConflictError, "concurrent"):
                 gate()
+
+    def test_missing_loaded_verifier_blocks_adapter_before_physical_workflow(self):
+        generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"
+        with patch("core.deployer._preflight_check", return_value=True), \
+                patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", generated, None)), \
+                patch("core.config_transaction.MoonrakerConfigTransport.verify_active_configuration", None), \
+                patch("core.config_transaction.MoonrakerConfigTransport.validate_activation_target"), \
+                patch("core.config_transaction.MoonrakerConfigTransport.supports_conditional_write", return_value=True), \
+                patch("core.config_transaction.MoonrakerConfigTransport.read_files", side_effect=lambda names: dict.fromkeys(names)), \
+                patch("core.deployer._interactive_configuration_review", return_value=True), \
+                patch("core.snapshot.create_snapshot"), \
+                patch("core.power_controller.configured_power_controller", return_value=None) as power, \
+                patch("core.mcu_monitor.McuPresenceMonitor") as monitor, \
+                patch("core.moonraker_deployer.Deployer") as deployer:
+            user = self._user()
+            result = deploy_firmware_installation(user)
+        self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
+        self.assertIn("active configuration", result.detail)
+        power.assert_not_called()
+        monitor.assert_not_called()
+        deployer.assert_not_called()
+        user["firmware_deployment_service"].execute.assert_not_called()
 
     def test_firmware_wrapper_shares_config_lock_and_releases_it_on_exception(self):
         from core.config_transaction import MoonrakerConfigTransport, config_destination_lock

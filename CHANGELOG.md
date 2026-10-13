@@ -7,6 +7,16 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 [README](README.md) covers current usage; [ROADMAP](ROADMAP.md) covers pending work.
 
+## Unreleased
+
+- Require loaded raw configuration to match the complete effective reviewed plan,
+  including removed sections/options, before live DONE/COMPLETE; preserve pending
+  activation and conservative recovery when verification fails.
+- Require saved MCU verification evidence in checkpoints from MCU_VERIFIED onward,
+  without renewing receipts or repeating hardware verification on read.
+- Hide Moonraker API-key input; cancel before reading when terminal echo cannot
+  be disabled, and preserve READY_TO_DEPLOY after cancelled secret entry.
+
 ## [0.9.4-rc.3] - 2026-10-03
 
 - Review incompatible probe Z geometry in the wizard before preparing firmware,

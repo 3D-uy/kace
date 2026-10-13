@@ -1,9 +1,11 @@
 """Tests for the end-to-end KACE installation transaction."""
 
+import configparser
 import os
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -63,6 +65,10 @@ class Client:
         self.calls = []
         self.remote = {"printer.cfg": b"[printer]\nold: true\n"}
         self.rollback = False
+        self.loaded_config = {"printer": {"old": "true"}}
+        self.reload_on_restart = True
+        self.active_config_error = None
+        self.active_config_response = None
 
     @staticmethod
     def _next(values, default):
@@ -91,6 +97,10 @@ class Client:
 
     def firmware_restart(self):
         self.calls.append("restart")
+        if self.reload_on_restart:
+            parser = configparser.RawConfigParser()
+            parser.read_string(self.remote["printer.cfg"].decode("utf-8"))
+            self.loaded_config = {section: dict(parser.items(section)) for section in parser.sections()}
 
     def restart_moonraker(self):
         self.calls.append("restart_moonraker")
@@ -111,7 +121,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.printer = os.path.join(self.tmp.name, "printer.cfg")
         self.macros = os.path.join(self.tmp.name, "macros.cfg")
         with open(self.printer, "wb") as stream:
-            stream.write(b"[printer]\n")
+            stream.write(b"[printer]\nkinematics: cartesian\n")
         with open(self.macros, "wb") as stream:
             stream.write(b"[gcode_macro TEST]\n")
         self.manifest = DeploymentManifest(
@@ -126,11 +136,32 @@ class InstallationWorkflowTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def deployer(self, client, manifest, **kwargs):
+        from core.config_transaction import MoonrakerConfigTransport
+        from core.managed_config import build_managed_config_plan
+
+        plan = build_managed_config_plan(Path(manifest.printer_cfg_path).read_bytes(), None, {})
+
+        def verify_active_configuration():
+            client.calls.append("active_config")
+            if client.active_config_error is not None:
+                raise client.active_config_error
+            response = client.active_config_response
+            if response is None:
+                response = (True, "", {"result": {"status": {
+                    "configfile": {"config": client.loaded_config},
+                }}})
+            with patch("core.moonraker._get", return_value=response):
+                MoonrakerConfigTransport("localhost", 7125).verify_active_configuration(plan)
+
+        verifier = kwargs.pop("verify_active_configuration", verify_active_configuration)
+        return Deployer(client, manifest, verify_active_configuration=verifier, **kwargs)
+
     def make(self, client=None, monitor=None, events=None, prompt=None):
         client = client or Client({})
         # The fake remote must start at the state actually captured by backup.
         client.remote.update(self.snapshot.config_files)
-        deployer = Deployer(
+        deployer = self.deployer(
             client, self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor or Monitor(),
             power_cycle_prompt=prompt or (lambda: True),
@@ -164,7 +195,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         monitor.wait_for_present = lambda **kwargs: (
             order.append("mcu_present"), original_present(**kwargs)
         )[1]
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}), self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor,
             power_cycle_prompt=lambda: order.append("confirmed") or True,
@@ -194,7 +225,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         order = []
         monitor = Monitor()
         events = []
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}),
             self.manifest,
             snapshot=self.snapshot,
@@ -215,7 +246,7 @@ class InstallationWorkflowTests(unittest.TestCase):
 
     def test_cancel_while_relay_is_off_never_powers_back_on(self):
         order = []
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}),
             self.manifest,
             snapshot=self.snapshot,
@@ -235,7 +266,7 @@ class InstallationWorkflowTests(unittest.TestCase):
 
     def test_manual_relay_emits_physical_states_in_safe_order(self):
         events = []
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}),
             self.manifest,
             snapshot=self.snapshot,
@@ -272,7 +303,7 @@ class InstallationWorkflowTests(unittest.TestCase):
             status=SimpleNamespace(value="ACTION_REQUIRED"),
             detail="operator action is unresolved",
         )
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}),
             self.manifest,
             snapshot=self.snapshot,
@@ -291,7 +322,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         monitor = Monitor()
         original_arm = monitor.arm
         monitor.arm = lambda: (order.append("arm"), original_arm())[1]
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}), self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor,
             firmware_copy=lambda: order.append("copy") or True,
@@ -305,7 +336,7 @@ class InstallationWorkflowTests(unittest.TestCase):
 
     def test_failed_required_backup_aborts_before_firmware_action(self):
         action = []
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}),
             self.manifest,
             snapshot_loader=lambda: None,
@@ -363,7 +394,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         client = Client({})
         from dataclasses import replace
         snapshot = replace(self.snapshot, missing_files=self.snapshot.missing_files + ("moonraker.conf",))
-        deployer = Deployer(
+        deployer = self.deployer(
             client,
             manifest,
             snapshot=snapshot,
@@ -379,7 +410,7 @@ class InstallationWorkflowTests(unittest.TestCase):
         monitor = Monitor()
         original_arm = monitor.arm
         monitor.arm = lambda: (order.append("arm"), original_arm())[1]
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}), self.manifest, snapshot=self.snapshot,
             mcu_monitor=monitor,
             firmware_deploy=lambda: order.append("flash") or SimpleNamespace(
@@ -396,7 +427,7 @@ class InstallationWorkflowTests(unittest.TestCase):
 
     def test_copy_failure_is_structured_and_never_arms_monitor(self):
         monitor = Monitor()
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}), self.manifest, mcu_monitor=monitor,
             firmware_copy=lambda: False, event_sink=lambda _event: None, snapshot=self.snapshot,
         )
@@ -550,7 +581,7 @@ class InstallationWorkflowTests(unittest.TestCase):
 
         monitor.wait_for_present = wait_for_present
         events = []
-        deployer = Deployer(
+        deployer = self.deployer(
             Client({}),
             self.manifest,
             snapshot=self.snapshot,
@@ -626,7 +657,7 @@ class InstallationWorkflowTests(unittest.TestCase):
             self.macros,
         )
         client = Client({}, versions=[{"mcu": previous.reported_version}])
-        deployer = Deployer(
+        deployer = self.deployer(
             client,
             manifest,
             snapshot=self.snapshot,
@@ -650,6 +681,95 @@ class InstallationWorkflowTests(unittest.TestCase):
         self.assertEqual(result.state, DeployState.DONE)
         self.assertEqual(client.calls.count("restart"), 1)
         self.assertGreaterEqual(client.calls.count("klipper"), 3)
+
+    def test_loaded_configuration_is_verified_after_restart_and_firmware_before_done(self):
+        client = Client({})
+        events = []
+        result = self.make(client=client, events=events).run()
+        self.assertEqual(result.state, DeployState.DONE)
+        self.assertEqual(client.calls.count("active_config"), 1)
+        verification = client.calls.index("active_config")
+        self.assertLess(client.calls.index("restart"), verification)
+        self.assertEqual(client.calls[verification - 1], "versions")
+        self.assertTrue(any(isinstance(call, tuple) and call[0] == "download"
+                            for call in client.calls[verification + 1:]))
+        self.assertEqual(events[-1]["state"], "DONE")
+
+    def test_invalid_loaded_configuration_never_completes(self):
+        for case in ("stale", "malformed", "unavailable", "timeout"):
+            with self.subTest(case=case):
+                client = Client({})
+                if case == "stale":
+                    client.reload_on_restart = False
+                elif case == "malformed":
+                    client.active_config_response = (True, "", {"result": {"status": []}})
+                elif case == "unavailable":
+                    client.active_config_response = (False, "unavailable", {})
+                else:
+                    client.active_config_error = TimeoutError("active configuration query timed out")
+                events = []
+                result = self.make(client=client, events=events).run()
+                self.assertEqual(result.state, DeployState.CONFIG_ERROR)
+                self.assertIn("active configuration", result.detail)
+                self.assertNotIn("DONE", [event["state"] for event in events])
+                self.assertEqual(client.calls.count("active_config"), 1)
+                self.assertTrue(result.rollback_succeeded)
+                self.assertEqual(client.remote, self.snapshot.config_files)
+
+    def test_missing_active_verifier_blocks_before_physical_action(self):
+        client = Client({})
+        monitor = Monitor()
+        events = []
+        actions = []
+        deployer = self.deployer(client, self.manifest, snapshot=self.snapshot,
+            mcu_monitor=monitor, firmware_deploy=lambda: actions.append("flash"),
+            verify_active_configuration=None, event_sink=events.append)
+        result = deployer.run()
+        self.assertEqual(result.state, DeployState.FAILED_PRECONDITION)
+        self.assertIn("active configuration", result.detail)
+        self.assertEqual(actions, [])
+        self.assertNotIn("arm", monitor.calls)
+        self.assertFalse(any(isinstance(call, tuple) and call[0] == "upload" for call in client.calls))
+        self.assertNotIn("restart", client.calls)
+        self.assertNotIn("DONE", [event["state"] for event in events])
+
+    def test_no_write_verification_failure_does_not_restore_or_restart(self):
+        client = Client({})
+        manifest = DeploymentManifest(self.manifest.targets, self.printer, config_artifacts=[])
+        events = []
+        deployer = self.deployer(client, manifest, snapshot=self.snapshot, event_sink=events.append)
+        deployer.POLL_INTERVAL_S = 0.001
+        result = deployer.run()
+        self.assertEqual(result.state, DeployState.CONFIG_ERROR)
+        self.assertIsNone(result.rollback_succeeded)
+        self.assertNotIn("restart", client.calls)
+        self.assertNotIn("rollback", client.calls)
+        self.assertEqual(client.remote, self.snapshot.config_files)
+        self.assertNotIn("DONE", [event["state"] for event in events])
+
+    def test_active_verification_failure_keeps_conflicting_live_edit(self):
+        from core.config_transaction import ConfigConflictError
+
+        client = Client({})
+        events = []
+        deployer = self.make(client=client, events=events)
+        external = b"[printer]\nkinematics: corexy\n"
+
+        def conflicting_verification():
+            client.remote["printer.cfg"] = external
+            raise ConfigConflictError("configuration changed during active verification")
+
+        deployer.verify_active_configuration = conflicting_verification
+        # The transport refuses restoration when the live file is no longer
+        # the one this operation published; the caller must preserve that result.
+        client.restore_snapshot = lambda _snapshot, **_kwargs: ["printer.cfg"]
+        result = deployer.run()
+        self.assertEqual(result.state, DeployState.CONFIG_ERROR)
+        self.assertFalse(result.rollback_succeeded)
+        self.assertEqual(client.remote["printer.cfg"], external)
+        self.assertEqual(client.calls.count("restart"), 1)
+        self.assertIn("rollback upload failed", result.detail)
+        self.assertNotIn("DONE", [event["state"] for event in events])
 
     def test_config_error_rolls_back_and_validates_ready(self):
         client = Client({}, states=["ready", "ready", "error", "ready", "ready"])
