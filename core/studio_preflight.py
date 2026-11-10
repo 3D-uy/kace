@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 from hashlib import sha256
+import hmac
 import json
 import os
 from pathlib import PurePosixPath
@@ -18,7 +19,7 @@ import time
 import uuid
 
 
-SCHEMA = "kace-studio-preflight/v1"
+SCHEMA = "kace-studio-preflight/v2"
 PORT_ENV = "KACE_STUDIO_PREFLIGHT_PORT"
 TOKEN_ENV = "KACE_STUDIO_PREFLIGHT_TOKEN"
 SESSION_ENV = "KACE_STUDIO_PREFLIGHT_SESSION"
@@ -72,6 +73,13 @@ def _unique_object(pairs):
 
 def _reject_constant(_value):
     raise _ProtocolError("Studio returned a non-finite JSON value")
+
+
+def _auth(payload, token, domain):
+    """Authenticate canonical JSON with direction separation; never send the key."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=True, allow_nan=False).encode("utf-8")
+    return hmac.new(bytes.fromhex(token), domain + canonical, sha256).hexdigest()
 
 
 def _files_payload(files, tree_digest):
@@ -128,10 +136,11 @@ def validate_files(files, identity, tree_digest):
             if not isinstance(value, str) or not pattern.fullmatch(value):
                 raise _ProtocolError("Studio validator identity is malformed")
         request = {
-            "schema": SCHEMA, "token": token, "session": session,
+            "schema": SCHEMA, "session": session,
             "request_id": uuid.uuid4().hex, **identity, "tree_digest": tree_digest,
             "files": _files_payload(files, tree_digest),
         }
+        request["auth"] = _auth(request, token, b"request\0")
         encoded = json.dumps(request, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
         if len(encoded) > MAX_REQUEST_BYTES:
             raise _ProtocolError("Studio validation request exceeds the protocol size limit")
@@ -143,10 +152,15 @@ def validate_files(files, identity, tree_digest):
                 raise _ProtocolError("Studio validation response exceeds the protocol size limit")
             raw = _receive_exact(connection, size, deadline)
         result = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
-        expected_fields = {"schema", "session", "request_id", *IDENTITY_FIELDS, "tree_digest", "status", "detail"}
+        expected_fields = {"schema", "session", "request_id", *IDENTITY_FIELDS, "tree_digest", "status", "detail", "auth"}
         if not isinstance(result, dict) or set(result) != expected_fields:
             raise _ProtocolError("Studio validation response has an unexpected schema")
-        for key in expected_fields - {"status", "detail"}:
+        authenticator = result["auth"]
+        if (not isinstance(authenticator, str) or not _HEX64.fullmatch(authenticator)
+                or not hmac.compare_digest(authenticator, _auth(
+                    {key: value for key, value in result.items() if key != "auth"}, token, b"response\0"))):
+            raise _ProtocolError("Studio validation response could not be authenticated")
+        for key in expected_fields - {"status", "detail", "auth"}:
             if not isinstance(result[key], str) or result[key] != request[key]:
                 raise _ProtocolError("Studio validation response does not match this session, request, tree or validator")
         if result["status"] not in ("valid", "invalid", "unverified") or not isinstance(result["status"], str):

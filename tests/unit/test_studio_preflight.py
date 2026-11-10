@@ -1,5 +1,7 @@
 """The Pi accepts only an exact, bounded result on the current Studio tunnel."""
 import base64
+from hashlib import sha256
+import hmac
 import json
 import socket
 import threading
@@ -25,9 +27,12 @@ def bridge_environment(monkeypatch):
 
 
 def response(request, **changes):
-    result = {key: value for key, value in request.items() if key not in {"token", "files"}}
+    result = {key: value for key, value in request.items() if key not in {"auth", "files"}}
     result.update(status="valid", detail="fan references checked in pinned image")
     result.update(changes)
+    if "auth" not in changes:
+        canonical = json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode()
+        result["auth"] = hmac.new(bytes.fromhex(TOKEN), b"response\0" + canonical, sha256).hexdigest()
     return json.dumps(result).encode()
 
 
@@ -89,17 +94,24 @@ def test_exact_current_result_and_binary_tree_cross_only_loopback(monkeypatch, s
     assert destinations == [("127.0.0.1", 32123)]
     assert connection.closed
     assert len(connection.request["request_id"]) == 32
+    assert "token" not in connection.request
+    assert TOKEN not in json.dumps(connection.request)
+    request_payload = {key: value for key, value in connection.request.items() if key != "auth"}
+    expected_auth = hmac.new(bytes.fromhex(TOKEN), b"request\0" + json.dumps(
+        request_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode(), sha256).hexdigest()
+    assert connection.request["auth"] == expected_auth
     assert {item["path"]: base64.b64decode(item["content_base64"], validate=True)
             for item in connection.request["files"]} == files
     assert TOKEN not in repr(result)
 
 
 @pytest.mark.parametrize("field,value", [
-    ("schema", "kace-studio-preflight/v2"), ("session", "0" * 32),
+    ("schema", "kace-studio-preflight/v1"), ("session", "0" * 32),
     ("request_id", "0" * 32), ("pin", "0" * 40), ("tree_digest", "0" * 64),
     ("engine_sha256", "0" * 64), ("dockerfile_sha256", "0" * 64),
     ("worker_sha256", "0" * 64), ("status", True), ("status", "approved"),
     ("detail", {}), ("detail", "x" * 4097), ("session", None),
+    ("auth", "0" * 64), ("auth", None), ("auth", True),
 ])
 def test_stale_or_malformed_result_cannot_approve(monkeypatch, field, value):
     connect(monkeypatch, lambda request: response(request, **{field: value}))
@@ -240,6 +252,26 @@ def test_two_requests_have_distinct_nonce_and_old_response_is_rejected(monkeypat
     assert second.request["request_id"] != prior_nonce
 
 
+def test_signed_rejection_cannot_be_changed_into_approval(monkeypatch):
+    def tamper(request):
+        original = json.loads(response(request, status="invalid"))
+        original["status"] = "valid"
+        return json.dumps(original).encode()
+    connect(monkeypatch, tamper)
+    result = validate()
+    assert result["status"] == "unverified"
+    assert "authenticated" in result["detail"]
+
+
+def test_response_without_authenticator_is_not_accepted(monkeypatch):
+    def unsigned(request):
+        result = json.loads(response(request))
+        result.pop("auth")
+        return json.dumps(result).encode()
+    connect(monkeypatch, unsigned)
+    assert validate()["status"] == "unverified"
+
+
 def test_actual_loopback_framing_without_docker(monkeypatch):
     errors = []
     with socket.socket() as listener:
@@ -253,7 +285,7 @@ def test_actual_loopback_framing_without_docker(monkeypatch):
                     deadline = client.time.monotonic() + 2
                     size = int.from_bytes(client._receive_exact(connection, 4, deadline), "big")
                     request = json.loads(client._receive_exact(connection, size, deadline))
-                    assert request["session"] == SESSION and request["token"] == TOKEN
+                    assert request["session"] == SESSION and "token" not in request
                     payload = response(request, status="invalid", detail="Unknown heater 'missing'")
                     connection.sendall(len(payload).to_bytes(4, "big") + payload)
             except Exception as exc:
@@ -265,3 +297,38 @@ def test_actual_loopback_framing_without_docker(monkeypatch):
         assert not worker.is_alive()
         assert not errors
         assert result["status"] == "invalid"
+
+
+def test_port_replacement_peer_cannot_approve_by_echoing_wire_fields(monkeypatch):
+    """A process binding the old forwarded port must not learn a signing secret."""
+    errors, observed = [], []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(2)
+        monkeypatch.setenv(client.PORT_ENV, str(listener.getsockname()[1]))
+        def impersonate():
+            try:
+                with listener.accept()[0] as connection:
+                    deadline = client.time.monotonic() + 2
+                    size = int.from_bytes(client._receive_exact(connection, 4, deadline), "big")
+                    incoming = json.loads(client._receive_exact(connection, size, deadline))
+                    observed.append(incoming)
+                    # This peer only knows the bytes sent on its accepted socket.
+                    # Echoing the request authenticator must not authenticate a
+                    # response, and the secret must never appear on the wire.
+                    forged = {key: value for key, value in incoming.items() if key not in {"token", "files"}}
+                    forged.update(status="valid", detail="forged validation")
+                    payload = json.dumps(forged).encode()
+                    connection.sendall(len(payload).to_bytes(4, "big") + payload)
+            except Exception as exc:
+                errors.append(exc)
+        worker = threading.Thread(target=impersonate, daemon=True)
+        worker.start()
+        result = validate()
+        worker.join(3)
+        assert not worker.is_alive()
+        assert not errors
+        assert result["status"] == "unverified"
+        assert observed and "token" not in observed[0]
+        assert TOKEN not in json.dumps(observed)

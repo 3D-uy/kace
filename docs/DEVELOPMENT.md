@@ -37,6 +37,11 @@ then KACE sends its effective tree through a session-scoped SSH reverse tunnel.
 partial or stale context fails closed, with no fallback to Docker on the Pi.
 The response must match a fresh request ID, session, tree digest, Klipper pin and
 canonical-LF SHA-256 identities of the engine, recipe and worker. Publication
+uses protocol `kace-studio-preflight/v2`: both directions carry HMAC-SHA256 over
+canonical JSON with separate request/response domains. The private session key
+never travels in the request; a process rebinding a stale loopback port cannot
+forge approval by echoing its public fields. Unsigned v1 responses are rejected.
+Publication
 still rechecks the plan and destination before writing. Studio does not own
 hardware decisions or deploy the tree. Launching `kace` manually in a new shell
 does not inherit this context; reconnect and use Studio's guarded launch for a
