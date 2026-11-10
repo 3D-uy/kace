@@ -170,7 +170,7 @@ class TestMotionModel(unittest.TestCase):
         self.assertEqual(space.printable_x_max, 235.0)
         self.assertEqual(space.printable_y_max, 235.0)
 
-        # 4. Offset travel shift alignment (e.g. position_min = -5, position_max = 295, x_size = 300)
+        # 4. A displaced rail does not establish the physical bed origin.
         user_data = {
             "x_size": "300",
             "y_size": "300",
@@ -179,6 +179,10 @@ class TestMotionModel(unittest.TestCase):
             "y_position_min": "-10",
             "y_position_max": "290",
         }
+        with self.assertRaisesRegex(ValueError, "explicit.*printable_x_min"):
+            PrinterMotionSpace(user_data)
+        user_data.update(printable_x_min="-5", printable_x_max="295",
+                         printable_y_min="-10", printable_y_max="290")
         space = PrinterMotionSpace(user_data)
         self.assertEqual(space.printable_x_min, -5.0)
         self.assertEqual(space.printable_x_max, 295.0)

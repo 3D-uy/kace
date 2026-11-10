@@ -276,12 +276,14 @@ def main():
         sys.exit(0 if ok else 1)
 
     # ── Standard test suite ───────────────────────────────────────────────────
-    verbosity = 2 if args.verbose else 1
-    loader = unittest.TestLoader()
-    suite  = loader.discover(start_dir=test_dir, pattern="test_*.py")
-    runner = KaceTestRunner(verbosity=verbosity)
-    result = runner.run(suite)
-    sys.exit(not result.wasSuccessful())
+    # The canonical collector also runs unittest.TestCase, while applying the
+    # pytest fixtures required by simulated publication tests. unittest discovery
+    # alone silently omits function tests and cannot supply those fixtures.
+    import pytest
+    sys.exit(pytest.main([
+        test_dir, "--ignore=" + os.path.join(test_dir, "results"),
+        "-v" if args.verbose else "-q", "-rs",
+    ]))
 
 
 if __name__ == "__main__":

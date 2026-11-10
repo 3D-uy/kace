@@ -324,16 +324,24 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
         user_ctx["safe_z_home_x"] = f"{safe_home_x:g}"
         user_ctx["safe_z_home_y"] = f"{safe_home_y:g}"
     user_ctx["motion_space"] = space.to_dict()
+    if probe_configuration.generates_safe_z_home:
+        from core.homing_source import resolve_safe_z_hop
+        user_ctx["safe_z_home_z_hop"] = resolve_safe_z_hop(parsed_data, user_ctx)
 
     # Auto-generate bed_mesh config
-    from core.bed_mesh import generate_bed_mesh_config, validate_mesh_clearance, validate_mesh_interpolation
+    from core.bed_mesh import generate_bed_mesh_config, validate_mesh_clearance, validate_mesh_interpolation, validate_mesh_options
     user_ctx["bed_mesh"] = generate_bed_mesh_config(
         space, user_ctx, parsed_data, probe_configuration=probe_configuration
     )
 
     # Derive leveling coordinates
     from core.leveling import derive_leveling_points
-    user_ctx["leveling"] = derive_leveling_points(space, int(user_ctx.get("z_motors") or 1))
+    z_motors = int(user_ctx.get("z_motors") or 1)
+    user_ctx["leveling"] = (
+        derive_leveling_points(space, z_motors)
+        if probe_configuration.generates_bed_mesh and z_motors >= 2
+        else {"z_tilt_points": [], "quad_gantry_level_points": []}
+    )
     # Setup Jinja2 environment
     env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR, encoding='utf-8'))
     template = env.get_template('printer.cfg.j2')
@@ -342,6 +350,8 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     # into the caller's parsed_data through shared nested dict references.
     import copy
     pins_ctx = copy.deepcopy(parsed_data)
+    from core.motor_direction import apply_motor_directions
+    apply_motor_directions(pins_ctx, user_ctx)
     from core.homing_source import additional_z_endstops, validate_additional_z_endstops
     pins_ctx['_additional_z_endstops'] = additional_z_endstops(parsed_data)
     pins_ctx['_bltouch_flags'] = {}
@@ -517,8 +527,21 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     )
     rendered_sections = _read_pin_config(final_output)[0]
     validate_additional_z_endstops(parsed_data, rendered_sections, z_count=int(user_ctx.get('z_motors') or 1))
-    from core.primary_mcu import validate_primary_restart
+    from core.primary_mcu import validate_primary_restart, validate_mcu_connection_options
     validate_primary_restart(rendered_sections, expected=user_ctx['mcu_restart_method'])
+    validate_mcu_connection_options(rendered_sections)
+    from core.heater_options import validate_heater_options
+    validate_heater_options(rendered_sections)
+    from core.pwm_output import validate_pwm_outputs
+    validate_pwm_outputs(rendered_sections)
+    from core.sx1509_pwm import validate_sx1509_pwm
+    validate_sx1509_pwm(rendered_sections)
+    from core.fan_consumers import validate_fan_consumers
+    validate_fan_consumers(rendered_sections)
+    from core.fan_auxiliary import validate_fan_auxiliary
+    validate_fan_auxiliary(rendered_sections)
+    from core.controller_fan_references import validate_controller_fan_references
+    validate_controller_fan_references(rendered_sections)
     from core.heater_verification import validate_verify_heater, validate_source_verification
     validate_verify_heater(final_output)
     if not thermal_review_only:
@@ -529,7 +552,11 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     validate_part_fan_options(rendered_sections)
     validate_heater_fan_options(final_output)
     validate_mesh_clearance(rendered_sections)
+    from core.leveling import validate_leveling_clearance, validate_leveling_adjustment_options
+    validate_leveling_clearance(rendered_sections)
+    validate_leveling_adjustment_options(rendered_sections)
     validate_mesh_interpolation(rendered_sections)
+    validate_mesh_options(rendered_sections)
     validate_static_digital_outputs(rendered_sections)
     validate_bltouch_flags(rendered_sections)
     validate_bltouch_hardware_options(rendered_sections, expected=pins_ctx['_bltouch_hardware'])
@@ -537,6 +564,8 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     validate_motion_timing(rendered_sections)
     validate_homing_options(rendered_sections)
     validate_probe_homing_geometry(rendered_sections)
+    from core.homing_source import validate_safe_z_hop
+    validate_safe_z_hop(rendered_sections)
     validate_primary_extruder_options(rendered_sections)
     validate_bed_circuit(rendered_sections, required=True)
     from core.board_auxiliary import validate_replicape_platform
@@ -580,6 +609,13 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
     except (PinAliasError, FirmwareIdentityError, FirmwareWorkflowError) as exc:
         raise GenerationError(str(exc)) from exc
 
+    from core.config_geometry import GeometryContext, validate_effective_xy_geometry
+    geometry_context = GeometryContext.from_generated(final_output.encode("utf-8"), space)
+    try:
+        validate_effective_xy_geometry(final_output, geometry_context)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
     if thermal_review_only:
         # No CFG, provenance, macro or directory writes. Return review facts,
         # never a deployable content/path result with source requirements omitted.
@@ -604,9 +640,11 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
 
     write_text_atomically(cfg_file, final_output)
     import json
+    from dataclasses import asdict
     write_text_atomically(cfg_file + ".provenance.json", json.dumps(
         {"schema": "kace-config-provenance/v1", "values": value_provenance,
          "resolved_values": {key: user_ctx.get(key) for key in resolved_values},
+         "geometry": asdict(geometry_context),
          "sources": configuration_sources},
         indent=2, sort_keys=True,
     ) + "\n")

@@ -107,8 +107,14 @@ def test_live_adapter_rejects_reserved_custom_include_with_mcu_scope(tmp_path, e
     original = {"printer.cfg": GENERATED + b"[include user.cfg]\n", "user.cfg": b"[include pin.cfg]\n",
                 "pin.cfg": extra}
     transport = FakeTransport(original)
+    from core.snapshot import create_snapshot
+    def isolated_snapshot(*args, **kwargs):
+        if not kwargs.get("persist_root"):
+            kwargs["persist_root"] = str(tmp_path / "snapshots")
+        return create_snapshot(*args, **kwargs)
     with patch("core.deployer._preflight_check", return_value=True), patch(
-        "core.deployer._interactive_configuration_review", return_value=True):
+        "core.deployer._interactive_configuration_review", return_value=True), patch(
+        "core.config_transaction.create_snapshot", side_effect=isolated_snapshot):
         result = _run_config_transaction(transport, {"firmware_artifact": built}, "none",
                                          generated=(str(tmp_path / "source.cfg"), STANDARD, None))
     if expected:

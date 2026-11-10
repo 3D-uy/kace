@@ -52,7 +52,12 @@ def test_export_does_not_copy_invalid_saved_config_or_companion_firmware(tmp_pat
             'core.config_transaction.LocalConfigTransport', return_value=transport):
         result = getattr(deployer, 'deploy_' + kind)({'firmware_path': str(firmware)}, artifact_type=artifact_type)
     assert not result.ok
-    assert 'display hardware' in capsys.readouterr().out
+    if artifact_type == 'config':
+        assert 'display hardware' in capsys.readouterr().out
+    else:
+        # The legacy combined export is rejected before reading any payload.
+        assert result.detail == deployer._FOLDER_EXPORT_BOUNDARY
+        assert capsys.readouterr().out == ''
     assert not transport.calls
     assert (dest/'printer.cfg').read_bytes() == original
     assert not (dest/'firmware.bin').exists()

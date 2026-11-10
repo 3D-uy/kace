@@ -94,7 +94,7 @@ class GuidedCustomProbeSettings:
         if self.samples_result not in {"median", "average"}:
             raise CustomProbeValidationError("samples_result must be median or average.")
 
-    def to_config(self) -> "CustomProbeConfig":
+    def to_config(self, *, language: str = "English", polarity_unverified: bool = False) -> "CustomProbeConfig":
         """Render only guided values into the standard Klipper ``[probe]`` section."""
         lines = [
             "[probe]",
@@ -102,7 +102,13 @@ class GuidedCustomProbeSettings:
             f"x_offset: {self.x_offset:g}",
             f"y_offset: {self.y_offset:g}",
         ]
-        lines.append(f"z_offset: {(self.z_offset if self.z_offset is not None else 0):g}")
+        z_offset = self.z_offset if self.z_offset is not None else 0
+        z_text = f"{z_offset:g}"
+        # Keep familiar compact values, but never round an explicitly supplied
+        # trigger height across a Z travel boundary.
+        if float(z_text) != z_offset:
+            z_text = str(z_offset)
+        lines.append(f"z_offset: {z_text}")
         lines.extend([
             f"samples: {self.samples}",
             f"samples_tolerance: {self.samples_tolerance:g}",
@@ -111,7 +117,19 @@ class GuidedCustomProbeSettings:
             f"samples_result: {self.samples_result}",
             f"sample_retract_dist: {self.sample_retract_dist:g}",
         ])
-        return parse_custom_probe_config("\n".join(lines))
+        from core.translations import UI_STRINGS
+
+        annotated = [lines[0]]
+        comment_column = max(len(line) for line in lines[1:]) + 2
+        if polarity_unverified:
+            annotated.append("# " + UI_STRINGS["wizard.probe_signal.pending"][language])
+        for line in lines[1:]:
+            option = line.split(":", 1)[0]
+            comment = UI_STRINGS[f"wizard.probe_comment.{option}"][language]
+            if option == "z_offset" and self.z_offset is None:
+                comment = UI_STRINGS["wizard.probe_comment.uncalibrated"][language]
+            annotated.append(f"{line:<{comment_column}}# {comment}")
+        return parse_custom_probe_config("\n".join(annotated))
 
 
 @dataclass(frozen=True)
@@ -134,6 +152,26 @@ class CustomProbeConfig:
     def requires_offset_prompt(self) -> bool:
         """Whether X or Y must be supplied for KACE geometry calculations."""
         return self.x_offset is None or self.y_offset is None
+
+    def with_z_offset(self, value: str) -> "CustomProbeConfig":
+        """Replace an explicitly edited Z value, preserving all other source bytes."""
+        value = _numeric_text(value, "z_offset")
+        lines = self.config_text.splitlines(keepends=True)
+        section = None
+        for index, line in enumerate(lines):
+            header = _section_name(line)
+            if header is not None:
+                section = header
+            if section != self.primary_section:
+                continue
+            match = re.match(r"^\s*z_offset\s*:\s*(\S+)", line, re.IGNORECASE)
+            if match:
+                start, end = match.span(1)
+                # The parser accepts inline comments even without separating space.
+                end = start + len(match.group(1).split("#", 1)[0])
+                lines[index] = line[:start] + value + line[end:]
+                return parse_custom_probe_config("".join(lines), policy=self.policy)
+        raise CustomProbeValidationError("No existing z_offset to edit in the primary probe section.")
 
     def with_missing_offsets(self, *, x_offset: Optional[str] = None,
                              y_offset: Optional[str] = None) -> "CustomProbeConfig":

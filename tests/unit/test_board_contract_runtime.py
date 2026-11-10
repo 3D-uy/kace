@@ -285,6 +285,7 @@ class BoardContractRuntimeTests(unittest.TestCase):
         physical = SimpleNamespace(final_state=SimpleNamespace(value="MCU_REENUMERATED"), digest="test-proof")
         data = {"board": alias, "mcu_type": mcu, "mcu_hint": "uart"}
         with patch.dict("os.environ", {"KACE_BOARD_CONTRACT_SD_DEPLOY": "1"}), \
+             patch("core.firmware_wizard.numbered_select", return_value="compile"), \
              patch("core.firmware_wizard.yes_no", return_value=True), \
              patch("core.firmware_wizard.build_board_contract_runtime", return_value=bundle), \
              patch("core.board_contract_deployment.run_sd_card_contract_deployment", return_value=physical) as deploy:
@@ -299,7 +300,7 @@ class BoardContractRuntimeTests(unittest.TestCase):
     @patch("core.firmware_wizard.derive_config")
     @patch("firmware.deployment.profiles.load_profiles")
     @patch("core.loader.load_boards_yaml")
-    @patch("core.firmware_wizard.yes_no", return_value=True)
+    @patch("core.firmware_wizard.numbered_select", return_value="compile")
     def test_migrated_workflows_never_consult_legacy_firmware_decisions(
         self,
         _confirm,
@@ -340,7 +341,7 @@ class BoardContractRuntimeTests(unittest.TestCase):
         legacy_profiles.assert_not_called()
 
     @patch("core.firmware_wizard.build_board_contract_runtime")
-    @patch("core.firmware_wizard.yes_no", return_value=False)
+    @patch("core.firmware_wizard.numbered_select", side_effect=["details", "skip"])
     def test_contract_target_is_fully_reviewed_before_build_confirmation(
         self, _confirm, contract_build
     ):
@@ -369,7 +370,7 @@ class BoardContractRuntimeTests(unittest.TestCase):
     @patch("core.firmware_wizard._resolve_firmware_configuration")
     @patch("core.firmware_wizard.derive_config")
     @patch("core.firmware_wizard.build_board_contract_runtime")
-    @patch("core.firmware_wizard.yes_no", return_value=True)
+    @patch("core.firmware_wizard.numbered_select", return_value="compile")
     def test_contract_error_blocks_without_legacy_fallback(
         self,
         _confirm,

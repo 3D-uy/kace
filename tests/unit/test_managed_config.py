@@ -40,7 +40,8 @@ class TestManagedConfigPlan(unittest.TestCase):
                 plan = build_managed_config_plan(GENERATED, None, {ROOT_REMOTE: existing})
                 files = {item.remote_name: item.content for item in plan.artifacts}
                 root = files[ROOT_REMOTE]
-                self.assertTrue(root.startswith(b"# KACE layout: root-v1\n[include mainsail.cfg]\n\n"))
+                self.assertTrue(root.startswith(b"# KACE layout: root-v1\n" + MANAGED_BEGIN.encode() + b"\n"))
+                self.assertGreater(root.index(b"[include mainsail.cfg]"), root.index(MANAGED_BEGIN.encode()))
                 self.assertEqual(root.count(b"[include mainsail.cfg]"), 1)
                 self.assertLess(root.index(b"[include mainsail.cfg]"), root.index(b"[mcu]"))
                 self.assertEqual(build_managed_config_plan(GENERATED, None, files).changed_artifacts, ())

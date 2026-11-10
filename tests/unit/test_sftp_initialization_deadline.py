@@ -31,7 +31,7 @@ def test_stalled_sftp_cannot_block_deployment(monkeypatch, phase):
     monkeypatch.setattr(deployer, "SFTP_TIMEOUT_SECONDS", 0.03, raising=False)
     monkeypatch.setattr(deployer, "_require_paramiko", lambda: paramiko)
     monkeypatch.setattr(deployer, "_connect_ssh_client", lambda *_a, **_k: ssh)
-    monkeypatch.setattr(deployer, "_generated_config_bytes", lambda: ("generated.cfg", b"synthetic", None))
+    monkeypatch.setattr(deployer, "_generated_config_bytes", lambda user_data=None: ("generated.cfg", b"synthetic", None))
     published = []
     def transact(transport, *_args, **_kwargs):
         if phase == "read":

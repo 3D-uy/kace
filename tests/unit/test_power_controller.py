@@ -80,6 +80,7 @@ class PowerControllerTests(TestCase):
                 load_power_config(config)
 
     def test_firmware_installation_reuses_the_configured_controller(self):
+        from tests.fixtures.klipper_preflight import valid_preflight
         from core import deployer
 
         events = []
@@ -164,6 +165,7 @@ class PowerControllerTests(TestCase):
         }
 
         with ExitStack() as stack:
+            stack.enter_context(patch("core.klipper_preflight.validate_plan", side_effect=valid_preflight))
             stack.enter_context(
                 patch(
                     "core.power_controller.configured_power_controller",

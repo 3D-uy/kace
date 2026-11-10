@@ -4,7 +4,7 @@
 # Bed Mesh Auto-Configuration Generator — KACE
 #
 # Auto-derives optimal [bed_mesh] limits, grid size, and interpolation
-# settings based on the printer's physical travel constraints.
+# settings based on declared travel and printable bounds.
 #
 
 import math
@@ -22,6 +22,32 @@ def _mesh_pair(value, option, minimum):
     if len(pair) not in (1, 2) or min(pair) < minimum:
         raise GenerationError(f"bed_mesh: {option} requires one or two integers >= {minimum}.")
     return pair * 2 if len(pair) == 1 else pair
+
+
+def validate_mesh_options(sections):
+    """Check scalar options before rendering/publication, including NaN.
+
+    The pinned loader's comparisons alone accept NaN. Fade and adaptive margin
+    have no static lower bound upstream; explicit zero must not select defaults.
+    Constraints depending on a measured mesh remain Klipper runtime checks.
+    """
+    mesh = sections.get("bed_mesh", {})
+    minimums = {"scan_overshoot": 1.0, "split_delta_z": .01,
+                "move_check_distance": 3.0}
+    for option in ("speed", "fade_start", "fade_end", "fade_target",
+                   "adaptive_margin", *minimums):
+        if option not in mesh:
+            continue
+        try:
+            value = float(str(mesh[option]).strip())
+        except (TypeError, ValueError):
+            raise GenerationError(f"bed_mesh: {option} requires a finite number.") from None
+        if not math.isfinite(value):
+            raise GenerationError(f"bed_mesh: {option} requires a finite number.")
+        if option == "speed" and value <= 0:
+            raise GenerationError("bed_mesh: speed must be greater than zero.")
+        if option in minimums and value < minimums[option]:
+            raise GenerationError(f"bed_mesh: {option} must be at least {minimums[option]:g} when specified.")
 
 
 def validate_mesh_interpolation(sections):
@@ -88,11 +114,13 @@ def _clearance_number(value, label):
 
 
 def validate_mesh_clearance(sections):
-    """Check finite height and known standard-probe/Z-travel constraints.
+    """Check finite height and configured probe/Z-travel constraints.
 
     Klipper's config reader has no static lower bound. ProbePointsHelper checks
     the probe's z_offset at runtime and the kinematics checks travel. Validate
-    those known constraints early without asserting physical clearance.
+    those known constraints early without asserting physical clearance. Eddy
+    rapid_scan also approaches its configured height from 0.5 mm above it.
+    Command-time overrides and the initial physical position are not known here.
     """
     if "bed_mesh" not in sections:
         return
@@ -108,8 +136,19 @@ def validate_mesh_clearance(sections):
         minimum = _clearance_number(z.get("position_min", "0"), "Z position_min")
         if height < minimum:
             raise GenerationError("horizontal_move_z is below Z position_min.")
-        if "position_max" in z and height > _clearance_number(z["position_max"], "Z position_max"):
-            raise GenerationError("horizontal_move_z exceeds Z position_max.")
+        if "position_max" in z:
+            maximum = _clearance_number(z["position_max"], "Z position_max")
+            if height > maximum:
+                raise GenerationError("horizontal_move_z exceeds Z position_max.")
+            # Pinned RapidScanHelper._raise_tool/_move_to_scan_height use +0.5.
+            # Only eddy providers select that path; ordinary/manual probes do not.
+            if any(name.startswith("probe_eddy_current ") for name in sections):
+                if height + 0.5 > maximum:
+                    raise GenerationError(
+                        f"horizontal_move_z: rapid_scan approach ({height + 0.5:g} mm) "
+                        f"exceeds Z position_max ({maximum:g} mm). Leave at least "
+                        "0.5 mm above the configured scan height."
+                    )
 
 
 def generate_bed_mesh_config(
@@ -118,7 +157,7 @@ def generate_bed_mesh_config(
     parsed_data: dict,
     probe_configuration=None,
 ) -> dict:
-    """Auto-generates intelligent [bed_mesh] settings from real printer geometry.
+    """Derive [bed_mesh] settings from declared printer geometry.
 
     Args:
         motion_space: An instance of PrinterMotionSpace.
@@ -145,8 +184,8 @@ def generate_bed_mesh_config(
     #
     # probeable_bed_area() returns the intersection of:
     #   probe_reachable_area (nozzle_travel + probe_offset)
-    #   physical_bed         [0, x_size] × [0, y_size]
-    # giving probe coordinates guaranteed to be on the physical bed.
+    #   declared_bed         resolved printable XY bounds (possibly shifted)
+    # This checks declared coordinates, not measured clearance or collisions.
     #
     # Using nozzle_range_for_probing() here was wrong: it returns nozzle coords
     # and never clamps against the bed bounds, producing negative mesh_min when
@@ -225,13 +264,17 @@ def generate_bed_mesh_config(
     validate_mesh_interpolation({"bed_mesh": interpolation})
 
     # 3. adaptive mesh support
-    # Automatically include adaptive_margin if requested/enabled via flags
+    # An explicit selection (including zero) overrides the selected profile.
+    # Do not coerce millimetres to integers or replace malformed input by 5.
     adaptive_margin = None
-    if user_data.get("adaptive_mesh") or user_data.get("adaptive_margin"):
-        try:
-            adaptive_margin = int(user_data.get("adaptive_margin", 5))
-        except (ValueError, TypeError):
-            adaptive_margin = 5
+    if "adaptive_margin" in user_data:
+        adaptive_margin = user_data["adaptive_margin"]
+    elif "adaptive_margin" in selected_mesh:
+        adaptive_margin = selected_mesh["adaptive_margin"]
+    elif user_data.get("adaptive_mesh"):
+        adaptive_margin = 5
+    if "adaptive_margin" in user_data or "adaptive_margin" in selected_mesh or adaptive_margin is not None:
+        validate_mesh_options({"bed_mesh": {"adaptive_margin": adaptive_margin}})
 
     # 4. horizontal_move_z
     # BLTouch/CR-Touch/contact probes: 5
@@ -239,7 +282,6 @@ def generate_bed_mesh_config(
     # Unknown: 5
     # Check if the printer profile has an explicit override
     # Clearance is mechanical profile data, not a different board's wiring.
-    # Keep the existing source policy for other mesh fields outside this fix.
     clearance_mesh = selected_mesh
     if "horizontal_move_z" in clearance_mesh:
         value = clearance_mesh["horizontal_move_z"]
@@ -253,22 +295,19 @@ def generate_bed_mesh_config(
         else:
             horizontal_move_z = 5
 
-    # Speed
-    if "speed" in profile_mesh:
-        try:
-            speed = float(profile_mesh["speed"])
-        except ValueError:
-            speed = 120.0
-    else:
-        speed = 120.0
-
-    # 5. Fade defaults
-    fade_start = profile_mesh.get("fade_start", "1")
-    fade_end = profile_mesh.get("fade_end", "10")
-    fade_target = profile_mesh.get("fade_target", "0")
+    # The selected mechanical profile owns these settings, just like clearance
+    # and interpolation. An empty selected profile must not reuse board tuning.
+    speed = selected_mesh.get("speed", "120")
+    fade_start = selected_mesh.get("fade_start", "1")
+    fade_end = selected_mesh.get("fade_end", "10")
+    fade_target = selected_mesh.get("fade_target", "0")
+    validate_mesh_options({"bed_mesh": {
+        "speed": speed, "fade_start": fade_start,
+        "fade_end": fade_end, "fade_target": fade_target,
+    }})
 
     result = {
-        "speed": f"{speed:g}",
+        "speed": str(speed).strip(),
         "horizontal_move_z": str(horizontal_move_z),
         "mesh_min": f"{mesh_min_x:.1f}, {mesh_min_y:.1f}",
         "mesh_max": f"{mesh_max_x:.1f}, {mesh_max_y:.1f}",
@@ -284,7 +323,7 @@ def generate_bed_mesh_config(
     if mesh_pps is not None:
         result["mesh_pps"] = f"{mesh_pps[0]}, {mesh_pps[1]}"
     if adaptive_margin is not None:
-        result["adaptive_margin"] = str(adaptive_margin)
+        result["adaptive_margin"] = str(adaptive_margin).strip()
 
     # Formatting must not put a generated point outside the probeable area or
     # collapse a narrow interval. Reject instead of emitting unusable geometry.

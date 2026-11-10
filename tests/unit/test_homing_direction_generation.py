@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from core.configuration_review import validate_configuration_plan
+from core.config_geometry import load_geometry_context
 from core.exceptions import GenerationError
 from core.generator import generate_config
 from core.managed_config import build_managed_config_plan, effective_hardware_text
@@ -102,7 +103,9 @@ def test_automatic_probe_z_does_not_recommend_a_physical_endstop_direction(tmp_p
     assert re.search(r'(?m)^# homing_positive_dir:\s+# Optional override:', body)
     assert not re.search(r'(?m)^# homing_positive_dir: (true|false)', body)
     assert not re.search(r'(?m)^homing_positive_dir:', body)
-    assert validate_configuration_plan(build_managed_config_plan(result['content'].encode(), None, {})).valid
+    content = result['content'].encode()
+    assert validate_configuration_plan(build_managed_config_plan(content, None, {},
+        geometry_context=load_geometry_context(tmp_path / 'printer.cfg', content))).valid
 
 
 @pytest.mark.parametrize('axis', 'xyz')

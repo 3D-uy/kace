@@ -353,14 +353,15 @@ class LocalExportBoundaryTests(unittest.TestCase):
         self.assertIn(b"[gcode_macro USER]", root)
         self.assertEqual(root, b"[gcode_macro USER]\ngcode: M117 keep\n")
 
-    def test_explicit_firmware_path_is_copied(self):
+    def test_explicit_unverified_firmware_path_cannot_use_folder_export(self):
         with tempfile.TemporaryDirectory() as source_dir, tempfile.TemporaryDirectory() as destination:
             firmware = os.path.join(source_dir, "firmware.uf2")
             with open(firmware, "wb") as output:
                 output.write(b"firmware")
-            self.assertTrue(_copy_artifacts({"firmware_path": firmware}, destination, "firmware"))
-            with open(os.path.join(destination, "firmware.uf2"), "rb") as copied:
-                self.assertEqual(copied.read(), b"firmware")
+            self.assertFalse(_copy_artifacts({"firmware_path": firmware}, destination, "firmware"))
+            self.assertEqual(os.listdir(destination), [])
+            with open(firmware, "rb") as original:
+                self.assertEqual(original.read(), b"firmware")
 
     @patch("core.deployer.platform.system", return_value="Linux")
     @patch("core.menu.simple_input", side_effect=["E:\\", None])
@@ -379,7 +380,7 @@ class LocalExportBoundaryTests(unittest.TestCase):
     @patch("core.deployer.platform.system", return_value="Windows")
     @patch("core.menu.simple_input", return_value=None)
     def test_windows_removable_prompt_offers_a_windows_drive(self, prompt, _platform):
-        result = deploy_usb({}, artifact_type="firmware")
+        result = deploy_usb({}, artifact_type="config")
 
         self.assertEqual(WorkflowOutcome.CANCELLED, result.outcome)
         self.assertIn("E:\\", prompt.call_args.args[0])
@@ -484,6 +485,7 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
         user["firmware_deployment_service"].execute.assert_not_called()
 
     def test_concurrent_review_edit_aborts_before_snapshot_power_or_firmware(self):
+        from tests.fixtures.klipper_preflight import valid_preflight
         files = {"printer.cfg": b"# original\n"}
         generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"
 
@@ -491,7 +493,8 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
             files["printer.cfg"] = b"# concurrent edit\n"
             return True
 
-        with patch("core.deployer._preflight_check", return_value=True), \
+        with patch("core.klipper_preflight.validate_plan", side_effect=valid_preflight), \
+                patch("core.deployer._preflight_check", return_value=True), \
                 patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", generated, None)), \
                 patch("core.config_transaction.MoonrakerConfigTransport.validate_activation_target"), \
                 patch("core.config_transaction.MoonrakerConfigTransport.supports_conditional_write", return_value=True), \
@@ -511,10 +514,12 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
     def test_firmware_workflow_receives_final_config_revalidation(self):
         from core.config_transaction import ConfigConflictError
         from core.snapshot import create_snapshot
+        from tests.fixtures.klipper_preflight import valid_preflight
 
         files = {"printer.cfg": b"# original\n"}
         generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"
         with tempfile.TemporaryDirectory() as root, \
+                patch("core.klipper_preflight.validate_plan", side_effect=valid_preflight), \
                 patch("core.deployer._preflight_check", return_value=True), \
                 patch("core.deployer._generated_config_bytes", return_value=("generated.cfg", generated, None)), \
                 patch("core.config_transaction.MoonrakerConfigTransport.validate_activation_target"), \
@@ -525,6 +530,13 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
                 patch("core.power_controller.configured_power_controller", return_value=None), \
                 patch("core.mcu_monitor.McuPresenceMonitor"), \
                 patch("core.moonraker_deployer.Deployer") as deployer:
+            def check_during_deployment():
+                gate = deployer.call_args.kwargs["before_config_upload"]
+                self.assertEqual(gate()["printer.cfg"], b"# original\n")
+                files["printer.cfg"] = b"# edited during firmware operation\n"
+                with self.assertRaisesRegex(ConfigConflictError, "concurrent"):
+                    gate()
+            deployer.return_value.run.side_effect = check_during_deployment
             deploy_firmware_installation(self._user())
             options = deployer.call_args.kwargs
             self.assertEqual(options["snapshot"].config_files["printer.cfg"], b"# original\n")
@@ -536,11 +548,6 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
                 active["mcu"]["serial"] = "/dev/stale"
                 with self.assertRaisesRegex(ConfigConflictError, "active configuration differs"):
                     options["verify_active_configuration"]()
-            gate = options["before_config_upload"]
-            self.assertEqual(gate()["printer.cfg"], b"# original\n")
-            files["printer.cfg"] = b"# edited during firmware operation\n"
-            with self.assertRaisesRegex(ConfigConflictError, "concurrent"):
-                gate()
 
     def test_missing_loaded_verifier_blocks_adapter_before_physical_workflow(self):
         generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"

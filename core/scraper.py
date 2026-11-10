@@ -385,6 +385,14 @@ def parse_config(raw_cfg, filename="", keep_comments=False):
             for name in extra_z
         }
 
+    if 'safe_z_home' in data:
+        from core.homing_source import SAFE_Z_HOP_SOURCE
+        data[SAFE_Z_HOP_SOURCE] = (
+            {'z_hop': data['safe_z_home']['z_hop']}
+            if 'safe_z_home' in active_sections and 'z_hop' in active_keys.get('safe_z_home', set())
+            else {}
+        )
+
     # Fan discovery may include commented examples; generation must only retain
     # active options from the source fan unless the user explicitly selects a pin.
     if "fan" in data:

@@ -324,6 +324,9 @@ def validate_custom_thermistors(sections):
             # The official Steinhart-Hart solver divides by this determinant.
             logs = [math.log(values["resistance" + str(i)]) for i in (1, 2, 3)]
             a, b, c = logs
+            # Distinct floats can round to the same logarithm.
+            if a == c:
+                raise GenerationError(f"{name}: singular three-point resistance curve.")
             determinant = (a**3 - b**3) - (a**3 - c**3) * (a - b) / (a - c)
             if determinant == 0 or not math.isfinite(determinant):
                 raise GenerationError(f"{name}: singular three-point resistance curve.")
@@ -340,10 +343,14 @@ def selected_custom_thermistors(board, user):
     selected = {}
     for key in ("hotend_thermistor", "bed_thermistor"):
         name = "thermistor " + str(user[key])
-        # The profile scraper case-folds section names; emit the selected
-        # sensor spelling because Klipper's factory lookup is case-sensitive.
-        matches = [options for source in sources for section, options in source.items()
-                   if str(section).casefold() == name.casefold()]
+        # Match Klipper's case-sensitive factory name across both sources.
+        # Only fall back to legacy case-folded maps when no exact name exists.
+        definitions = [(" ".join(str(section).split()), options)
+                       for source in sources for section, options in source.items()]
+        matches = [options for section, options in definitions if section == name]
+        if not matches:
+            matches = [options for section, options in definitions
+                       if section.casefold() == name.casefold()]
         if any(not isinstance(options, Mapping) for options in matches):
             raise GenerationError(f"{name}: invalid custom thermistor definition.")
         candidates = [dict(options) for options in matches]

@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 from core.exceptions import GenerationError
 from core.generator import generate_config
+from core.config_geometry import load_geometry_context
 from core.board_auxiliary import selected_board_electrical_source, validate_board_electrical_artifact
 from core.managed_config import build_managed_config_plan
 from core.pin_validator import _read_pin_config
@@ -79,13 +80,15 @@ def test_late_include_cannot_override_source_policy(tmp_path, noop, value):
     from core.config_transaction import ConfigDeploymentTransaction, ConfigTransactionState
     from tests.unit.test_config_transaction import FakeTransport
     text = generate(tmp_path, OPTIONS)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text)
     remote = {"printer.cfg": text + b"\n[include user.cfg]\n", "user.cfg": b"[include nested.cfg]\n",
               "nested.cfg": f"[bltouch]\nsamples_tolerance: {value}\n".encode()}
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, None, remote).artifacts})
-        assert not build_managed_config_plan(text, None, remote).changed_artifacts
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, None, remote, geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(text, None, remote, geometry_context=geometry).changed_artifacts
     transport, confirm = FakeTransport(remote), Mock(return_value=True)
     result = ConfigDeploymentTransaction(transport, text, None, selected_board=board(**OPTIONS),
+        geometry_context=geometry,
         activation="none", confirm=confirm, output=lambda _: None,
         snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED

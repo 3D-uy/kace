@@ -1,4 +1,6 @@
 import os
+import shutil
+import textwrap
 from core.translations import t, get_mode
 from core.wizard.runner import PHASE_MAP, PHASE_KEYS, _BACK, _QUIT
 from core.terminal import HINT, INPUT, QUESTION, RESET, SECTION
@@ -58,48 +60,36 @@ def _print_step_header(step_id: str, user_data: dict, *, active_steps=None) -> N
     lbl_phase = t("wizard.phase_label") or "Phase"
     lbl_step = t("wizard.step_label") or "Step"
 
-    # Print the beautiful UI block
-    box_width = 72
+    # Preserve the full boxed explanation at every terminal height.
+    columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    box_width = max(12, min(72, columns - 4))
+    content_width = box_width - 4
+
+    def box_rows(text, color):
+        for paragraph in str(text).splitlines() or [""]:
+            for line in textwrap.wrap(paragraph, width=content_width,
+                                      break_long_words=True, break_on_hyphens=False) or [""]:
+                padding = " " * max(0, content_width - len(line))
+                print(f"{C_BORDER}│ {color}{line}{C_RESET}{padding} {C_BORDER}│{C_RESET}")
+
     print(f"\n{C_BORDER}┌" + "─" * (box_width - 2) + f"┐{C_RESET}")
-    
-    # Phase & Step progress line
-    content = f"{lbl_phase}: {translated_phase} | {lbl_step} {step_idx}"
-    padding_len = box_width - 4 - len(content)
-    left_padding = padding_len // 2
-    right_padding = padding_len - left_padding
-    print(f"{C_BORDER}│ {C_RESET}{' ' * left_padding}{C_PHASE}{lbl_phase}: {translated_phase}{C_RESET} | {C_STEP}{lbl_step} {step_idx}{C_RESET}{' ' * right_padding} {C_BORDER}│{C_RESET}")
-    
-    print(f"{C_BORDER}├" + "─" * (box_width - 2) + f"┤{C_RESET}")
-    
-    # Header line
-    header_line = f"  {header_text}"
-    header_padding = box_width - 4 - len(header_line)
-    if header_padding > 0:
-        print(f"{C_BORDER}│ {C_HEADER}{header_line}{C_RESET}{' ' * header_padding} {C_BORDER}│{C_RESET}")
+    phase_text = f"{lbl_phase}: {translated_phase}"
+    step_text = f"{lbl_step} {step_idx}"
+    content = f"{phase_text} | {step_text}"
+    if len(content) <= content_width:
+        padding_len = content_width - len(content)
+        left = " " * (padding_len // 2)
+        right = " " * (padding_len - len(left))
+        print(f"{C_BORDER}│ {C_RESET}{left}{C_PHASE}{phase_text}{C_RESET} | "
+              f"{C_STEP}{step_text}{C_RESET}{right} {C_BORDER}│{C_RESET}")
     else:
-        print(f"{C_BORDER}│ {C_HEADER}{header_line[:box_width-4]}{C_RESET} {C_BORDER}│{C_RESET}")
-        
-    # Hint line(s) (word wrap to fit box_width - 4)
-    words = hint_text.split()
-    lines = []
-    current_line = "  "
-    for word in words:
-        if len(current_line) + len(word) + 1 <= box_width - 4:
-            if current_line == "  ":
-                current_line += word
-            else:
-                current_line += " " + word
-        else:
-            lines.append(current_line)
-            current_line = "  " + word
-    if current_line.strip():
-        lines.append(current_line)
-        
-    for line in lines:
-        line_padding = box_width - 4 - len(line)
-        print(f"{C_BORDER}│ {C_HINT}{line}{C_RESET}{' ' * line_padding} {C_BORDER}│{C_RESET}")
-        
+        box_rows(phase_text, C_PHASE)
+        box_rows(step_text, C_STEP)
+    print(f"{C_BORDER}├" + "─" * (box_width - 2) + f"┤{C_RESET}")
+    box_rows(header_text, C_HEADER)
+    box_rows(hint_text, C_HINT)
     print(f"{C_BORDER}└" + "─" * (box_width - 2) + f"┘{C_RESET}\n")
+
 
 
 def _back_choice():

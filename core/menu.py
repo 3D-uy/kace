@@ -1,8 +1,8 @@
 # core/menu.py
 """
 Terminal-agnostic input helpers for KACE CLI.
-Replaces questionary TUI calls with plain input()/print() that work
-reliably in any environment: true TTY, bridged PTY, xterm.js SSH, pipes.
+Replaces questionary TUI calls with input()/print() and optional native TTY
+editing: true TTY, bridged PTY, xterm.js SSH, or plain-input pipes.
 """
 
 import sys
@@ -11,7 +11,10 @@ import getpass
 import warnings
 import shutil
 import textwrap
+import re
+from wcwidth import wcwidth, wcswidth
 from core.exceptions import WizardExit
+from core.line_input import read_line
 from core.terminal import ERROR, QUESTION, RESET, WARNING
 from core.translations import t
 
@@ -30,6 +33,39 @@ class Separator:
 
 def _is_auto():
     return os.environ.get("KACE_AUTO") == "1"
+
+_INTERACTION_REVISION = 0
+
+
+def interaction_revision():
+    """Identify whether a wizard step offered an interactive prompt."""
+    return _INTERACTION_REVISION
+
+
+def _record_interaction():
+    global _INTERACTION_REVISION
+    if not _is_auto():
+        _INTERACTION_REVISION += 1
+
+
+def _plain_label(label):
+    return re.sub(r"\x1b\[[0-9;]*m", "", str(label))
+
+
+def _exact_choices(query, choices):
+    """Match visible labels and values, including navigation in filtered lists."""
+    query = query.casefold()
+    if query in ("<", "back", "volver", "voltar"):
+        back = [item for item in choices if item[1] in ("__back__", "back")]
+        if back:
+            return back
+    if query == "q":
+        quit_choices = [item for item in choices if item[1] in ("__quit__", "quit")]
+        if quit_choices:
+            return quit_choices
+    return [item for item in choices
+            if query in (_plain_label(item[0]).casefold(), str(item[1]).casefold())]
+
 
 def parse_choices(choices):
     """
@@ -178,6 +214,36 @@ def _wrapped_prompt_lines(prompt, indent="  "):
     return lines
 
 
+def _choice_lines(index, label, columns):
+    """Wrap visible label cells while retaining ANSI tokens and hanging indent."""
+    prefix = f"    {WARNING}{index}){RESET} "
+    indent = " " * (len(str(index)) + 6)
+    width = max(1, columns - len(indent))
+    tokens = re.findall(r"\x1b\[[0-9;]*m|[^\x1b]", str(label))
+    chunks, current, cells = [], [], 0
+    for token in tokens:
+        token_width = 0 if token.startswith("\x1b[") else max(0, wcwidth(token))
+        if token == "\n":
+            chunks.append("".join(current))
+            current, cells = [], 0
+            continue
+        if cells + token_width > width:
+            split = next((i for i in range(len(current) - 1, -1, -1)
+                          if current[i].isspace()), -1)
+            if split > 0:
+                chunks.append("".join(current[:split]))
+                current = current[split + 1:]
+                cells = sum(0 if part.startswith("\x1b[") else max(0, wcwidth(part))
+                            for part in current)
+            else:
+                chunks.append("".join(current))
+                current, cells = [], 0
+        current.append(token)
+        cells += token_width
+    chunks.append("".join(current))
+    return [prefix + chunks[0], *(indent + chunk for chunk in chunks[1:])]
+
+
 def numbered_select(prompt, choices, default=0, require_explicit=False):
     """
     Replace questionary.select().
@@ -188,6 +254,7 @@ def numbered_select(prompt, choices, default=0, require_explicit=False):
         accepting the default.  Automatic/non-interactive mode still uses the
         default because it cannot request input.
     """
+    _record_interaction()
     mock_val = _check_questionary_mock("numbered_select", prompt)
     if mock_val is not _MOCK_DEFAULT:
         return mock_val
@@ -201,7 +268,9 @@ def numbered_select(prompt, choices, default=0, require_explicit=False):
         
     if _is_auto():
         return selectable_choices[default][1]
-        
+
+    size = shutil.get_terminal_size(fallback=(80, 24))
+
     print()
     for prompt_line in _wrapped_prompt_lines(prompt):
         print(f"  {QUESTION}{prompt_line}{RESET}")
@@ -212,7 +281,8 @@ def numbered_select(prompt, choices, default=0, require_explicit=False):
     for is_selectable, item in display_lines:
         if is_selectable:
             label, value = item
-            print(f"    {selectable_idx}) {label}")
+            for line in _choice_lines(selectable_idx, label, size.columns):
+                print(line)
             selectable_map[str(selectable_idx)] = value
             selectable_idx += 1
         else:
@@ -223,7 +293,7 @@ def numbered_select(prompt, choices, default=0, require_explicit=False):
     
     while True:
         try:
-            val = input(input_prompt).strip()
+            val = read_line(input_prompt).strip()
         except (KeyboardInterrupt, EOFError):
             print()
             # R-06: Raise WizardExit instead of sys.exit(0) so the top-level
@@ -241,19 +311,34 @@ def numbered_select(prompt, choices, default=0, require_explicit=False):
             return selectable_map[val]
             
         # Also allow entering the actual label/value case-insensitively if it matches
-        for label, val_choice in selectable_choices:
-            if val.lower() == str(label).lower() or val.lower() == str(val_choice).lower():
-                return val_choice
+        exact_matches = _exact_choices(val, selectable_choices)
+        if len(exact_matches) == 1:
+            return exact_matches[0][1]
                 
         print(f"  {ERROR}{t('menu.invalid_choice', count=len(selectable_choices))}{RESET}")
 
-def simple_input(prompt, default=None, validate=None, *, back_value=None):
+def _read_input(full_prompt, *, remember=False):
+    """Keep input help readable on narrow SSH terminals without splitting words."""
+    columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    if wcswidth(_plain_label(full_prompt)) <= columns:
+        return read_line(full_prompt, remember=remember)
+    # Reserve the two-space indent and the trailing input separator.
+    lines = _wrapped_prompt_lines(full_prompt.strip(), indent="   ")
+    for line in lines[:-1]:
+        print("  " + line)
+    return read_line("  " + lines[-1] + " ", remember=remember)
+
+
+def simple_input(prompt, default=None, validate=None, *, back_value=None, history=True):
     """
     Replace questionary.text().
     validate: optional callable(str) -> bool/str. Re-prompts on failure.
     Returns stripped string, or back_value for explicit navigation when enabled.
     Navigation is resolved before domain validation and default substitution.
+    history: retain ordinary text in process memory for Up-arrow recall on TTYs.
+        Secrets must use password_input(); history=False omits other private text.
     """
+    _record_interaction()
     mock_val = _check_questionary_mock("simple_input", prompt)
     if mock_val is not _MOCK_DEFAULT:
         return mock_val
@@ -271,7 +356,7 @@ def simple_input(prompt, default=None, validate=None, *, back_value=None):
         
     while True:
         try:
-            val = input(full_prompt).strip()
+            val = _read_input(full_prompt, remember=history).strip()
         except (KeyboardInterrupt, EOFError):
             print()
             # S2-01: Raise WizardExit instead of sys.exit(0) so the top-level
@@ -301,6 +386,7 @@ def yes_no(prompt, default=False):
     Replace questionary.confirm().
     Returns bool. Lowercase choices show the Enter default explicitly.
     """
+    _record_interaction()
     mock_val = _check_questionary_mock("yes_no", prompt)
     if mock_val is not _MOCK_DEFAULT:
         return mock_val
@@ -313,7 +399,7 @@ def yes_no(prompt, default=False):
     full_prompt = f"  {prompt} {indicator}: "
     while True:
         try:
-            val = input(full_prompt).strip().lower()
+            val = _read_input(full_prompt).strip().lower()
         except (KeyboardInterrupt, EOFError):
             print()
             # S2-01: Raise WizardExit instead of sys.exit(0).
@@ -329,98 +415,138 @@ def yes_no(prompt, default=False):
             
         print(f"  {ERROR}{t('menu.yes_no_expected')}{RESET}")
 
-def autocomplete_select(prompt, choices, default=0):
+def autocomplete_select(prompt, choices, default=0, require_explicit=False, *,
+                        search_first=False, renumber_results=False, allow_auto_default=True):
+    """Select from a visible catalog with optional substring search.
+
+    Lists below 20 choices retain the standard numbered menu. Longer lists show
+    a bounded preview and keep navigation available after filtering.
+    allow_auto_default=False requires an explicit choice instead of selecting the
+    first item in automatic mode (used for unconfirmed board identity).
     """
-    Replace questionary.autocomplete().
-    For short lists (<20): behaves like numbered_select.
-    For long lists (20+): accepts typed input, shows fuzzy-matched
-    candidates (case-insensitive substring match), re-prompts until valid.
-    choices: list of str or list of (label, value) tuples.
-    """
+    _record_interaction()
     mock_val = _check_questionary_mock("autocomplete_select", prompt)
     if mock_val is not _MOCK_DEFAULT:
         return mock_val
 
-    display_lines, selectable_choices = parse_choices(choices)
+    _, selectable_choices = parse_choices(choices)
     if not selectable_choices:
         return None
-        
     if default < 0 or default >= len(selectable_choices):
         default = 0
-        
     if _is_auto():
+        if not allow_auto_default:
+            print(f"  {ERROR}{t('catalog.auto_board_required')}{RESET}")
+            raise WizardExit
         return selectable_choices[default][1]
-        
-    if len(selectable_choices) < 20:
-        return numbered_select(prompt, choices, default=default)
-        
+    if len(selectable_choices) < 20 and not search_first:
+        return numbered_select(prompt, choices, default=default,
+                               require_explicit=require_explicit)
+
+    return _catalog_select(prompt, selectable_choices, default, require_explicit,
+                           search_first=search_first, renumber_results=renumber_results)
+
+
+def _catalog_select(prompt, selectable_choices, default, require_explicit, *,
+                    search_first=False, renumber_results=False):
+    """Keep one numbered list and its navigation while allowing optional filtering."""
     default_label, default_val = selectable_choices[default]
-    
-    prompt = prompt.rstrip(" :")
-    print()
-    for line in _wrapped_prompt_lines(prompt):
-        print(f"  {line}")
-    print(f"  {t('menu.search_help', count=len(selectable_choices))}")
-    
+    indexed = list(enumerate(selectable_choices, 1))
+    navigation = [(index, item) for index, item in indexed
+                  if item[1] in ("__back__", "back", "__quit__", "quit")]
+    catalog = [(index, item) for index, item in indexed if (index, item) not in navigation]
+    matches, query = ([] if search_first else catalog), ""
+    notice = ""
     while True:
+        columns, rows = shutil.get_terminal_size(fallback=(80, 24))
+        prompt_lines = _wrapped_prompt_lines(prompt)
+        query_lines = _wrapped_prompt_lines(t("menu.search_matches", query=query)) if query else []
+        help_lines = _wrapped_prompt_lines(t("catalog.search_help" if search_first else "menu.list_filter_help"))
+        navigation_lines = [line for index, (label, _) in navigation
+                            for line in _choice_lines(index, label, columns)]
+        controls = [("< " if value in ("__back__", "back") else "q ") + _plain_label(label)
+                    for _, (label, value) in navigation]
+        control_lines = _wrapped_prompt_lines(" | ".join(controls)) if controls else []
+        notice_lines = _wrapped_prompt_lines(notice) if notice else []
+        input_text = (t("catalog.search_prompt") if search_first and not query else
+                      t("menu.list_filter_prompt") if require_explicit or query else
+                      t("menu.search_prompt", value=default_label))
+        count_lines = _wrapped_prompt_lines(t("menu.list_preview_count", shown=len(matches), total=len(matches)))
+        # Leave room for the existing wizard header, help, controls and input.
+        # Filtering searches the complete catalog, so no paging is necessary.
+        header_reserve = 0 if search_first and query else 10
+        available = max(1, rows - header_reserve - 1 - sum(map(len, (
+            prompt_lines, query_lines, help_lines, navigation_lines, control_lines,
+            notice_lines, count_lines, _wrapped_prompt_lines(input_text),
+        ))))
+        visible, result_lines = [], []
+        for index, item in matches:
+            display_index = len(visible) + 1 if renumber_results else index
+            lines = _choice_lines(display_index, item[0], columns)
+            if visible and len(result_lines) + len(lines) > available:
+                break
+            visible.append((display_index, item))
+            result_lines.extend(lines)
+        visible_navigation = ([(len(visible) + index, item) for index, (_, item) in enumerate(navigation, 1)]
+                              if renumber_results else navigation)
+        navigation_lines = [line for index, (label, _) in visible_navigation
+                            for line in _choice_lines(index, label, columns)]
+        print()
+        for line in prompt_lines:
+            print(f"  {QUESTION}{line}{RESET}")
+        for line in query_lines:
+            print("  " + line)
+        for line in result_lines + navigation_lines:
+            print(line)
+        if query or not search_first:
+            for line in _wrapped_prompt_lines(t("menu.list_preview_count", shown=len(visible), total=len(matches))):
+                print("  " + line)
+        for line in help_lines + control_lines:
+            print("  " + line)
+        for line in notice_lines:
+            print(f"  {WARNING}{line}{RESET}")
         try:
-            query = input(f"  {t('menu.search_prompt', value=default_label)} ").strip()
+            answer = _read_input(f"  {QUESTION}{input_text}{RESET} ").strip()
         except (KeyboardInterrupt, EOFError):
             print()
-            # S2-01: Raise WizardExit instead of sys.exit(0).
             raise WizardExit
-            
-        if not query:
-            return default_val
-            
-        matches = [item for item in selectable_choices if query.lower() in item[0].lower()]
-        
-        if not matches:
-            print(f"  {t('menu.search_no_matches', query=query)}")
+        notice = ""
+        if not answer:
+            if query:
+                matches, query = ([] if search_first else catalog), ""
+            elif require_explicit or search_first:
+                notice = t("menu.selection_required")
+            else:
+                return default_val
             continue
-            
-        # Check for exact match
-        exact_matches = [item for item in matches if item[0].lower() == query.lower()]
+        if answer == "/":
+            matches, query = ([] if search_first else catalog), ""
+            continue
+        if answer.isdigit():
+            selected = next((item for index, item in visible + visible_navigation if index == int(answer)), None)
+            if selected is not None:
+                return selected[1]
+            notice = t("menu.list_visible_number")
+            continue
+        exact_matches = _exact_choices(answer, selectable_choices)
         if len(exact_matches) == 1:
             return exact_matches[0][1]
-            
-        # Show matches
-        while True:
-            print(f"\n  {t('menu.search_matches', query=query)}")
-            for idx, (lbl, _) in enumerate(matches, 1):
-                print(f"    {idx}) {lbl}")
-            
-            try:
-                sel = input(f"  {t('menu.search_select', count=len(matches))} ").strip()
-            except (KeyboardInterrupt, EOFError):
-                print()
-                # S2-01: Raise WizardExit instead of sys.exit(0).
-                raise WizardExit
-                
-            if not sel:
-                break
-                
-            if sel.isdigit():
-                sel_idx = int(sel) - 1
-                if 0 <= sel_idx < len(matches):
-                    return matches[sel_idx][1]
-                    
-            # Treat search input as new query
-            query = sel
-            matches = [item for item in selectable_choices if query.lower() in item[0].lower()]
-            if not matches:
-                print(f"  {t('menu.search_retry', query=query)}")
-                break
-                
-            exact_matches = [item for item in matches if item[0].lower() == query.lower()]
-            if len(exact_matches) == 1:
-                return exact_matches[0][1]
+        filtered = [(index, item) for index, item in catalog
+                    if answer.casefold() in _plain_label(item[0]).casefold()]
+        if not filtered:
+            if search_first:
+                matches, query = [], answer
+            notice = t("menu.search_no_matches", query=answer)
+            continue
+        matches, query = filtered, answer
+
 
 def password_input(prompt):
     """
     Replace questionary.password().
     Uses getpass.getpass() for hidden input; refuses echoing fallbacks.
     """
+    _record_interaction()
     mock_val = _check_questionary_mock("password_input", prompt)
     if mock_val is not _MOCK_DEFAULT:
         return mock_val

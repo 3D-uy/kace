@@ -122,7 +122,12 @@ def discover_mcu_hardware(interactive=True):
 def mcu_context_from_path(choice):
     """Parse an explicitly selected path without selecting another device."""
     context = {"mcu_path": choice, "derived_mcu": None, "hint": None}
-    match = re.search(r'(usb|can|uart)[_-]Klipper_([a-zA-Z0-9]+)', choice, re.IGNORECASE)
+    # Identity comes from the complete Klipper model token in the device name,
+    # never from a parent directory or the prefix of a lookalike token.
+    match = re.match(
+        r'(usb|can|uart)[_-]Klipper_([a-zA-Z0-9]+)(?=_|$|-if\d+(?:-port\d+)?$)',
+        os.path.basename(choice), re.IGNORECASE,
+    )
     if match:
         context["hint"] = match.group(1).lower()
         context["derived_mcu"] = match.group(2).lower()

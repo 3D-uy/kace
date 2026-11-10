@@ -26,3 +26,10 @@ def suggested_board_configs(filenames: list[str], detected_mcu: str) -> list[str
     model = canonical_mcu(detected_mcu)
     return list(dict.fromkeys(name for name in filenames
                               if model and model in board_mcu_candidates(name)))
+
+
+def board_model_label(filename: str, detected_mcu: str = "") -> str:
+    """Display a reviewed model; the filename remains the selection identity."""
+    name = str(filename or "").strip().casefold()
+    model = resolve_board_mcu(name, detected_mcu)
+    return load_boards_yaml().get("board_model_labels", {}).get(name, {}).get(model, filename)

@@ -110,8 +110,9 @@ jobs:
         shell: bash
         run: python3 tests/run_tests.py --verbose 2>&1 | tee tests/results/ci-source/unittest.log
 
-      # Run both collectors after successful preparation, even if unittest fails.
-      # Neither suite uses continue-on-error: failures remain job failures.
+      # The entrypoint above and this command share pytest collection/fixtures.
+      # Retain both command checks and logs; they are not independent coverage.
+      # Neither command uses continue-on-error: failures remain job failures.
       - name: Run complete pytest suite against pinned Klipper
         if: ${{ !cancelled() && steps.klipper.outcome == 'success' }}
         shell: bash

@@ -13,6 +13,7 @@
 
 import os
 import subprocess
+from wcwidth import wcswidth
 
 from core.exceptions import WizardExit
 from core.translations import t, set_lang, set_mode
@@ -48,8 +49,6 @@ _B = "\033[1m"    # bold
 _R = "\033[0m"    # reset
 _DIM = "\033[2m"  # dim
 
-_OK  = f"{_G}✅{_R}"
-_NOK = f"{_Y}❌{_R}"
 
 
 def _service_active(name: str) -> bool:
@@ -62,6 +61,41 @@ def _service_active(name: str) -> bool:
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False
+
+
+def _detect_crowsnest_status() -> str:
+    """Distinguish downloaded files from the read-only systemd service state."""
+    files_found = os.path.isdir(_PATH_CROWSNEST)
+    fallback = "files_detected" if files_found else "status_unknown"
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", "crowsnest.service",
+             "--property=LoadState", "--property=ActiveState"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return fallback
+    if result.returncode != 0:
+        return fallback
+    properties = dict(
+        line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+    )
+    load_state = properties.get("LoadState")
+    active_state = properties.get("ActiveState")
+    if load_state == "not-found":
+        return "files_detected" if files_found else "not_found"
+    if active_state == "failed":
+        return "service_failed"
+    if load_state == "loaded":
+        if active_state == "active":
+            return "service_active"
+        if active_state == "inactive":
+            return "service_inactive"
+    # Masked, malformed, transitional and unavailable states are not evidence
+    # that an installation is healthy or the service is inactive.
+    return fallback
 
 
 def _detect_webui(name: str, default_path: str) -> bool:
@@ -122,14 +156,14 @@ def _detect_webui(name: str, default_path: str) -> bool:
 def detect_system_state() -> dict:
     """Probe the local system for Klipper ecosystem components.
 
-    Returns a dict with boolean presence flags and detected MCU string.
+    Returns presence flags, Crowsnest service status and detected MCU string.
     Detection is fast, read-only, and safe to call on any platform.
     """
     klipper   = os.path.isdir(_PATH_KLIPPER)   or _service_active("klipper")
     moonraker = os.path.isdir(_PATH_MOONRAKER)  or _service_active("moonraker")
     mainsail  = _detect_webui("mainsail", _PATH_MAINSAIL)
     fluidd    = _detect_webui("fluidd", _PATH_FLUIDD)
-    crowsnest = os.path.isdir(_PATH_CROWSNEST)  or _service_active("crowsnest")
+    crowsnest_status = _detect_crowsnest_status()
     has_cfg   = os.path.isfile(_PATH_PRINTER_CFG)
 
     # Reuse the existing MCU detector — returns empty dict on failure.
@@ -148,7 +182,8 @@ def detect_system_state() -> dict:
         "moonraker":   moonraker,
         "mainsail":    mainsail,
         "fluidd":      fluidd,
-        "crowsnest":   crowsnest,
+        "crowsnest":   crowsnest_status not in {"not_found", "status_unknown"},
+        "crowsnest_status": crowsnest_status,
         "printer_cfg": has_cfg,
         "mcu":         mcu,
         "mcu_path":    mcu_path,
@@ -177,11 +212,13 @@ def _render_status_panel(state: dict) -> None:
     title  = t("dashboard.status_title")
     SEP    = f"  {_C}{'#' * 48}{_R}"
 
-    def _row(label: str, ok: bool) -> str:
-        icon   = _OK if ok else _NOK
-        status = t("dashboard.installed") if ok else t("dashboard.not_found")
+    def _row(label: str, ok: bool, *, status: str = None, neutral: bool = False) -> str:
+        symbol = "●" if neutral else "✅" if ok else "❌"
+        icon = f"{_Y if neutral or not ok else _G}{symbol}{_R}"
+        icon_pad = " " * max(0, 2 - wcswidth(symbol))
+        status = status or (t("dashboard.installed") if ok else t("dashboard.not_found"))
         label_pad = " " * max(0, 14 - len(label))
-        return f"  {_B}{label}{_R}{label_pad} {icon}  {status}"
+        return f"  {_B}{label}{_R}{label_pad} {icon}{icon_pad}  {status}"
 
     mcu_val  = state.get("mcu")
     mcu_path = state.get("mcu_path")
@@ -192,13 +229,16 @@ def _render_status_panel(state: dict) -> None:
     else:
         mcu_line  = f"  {_B}MCU           {_R} {_Y}{t('dashboard.no_mcu')}{_R}"
 
-    print(f"\n  {_C}{_B}{title}{_R}")
+    print(f"\n  {_C}{title}{_R}")
     print(SEP)
     print(_row("Klipper",     state["klipper"]))
     print(_row("Moonraker",   state["moonraker"]))
     print(_row("Mainsail",    state["mainsail"]))
     print(_row("Fluidd",      state["fluidd"]))
-    print(_row("Crowsnest",   state.get("crowsnest", False)))
+    crowsnest_status = state.get("crowsnest_status", "status_unknown")
+    print(_row("Crowsnest", crowsnest_status == "service_active",
+               status=t("dashboard." + crowsnest_status),
+               neutral=crowsnest_status not in {"service_active", "service_failed", "not_found"}))
     cfg_ok = state["printer_cfg"]
     print(_row("printer.cfg", cfg_ok))
     print(mcu_line)
@@ -217,7 +257,7 @@ def _render_suggestions(suggestions: list) -> None:
 def _show_manage_view(state: dict) -> None:
     """Print the full component status view and wait for user input."""
     title = t("dashboard.manage_header")
-    print(f"\n  {_C}{_B}{title}{_R}")
+    print(f"\n  {_C}{title}{_R}")
     _render_status_panel(state)
     suggestions = get_suggestions(state)
     _render_suggestions(suggestions)
@@ -241,7 +281,7 @@ def _select_language() -> None:
     LANGUAGES = {"1": "English", "2": "Español", "3": "Português"}
     print(f"\n  {_C}Select language / Seleccione el idioma / Selecione o idioma:{_R}")
     for num, name in LANGUAGES.items():
-        print(f"    {num}) {name}")
+        print(f"    {_Y}{num}){_R} {name}")
     try:
         choice = input(f"  {_Y}Select [1-3]:{_R} ").strip()
     except (KeyboardInterrupt, EOFError):
@@ -259,8 +299,8 @@ def _select_mode() -> None:
     """
     MODES = {"1": "Beginner", "2": "Advanced"}
     print(f"\n  {_C}{t('wizard.select_mode')}{_R}")
-    print(f"    1) {t('wizard.mode.beginner')}")
-    print(f"    2) {t('wizard.mode.advanced')}")
+    print(f"    {_Y}1){_R} {t('wizard.mode.beginner')}")
+    print(f"    {_Y}2){_R} {t('wizard.mode.advanced')}")
     try:
         choice = input(f"  {_Y}{t('menu.select_range', count=2)}{_R} ").strip()
     except (KeyboardInterrupt, EOFError):
@@ -293,8 +333,8 @@ def run_dashboard(state: dict) -> str:
     while True:
         ACTIONS = {"1": "generate", "2": "quit"}
         print(f"\n  {_C}{t('dashboard.action_prompt')}{_R}")
-        print(f"    1) {t('dashboard.action_generate')}")
-        print(f"    2) {t('dashboard.action_quit')}")
+        print(f"    {_Y}1){_R} {t('dashboard.action_generate')}")
+        print(f"    {_Y}2){_R} {t('dashboard.action_quit')}")
         try:
             action_choice = input(f"  {_Y}{t('menu.select_range', count=2)}{_R} ").strip()
         except (KeyboardInterrupt, EOFError):

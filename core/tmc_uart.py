@@ -16,8 +16,9 @@ def validate_uart_config(content):
     try:
         parsed, _ = _read_pin_config(content)
         sections = {name: options for name, options in parsed.items()
-                    if name.startswith(("tmc2208 ", "tmc2209 "))
-                    or name.startswith("tmc2240 ") and "uart_pin" in options}
+                    if len(parts := name.split()) >= 2
+                    and (parts[0] in ("tmc2208", "tmc2209")
+                         or parts[0] == "tmc2240" and "uart_pin" in options)}
         _validate_uart_sections(parsed, sections, check_consumers=True)
     except PinAliasError as exc:
         raise GenerationError(f"TMC UART: {exc}") from exc
@@ -65,7 +66,8 @@ def _validate_uart_sections(parsed, sections, *, check_consumers=False):
         return identity, polarity
 
     for name, options in sections.items():
-        if name.startswith("tmc2240 "):
+        model = name.split()[0] if name.split() else ""
+        if model == "tmc2240":
             unused = {key for key in options if key.startswith("spi_")
                       or key in ("cs_pin", "chain_length", "chain_position")}
             if unused:
@@ -76,7 +78,7 @@ def _validate_uart_sections(parsed, sections, *, check_consumers=False):
             address = int(options.get("uart_address", "0"))
         except (TypeError, ValueError) as exc:
             raise GenerationError(f"{name}: TMC UART has invalid uart_address.") from exc
-        maximum = 7 if name.startswith("tmc2240 ") else (3 if name.startswith("tmc2209 ") else 0)
+        maximum = 7 if model == "tmc2240" else (3 if model == "tmc2209" else 0)
         if not 0 <= address <= maximum:
             raise GenerationError(f"{name}: TMC UART uart_address out of range.")
         rx, _ = pin(options["uart_pin"], "rx")
@@ -87,8 +89,10 @@ def _validate_uart_sections(parsed, sections, *, check_consumers=False):
         select_tokens = options.get("select_pins")
         selectors = None
         if select_tokens is not None:
+            # Klipper getlist preserves an explicit empty list separately from
+            # omission. Empty tokens inside a nonempty list remain invalid pins.
             selectors = [pin(token, "select", allocate=existing is None)
-                         for token in select_tokens.split(",")]
+                         for token in (select_tokens.split(",") if select_tokens.strip() else [])]
             if any(identity[0] != rx[0] for identity, _ in selectors):
                 raise GenerationError(f"{name}: TMC UART mux pins must use the same MCU.")
         layout = None if selectors is None else tuple(identity for identity, _ in selectors)

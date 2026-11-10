@@ -7,6 +7,7 @@ import pytest
 from core.board_bx_panel import (SOURCE_PANEL, PROFILE, reviewed_panel, selected_bx_panel,
     render_bx_panel, validate_bx_panel)
 from core.board_auxiliary import validate_board_electrical_artifact, selected_board_electrical_source
+from core.config_geometry import load_geometry_context
 from core.config_transaction import ConfigDeploymentTransaction, ConfigTransactionState
 from core.exceptions import GenerationError
 from core.generator import generate_config
@@ -24,6 +25,7 @@ def test_board_panel_is_preserved_independently_of_optional_display_and_starter_
     choices["display_choice"] = display
     text = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"),
                            include_macros=macros, verbose=False)["content"]
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text.encode())
     actual, expected = _read_pin_config(text)[0], _read_pin_config(raw)[0]
     for name in reviewed_panel()["sections"]:
         assert actual[name] == expected[name]
@@ -35,7 +37,7 @@ def test_board_panel_is_preserved_independently_of_optional_display_and_starter_
     validate_board_electrical_artifact(recovered, text)
     dest = FakeTransport()
     for _ in range(2):
-        result = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=recovered,
+        result = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=recovered, geometry_context=geometry,
             activation="none", snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
         assert result.state == ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION, result.detail
 
@@ -84,12 +86,13 @@ def test_saved_artifact_cannot_omit_any_panel_dependency(tmp_path, section):
 def test_effective_override_or_collision_rejected_without_writes(tmp_path, override, noop):
     _, board, choices = board_case(PROFILE)
     text = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text)
     remote = {"printer.cfg": text+b"\n[include user.cfg]\n", "user.cfg": override.encode()}
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, None, remote).artifacts})
-        assert not build_managed_config_plan(text, None, remote).changed_artifacts
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, None, remote, geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(text, None, remote, geometry_context=geometry).changed_artifacts
     dest, confirm = FakeTransport(remote), Mock(return_value=True)
-    result = ConfigDeploymentTransaction(dest, text, None, selected_board=board, confirm=confirm,
+    result = ConfigDeploymentTransaction(dest, text, None, selected_board=board, confirm=confirm, geometry_context=geometry,
         activation="firmware", snapshot_root=str(tmp_path / "snapshots")).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED
     assert all(c[0] == "read" for c in dest.calls) and dest.files == remote
@@ -101,11 +104,12 @@ def test_known_firmware_reservations_block_generation_and_review(tmp_path, pin):
     from core.configuration_review import validate_configuration_plan
     _, board, choices = board_case(PROFILE)
     text = generate_config(board, choices, output_path=str(tmp_path / "good.cfg"), verbose=False)["content"]
+    geometry = load_geometry_context(tmp_path / "good.cfg", text.encode())
     reserved = {"mcu": {pin: "reserved bus"}}
     with patch("core.firmware_workflow.generation_pin_reservations", return_value=reserved):
         with pytest.raises(GenerationError, match="reserved bus"):
             generate_config(board, choices, output_path=str(tmp_path / "bad.cfg"), verbose=False)
-    review = validate_configuration_plan(build_managed_config_plan(text.encode(), None, {}),
+    review = validate_configuration_plan(build_managed_config_plan(text.encode(), None, {}, geometry_context=geometry),
         selected_board=board, firmware_reservation_reader=lambda _: reserved)
     assert not review.valid and any("reserved bus" in m.message for m in review.errors)
     assert not (tmp_path / "bad.cfg").exists()

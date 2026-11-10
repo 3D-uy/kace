@@ -60,28 +60,51 @@ def selected_part_fan(parsed, choice):
 
 
 def validate_part_fan_options(sections):
-    """Klipper fan.Fan scalar bounds; finiteness is an extra KACE guard.
+    """Klipper fan.Fan bounds for all consumers; finiteness is a KACE guard.
 
     This also checks preserved destination overrides, but does not forbid their
     auxiliary pins or claim MCU hardware-PWM capability validation.
     """
-    options = sections.get("fan", {})
-    for option in SCALAR_OPTIONS:
-        if option not in options:
+    for section, options in sections.items():
+        parts = section.split()
+        if section != "fan" and not (len(parts) >= 2 and parts[0] in (
+                "fan_generic", "heater_fan", "controller_fan", "temperature_fan")):
             continue
-        text = str(options[option]).strip()
-        if option == "hardware_pwm":
-            if text.lower() not in ("1", "yes", "true", "on", "0", "no", "false", "off"):
-                raise GenerationError("fan: hardware_pwm must be a Klipper boolean.")
-            continue
-        try:
-            value = float(text)
-        except (TypeError, ValueError) as exc:
-            raise GenerationError(f"fan: {option} must be a finite number.") from exc
-        exclusive_zero = option in ("max_power", "cycle_time")
-        bounded = option in ("max_power", "off_below", "shutdown_speed")
-        if (not math.isfinite(value) or value < 0
-                or (exclusive_zero and value == 0) or (bounded and value > 1)):
-            lower = "> 0" if exclusive_zero else ">= 0"
-            upper = " and <= 1" if bounded else ""
-            raise GenerationError(f"fan: {option} must be finite, {lower}{upper}.")
+        for option in SCALAR_OPTIONS:
+            if option not in options:
+                continue
+            text = str(options[option]).strip()
+            if option == "hardware_pwm":
+                if text.lower() not in ("1", "yes", "true", "on", "0", "no", "false", "off"):
+                    raise GenerationError(f"{section}: hardware_pwm must be a Klipper boolean.")
+                continue
+            try:
+                value = float(text)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise GenerationError(f"{section}: {option} must be a finite number.") from exc
+            exclusive_zero = option in ("max_power", "cycle_time")
+            bounded = option in ("max_power", "off_below", "shutdown_speed")
+            if (not math.isfinite(value) or value < 0
+                    or (exclusive_zero and value == 0) or (bounded and value > 1)):
+                lower = "> 0" if exclusive_zero else ">= 0"
+                upper = " and <= 1" if bounded else ""
+                raise GenerationError(f"{section}: {option} must be finite, {lower}{upper}.")
+        if "tachometer_pin" not in options:
+            for option in ("tachometer_ppr", "tachometer_poll_interval"):
+                if option in options:
+                    raise GenerationError(f"{section}: {option} requires tachometer_pin; Klipper otherwise leaves it unused.")
+        else:
+            if "tachometer_ppr" in options:
+                try:
+                    ppr = int(str(options["tachometer_ppr"]).strip())
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise GenerationError(f"{section}: tachometer_ppr must be an integer >= 1.") from exc
+                if ppr < 1:
+                    raise GenerationError(f"{section}: tachometer_ppr must be an integer >= 1.")
+            if "tachometer_poll_interval" in options:
+                try:
+                    poll = float(str(options["tachometer_poll_interval"]).strip())
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise GenerationError(f"{section}: tachometer_poll_interval must be finite and > 0.") from exc
+                if not math.isfinite(poll) or poll <= 0:
+                    raise GenerationError(f"{section}: tachometer_poll_interval must be finite and > 0.")

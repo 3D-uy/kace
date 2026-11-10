@@ -11,12 +11,14 @@ Guided configuration, reviewed publication, durable recovery, firmware identity 
 Reviewed removable TMC socket mapping covers ten exact source profiles; cross-model electrical settings still require user review. See [mapping scope](docs/TMC_SOCKET_MAPPING.md).
 
 Probe Z geometry is reviewed before firmware preparation; unfinished workflows
-with verified firmware can review their saved Z minimum without discarding that
-evidence. Qualification must still exercise the early rejection, cancellation,
+with verified firmware can review their saved Z minimum or a known custom-probe
+offset without discarding that evidence. Qualification must still exercise the early rejection, cancellation,
 saved correction and full activation/verification on the exact candidate; these
 checks do not calibrate the probe or complete an installation by themselves.
 
 ## 🧭 Priorities
+
+The source includes unified board recommendations, yellow selection numbers, interactive Back navigation and reuse of reviewed homing directions. The continuous questionnaire preserves boxed explanations, the probe diagram and full profile review; catalogs show a bounded preview and optional filtering over all entries without paging. The generated summary keeps application and verification pending. Crowsnest reports files and service state separately. Validate these flows, including probe-range cancellation and correction, on the actual Pi and exact distributed candidate; source regressions do not establish physical qualification.
 
 | Priority | Required result | Reference |
 | --- | --- | --- |

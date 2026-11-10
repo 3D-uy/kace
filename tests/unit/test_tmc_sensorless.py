@@ -19,7 +19,8 @@ def sections(model="tmc2209", diag="^PC6", reference=None, extra=None):
     if diag is not None:
         options["diag_pin" if model in ("tmc2208", "tmc2209") else "diag1_pin"] = diag
     result = {f"{model} stepper_x": options,
-              "stepper_x": {"endstop_pin": reference or f"{model}_stepper_x:virtual_endstop"}}
+              "stepper_x": {"endstop_pin": reference or f"{model}_stepper_x:virtual_endstop",
+                            "homing_retract_dist": "0"}}
     result.update(extra or {})
     return result
 
@@ -96,7 +97,7 @@ def test_two_active_diag_pins_must_be_distinct(model, shared):
     data = sections(model, "PC6")
     option = "diag_pin" if model == "tmc2209" else "diag1_pin"
     data[f"{model} stepper_y"] = {option: "PC6" if shared else "PC7"}
-    data["stepper_y"] = {"endstop_pin": f"{model}_stepper_y:virtual_endstop"}
+    data["stepper_y"] = {"endstop_pin": f"{model}_stepper_y:virtual_endstop", "homing_retract_dist": "0"}
     if shared:
         with pytest.raises(GenerationError, match="DIAG conflicts"):
             validate_tmc_virtual_endstops(data)

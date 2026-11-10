@@ -150,14 +150,15 @@ gcode:
         files = {item.remote_name: item.content for item in second.artifacts}
         self.assertEqual(build_managed_config_plan(generated, None, files).changed_artifacts, ())
 
-    def test_cli_local_installation_reaches_complete_and_renders_success(self):
+    def _run_cli_installation(self, *, deploy_choice='moonraker', outcome=None, fail_complete=False):
         import hashlib
         import kace
         from core.deployer import _config_result_to_workflow
         from core.firmware_workflow import create_checkpoint, transition_checkpoint, write_checkpoint, load_checkpoint, FirmwareWorkflowState as State
         from tests.regression.test_main_integration import _WIZARD_USER_DATA_WITH_PARSED
         user = {**_WIZARD_USER_DATA_WITH_PARSED, 'mcu_type': 'lpc1769', 'mcu_path': '/dev/serial/by-id/test', 'language': 'Español'}
-        artifact = self.root / 'firmware.bin'
+        run_root = Path(tempfile.mkdtemp(dir=self.root))
+        artifact = run_root / 'firmware.bin'
         artifact.write_bytes(b'firmware')
         checkpoint = transition_checkpoint(create_checkpoint(user), State.ARTIFACT_READY, artifact={
             'path': str(artifact), 'final_filename': 'firmware.bin',
@@ -168,7 +169,7 @@ gcode:
         checkpoint = transition_checkpoint(checkpoint, State.MCU_VERIFIED, verified_serial_path=user['mcu_path'], flash_evidence_recorded_at=1)
         checkpoint = transition_checkpoint(checkpoint, State.CONFIG_GENERATED)
         checkpoint = transition_checkpoint(checkpoint, State.READY_TO_DEPLOY)
-        checkpoint_path = str(self.root / 'firmware-workflow.json')
+        checkpoint_path = str(run_root / 'firmware-workflow.json')
         write_checkpoint(checkpoint, checkpoint_path)
         from core.translations import set_lang, get_lang
         self.addCleanup(set_lang, get_lang())
@@ -177,7 +178,10 @@ gcode:
         saved_config.write_bytes(GENERATED)
         expanduser = os.path.expanduser
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch.dict(os.environ, {'KACE_AUTO': '1', 'KACE_FIRMWARE_WORKFLOW_PATH': checkpoint_path}))
+            stack.enter_context(patch.dict(os.environ, {'KACE_AUTO': '1', 'KACE_FIRMWARE_WORKFLOW_PATH': checkpoint_path, 'KACE_MACHINE_OUTPUT': '1'}))
+            # This checkpoint belongs to the synthetic MCU above. An attached
+            # printer must not reject it and divert the fixture into a new wizard.
+            stack.enter_context(patch('firmware.detector.discover_mcu_hardware', return_value={}))
             for name in ('print_kace_banner', 'print_summary', 'time.sleep'):
                 stack.enter_context(patch('kace.' + name))
             stack.enter_context(patch('kace.check_display_compatibility', return_value=[]))
@@ -185,17 +189,66 @@ gcode:
             stack.enter_context(patch('kace.os.path.isfile', return_value=True))
             stack.enter_context(patch('kace.os.path.expanduser', side_effect=lambda p:
                 str(saved_config) if p == '~/kace/printer.cfg' else expanduser(p)))
-            stack.enter_context(patch('kace.numbered_select', return_value='moonraker'))
-            stack.enter_context(patch('kace.deploy_moonraker', side_effect=lambda _: _config_result_to_workflow(self.transaction())))
+            stack.enter_context(patch('kace.numbered_select', return_value=deploy_choice))
+            def deploy(_, **kwargs):
+                return outcome if outcome is not None else _config_result_to_workflow(self.transaction())
+            stack.enter_context(patch('kace.deploy_moonraker', side_effect=deploy))
+            stack.enter_context(patch('kace.deploy_local', side_effect=deploy))
+            if fail_complete:
+                def persist(value, **kwargs):
+                    if value['state'] == 'COMPLETE':
+                        raise OSError('checkpoint write failed')
+                    return write_checkpoint(value, **kwargs)
+                stack.enter_context(patch('kace.write_checkpoint', side_effect=persist))
+            render = kace.print_installation_complete
+            def completed():
+                self.assertEqual(load_checkpoint(checkpoint_path)['state'], 'COMPLETE')
+                render()
+            stack.enter_context(patch('kace.print_installation_complete', side_effect=completed))
             wizard = stack.enter_context(patch('kace.run_wizard', side_effect=AssertionError('must resume')))
             output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             with self.assertRaises(SystemExit) as exited:
                 kace.main()
-        self.assertEqual(exited.exception.code, 0)
-        self.assertEqual(load_checkpoint(checkpoint_path)['state'], 'COMPLETE')
-        self.assertIn('Instalación de KACE completada', output.getvalue())
-        self.assertIn('commissioning', output.getvalue())
         wizard.assert_not_called()
+        return exited.exception.code, load_checkpoint(checkpoint_path)['state'], output.getvalue()
+
+    def test_cli_local_installation_reaches_complete_and_renders_success(self):
+        code, state, output = self._run_cli_installation()
+        self.assertEqual(code, 0)
+        self.assertEqual(state, 'COMPLETE')
+        self.assertIn('Instalación de KACE completada', output)
+        self.assertIn('commissioning', output)
+        self.assertEqual(output.count('HAPPY PRINTING!'), 1)
+        self.assertLess(output.index('KACE_RESULT:'), output.index('HAPPY PRINTING!'))
+        self.assertTrue(output.rstrip().endswith('┘'))
+
+    def test_cli_pending_and_failure_never_render_completed_banner(self):
+        from core.workflow_outcome import pending_activation, failed, WorkflowOutcome
+        for outcome in (pending_activation('restart deferred'),
+                        failed(WorkflowOutcome.DEPLOYMENT_FAILED, 'verification failed')):
+            with self.subTest(outcome=outcome.outcome):
+                code, state, output = self._run_cli_installation(outcome=outcome)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(state, 'READY_TO_DEPLOY')
+                self.assertNotIn('HAPPY PRINTING!', output)
+                self.assertNotIn('Instalación de KACE completada', output)
+
+    def test_cli_generated_and_exported_configs_never_render_completed_banner(self):
+        from core.workflow_outcome import success
+        for choice in ('none', 'local'):
+            with self.subTest(choice=choice):
+                code, state, output = self._run_cli_installation(deploy_choice=choice, outcome=success('exported'))
+                self.assertEqual(code, 0)
+                self.assertEqual(state, 'READY_TO_DEPLOY')
+                self.assertNotIn('HAPPY PRINTING!', output)
+                self.assertNotIn('Instalación de KACE completada', output)
+
+    def test_cli_complete_persistence_failure_never_renders_completed_banner(self):
+        code, state, output = self._run_cli_installation(fail_complete=True)
+        self.assertEqual(code, 10)
+        self.assertEqual(state, 'DEPLOYING')
+        self.assertNotIn('HAPPY PRINTING!', output)
+        self.assertNotIn('Instalación de KACE completada', output)
 
 
 class RecoveryPresentationTests(unittest.TestCase):
@@ -221,6 +274,31 @@ class RecoveryPresentationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'checked first'):
                 kace.main()
             dashboard.assert_not_called()
+
+    def test_interrupted_resume_menu_exits_cleanly_without_writing_checkpoint(self):
+        import copy
+        import kace
+        from core.exceptions import WizardExit
+        checkpoint = {'state': 'DEPLOYING', 'artifact': {'path': 'firmware.bin'},
+                      'wizard_data': {'language': 'English'}}
+        for interruption in (KeyboardInterrupt, EOFError, WizardExit):
+            with self.subTest(interruption=interruption.__name__):
+                original = copy.deepcopy(checkpoint)
+                with patch('kace.checkpoint_revision', return_value=('saved', 9)), \
+                     patch('kace.load_checkpoint', return_value=checkpoint), \
+                     patch('firmware.detector.discover_mcu_hardware', return_value={}), \
+                     patch('builtins.input', side_effect=interruption), \
+                     patch('kace._persist_workflow') as persist, \
+                     patch('core.dashboard.run_dashboard') as dashboard, \
+                     patch.dict(os.environ, {'KACE_AUTO': '0'}), \
+                     contextlib.redirect_stdout(io.StringIO()) as output:
+                    with self.assertRaises(SystemExit) as exit_result:
+                        kace.main()
+                    self.assertEqual(exit_result.exception.code, 2)
+                    persist.assert_not_called()
+                    dashboard.assert_not_called()
+                self.assertEqual(checkpoint, original)
+                self.assertNotIn('Traceback', output.getvalue())
 
     def test_beginner_never_gets_technical_diff_question(self):
         from core.deployer import _interactive_configuration_review

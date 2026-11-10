@@ -8,6 +8,7 @@ semantics from terminal text.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import TextIO
 
@@ -79,13 +80,27 @@ def _supports_color(stream: TextIO) -> bool:
     return bool(getattr(stream, "isatty", lambda: False)())
 
 
+def _failure_detail(detail: str) -> str:
+    """Keep the observed cause readable without echoing common credentials."""
+    detail = re.sub(r"(?i)(https?://)[^/\s@]+@", r"\1[redacted]@", detail)
+    detail = re.sub(r"(?i)(\bAuthorization\s*[:=]\s*)(?:Bearer|Basic)\s+\S+",
+                    r"\1[redacted]", detail)
+    detail = re.sub(
+        r"(?i)(\b(?:password|passwd|api[_-]?key|access_token|token)\s*[:=]\s*)"
+        r"(?:\"[^\"]*\"|'[^']*'|[^\s;,&]+)", r"\1[redacted]", detail,
+    )
+    detail = " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", detail).split())
+    limit = 4000 if get_mode() == "Advanced" else 1000
+    return detail if len(detail) <= limit else detail[:limit - 1] + "…"
+
+
 def render_workflow_result(
     result: WorkflowResult,
     *,
     stream: TextIO | None = None,
     color: bool | None = None,
 ) -> str:
-    """Render normal non-success outcomes without exposing internal details."""
+    """Render non-success outcomes with a bounded, credential-filtered cause."""
     messages = _MESSAGES.get(result.outcome)
     is_failure = result.outcome not in (
         WorkflowOutcome.SUCCESS,
@@ -98,13 +113,8 @@ def render_workflow_result(
     language = get_lang()
     if is_failure:
         title = _FAILURE_TITLES.get(language, _FAILURE_TITLES["English"])
-        explanation = result.detail or title
-        if get_mode() != "Advanced":
-            explanation = {
-                "English": "Installation stopped safely. Run KACE again to continue the saved workflow. Technical details are available in advanced mode.",
-                "Español": "La instalación se detuvo de forma segura. Ejecutá KACE para continuar el flujo guardado. Los detalles técnicos están disponibles en modo avanzado.",
-                "Português": "A instalação parou com segurança. Execute o KACE para continuar o fluxo salvo. Os detalhes técnicos estão disponíveis no modo avançado.",
-            }.get(language, explanation)
+        label = {"English": "Reason", "Español": "Motivo", "Português": "Motivo"}.get(language, "Reason")
+        explanation = f"{label}: {_failure_detail(result.detail or title)}"
         closing = _FAILURE_HINTS.get(language, _FAILURE_HINTS["English"])
         icon = "✖"
         ansi = "\033[91m"

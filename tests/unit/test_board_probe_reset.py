@@ -8,6 +8,7 @@ import pytest
 from core.board_probe_reset import (SOURCE_RESET, RESET_OUTPUT, RESET_MACRO, RESET_COMMANDS,
     selected_probe_reset, validate_probe_reset_artifact)
 from core.board_auxiliary import selected_board_digital_outputs, validate_board_electrical_artifact
+from core.config_geometry import load_geometry_context
 from core.config_transaction import ConfigDeploymentTransaction, ConfigTransactionState
 from core.custom_probe import parse_custom_probe_config
 from core.exceptions import GenerationError
@@ -48,6 +49,7 @@ def test_real_source_hook_macro_outputs_and_repeat_publication(tmp_path, profile
     raw, board, choices = reset_case(profile, mode)
     expected = _read_pin_config(raw)[0]
     text = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"), include_macros=True, verbose=False)["content"]
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text.encode())
     actual = _read_pin_config(text)[0]
     for name in (RESET_OUTPUT, "output_pin LED"):
         assert actual[name] == expected[name]
@@ -59,7 +61,7 @@ def test_real_source_hook_macro_outputs_and_repeat_publication(tmp_path, profile
     validate_board_electrical_artifact(board, text)
     dest = FakeTransport()
     for _ in range(2):
-        outcome = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=board,
+        outcome = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=board, geometry_context=geometry,
             activation="none", snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
         assert outcome.state == ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION, outcome.detail
 
@@ -101,12 +103,13 @@ def test_unreviewed_source_never_replaces_artifacts(tmp_path, mutation):
 def test_effective_override_cannot_bypass_binding(tmp_path, override, noop):
     _, board, choices = reset_case(PROFILES[0])
     text = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text)
     remote = {"printer.cfg": text+b"\n[include user.cfg]\n", "user.cfg": override.encode()}
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, None, remote).artifacts})
-        assert not build_managed_config_plan(text, None, remote).changed_artifacts
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, None, remote, geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(text, None, remote, geometry_context=geometry).changed_artifacts
     dest, confirm = FakeTransport(remote), Mock(return_value=True)
-    result = ConfigDeploymentTransaction(dest, text, None, selected_board=board, confirm=confirm,
+    result = ConfigDeploymentTransaction(dest, text, None, selected_board=board, confirm=confirm, geometry_context=geometry,
         activation="firmware", snapshot_root=str(tmp_path / "snapshots")).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED
     assert all(call[0] == "read" for call in dest.calls) and dest.files == remote

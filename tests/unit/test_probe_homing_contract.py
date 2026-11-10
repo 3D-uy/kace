@@ -190,7 +190,19 @@ def base(tmp_path):
 
 
 def plan(text, remote=None):
-    return build_managed_config_plan(text.encode(), None, remote or {})
+    return build_managed_config_plan(text.encode(), None, remote or {},
+                                     geometry_context=geometry(text))
+
+
+def geometry(text):
+    # These hand-edited fixtures retain the base printer's explicit 235mm bed.
+    # Supply that input rather than deriving bed bounds from their changed rails.
+    from core.config_geometry import GeometryContext
+    from core.motion_model import PrinterMotionSpace
+    return GeometryContext.from_generated(text.encode(), PrinterMotionSpace({
+        "printable_x_min": 0, "printable_x_max": 235,
+        "printable_y_min": 0, "printable_y_max": 235,
+    }))
 
 
 def virtual(text):
@@ -317,6 +329,7 @@ def test_publication_preserves_mesh_probe_with_physical_homing(base, kind, noop,
         remote.update({a.remote_name: a.content for a in plan(base, remote).artifacts})
     transport = FakeTransport(remote)
     result = ConfigDeploymentTransaction(transport, base.encode(), None,
+        geometry_context=geometry(base),
         activation="none", confirm=lambda _: True, verify_existing_ready=noop,
         snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     expected = (ConfigTransactionState.COMMITTED if noop
