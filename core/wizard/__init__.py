@@ -65,6 +65,7 @@ from core.wizard.steps.motion import (
     _step_y_limits,
     _step_z_limits,
     _step_homing_directions,
+    _step_motor_directions,
     _step_z_mechanics,
     _get_printer_profiles,
     _load_printer_profiles,
@@ -90,9 +91,11 @@ from core.wizard.steps.sensors import (
 )
 from core.wizard.steps.software import (
     _step_display,
+    _step_starter_macros,
     _step_web_ui,
 )
 from core.wizard.steps.probe_homing import (
+    probe_homing_review_required,
     review_probe_homing_geometry,
     validate_wizard_probe_homing_geometry,
 )
@@ -170,13 +173,23 @@ def resolve_bltouch_pins(user_data: dict, parsed_data: dict) -> None:
         _blt["control_pin"] = _cp.strip()
 
 
+def _review_profile_with_homing(user_data):
+    answer = _step_profile_review(user_data)
+    if answer == "confirm":
+        result = _step_homing_directions(user_data, reviewed=True)
+        if result == _BACK:
+            return _BACK
+    return answer
+
+
 def run_wizard(user_data_arg=None):
     """Runs the interactive CLI wizard to gather user preferences.
 
     New step order (all hardware decisions first):
       board → z_motors → z_socket_assignment → driver_type → driver_mode
       → printer_profile → profile_review → kinematics → x/y/z_volume
-      → probe → probe_offsets → probe_homing → hotend_therm → bed_therm → display → web_ui
+      → homing_directions → z_mechanics → motor_directions → tmc_currents
+      → probe → probe_offsets → probe_homing → hotend_therm → bed_therm → display → web_ui → starter_macros
 
     The wizard now also handles Z socket wiring and display setup internally,
     so kace.py only handles file generation and deployment after the wizard
@@ -270,6 +283,7 @@ def run_wizard(user_data_arg=None):
         "z_limits",
         "homing_directions",
         "z_mechanics",
+        "motor_directions",
         "tmc_currents",
         "probe",
         "custom_probe",
@@ -282,6 +296,7 @@ def run_wizard(user_data_arg=None):
         "bed_therm",
         "display",
         "web_ui",
+        "starter_macros",
     ]
 
     # ── Step catalog ───────────────────────────────────────────────────────────
@@ -317,9 +332,9 @@ def run_wizard(user_data_arg=None):
             "next":   lambda ans, ud: "kinematics" if not ud.get("profile_loaded") else "profile_review"
         },
         "profile_review": {
-            "prompt": lambda ud: _step_profile_review(ud),
-            # After review always continue to the next authoritative-skip steps.
-            "next":   lambda ans, ud: "homing_directions" if ans == "confirm" else _BACK
+            "prompt": lambda ud: _review_profile_with_homing(ud),
+            # Homing was reviewed here; custom geometry still visits its own step.
+            "next":   lambda ans, ud: "z_mechanics" if ans == "confirm" else _BACK
         },
         "kinematics": {
             "visible": lambda ud: "kinematics" not in ud.get("_authoritative", set()),
@@ -356,6 +371,10 @@ def run_wizard(user_data_arg=None):
         "tmc_currents": {
             "visible": lambda ud: ud.get("driver_mode") != "Standalone" and str(ud.get("driver_type", "")).startswith("TMC"),
             "prompt": lambda ud: _step_tmc_currents(ud)
+        },
+        "motor_directions": {
+            "visible": lambda ud: not ud.get("profile_loaded"),
+            "prompt": lambda ud: _step_motor_directions(ud),
         },
         "probe": {
             "prompt": lambda ud: _step_probe(ud),
@@ -417,6 +436,7 @@ def run_wizard(user_data_arg=None):
         "custom_probe_review": {
             "prompt": lambda ud: _step_custom_probe_review(ud),
             "next": lambda ans, ud: "probe_homing",
+            "preserve_on_back": True,
         },
         "custom_probe_offsets": {
             "prompt": lambda ud: _step_custom_probe_offsets(ud),
@@ -430,6 +450,7 @@ def run_wizard(user_data_arg=None):
             "prompt": lambda ud: _step_probe_offsets(ud)
         },
         "probe_homing": {
+            "visible": probe_homing_review_required,
             "prompt": lambda ud: "done" if review_probe_homing_geometry(ud) else _BACK,
         },
         "hotend_therm": {
@@ -446,6 +467,9 @@ def run_wizard(user_data_arg=None):
         "web_ui": {
             "prompt": lambda ud: _step_web_ui(ud)
         },
+        "starter_macros": {
+            "prompt": lambda ud: _step_starter_macros(ud)
+        },
     }
 
     user_data = dict(initial_defaults)
@@ -457,6 +481,8 @@ def run_wizard(user_data_arg=None):
     user_data["language"] = get_lang()
     start_step = user_data.pop("start_step", "board")
 
+    for step_cfg in steps_config.values():
+        step_cfg["track_interaction"] = True
     runner = WizardRunner(steps_config, step_order, initial_data=user_data)
     result_data = runner.run(start_step)
 

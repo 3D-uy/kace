@@ -1,7 +1,9 @@
 import copy
 import os
+import shutil
+import textwrap
 
-from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
+from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Choice
 from core.scraper import fetch_raw_config, parse_config, get_reusable_driver_sockets, detect_fan_pins, detect_driver_info
 from core.translations import t
 from core.terminal import ERROR, INFO, RESET, WARNING, SECTION
@@ -55,38 +57,74 @@ def _has_fan_options(user_data: dict) -> bool:
 def _step_board(user_data, suggested_configs, board_configs):
     """Board selection step.
 
-    Presents MCU-suggested boards at the top of the list.
+    Presents exact-MCU candidates inline and offers an explicit full-catalog search.
     After selection, loads and stores the raw board config so subsequent
     wizard steps (Z socket assignment, display) can use it without re-fetching.
     """
-    choices = []
-    if suggested_configs:
-        choices.append(Separator(f"── {t('wizard.select_board_suggested')} ──"))
-        choices.extend(suggested_configs)
-        choices.append(Separator("──────────────────────────────────────────────────"))
+    from core.board_identity import board_mcu_candidates, board_model_label, canonical_mcu
+    from core.menu import _wrapped_prompt_lines
+
+    detected = canonical_mcu(user_data.get("mcu_type"))
+    # An existing exact choice may be reused by automation. The MCU and the
+    # ordering of candidate profiles are never an implicit board choice.
+    preselected = user_data.get("board") if os.environ.get("KACE_AUTO") == "1" else None
+    if preselected and preselected not in {*suggested_configs, *board_configs}:
+        print(f"  {ERROR}{t('catalog.auto_board_required')}{RESET}")
+        raise WizardExit()
+
+    def board_choice(board):
+        return {"name": board_model_label(board, detected), "value": board}
+
+    choices = [
+        board_choice(board)
+        for board in dict.fromkeys(suggested_configs)
+    ]
     choices.extend([
-        {"name": t("choice.search_manually"), "value": "__search__"},
+        {"name": t("catalog.search_other_boards"), "value": "__search_boards__"},
         _back_choice(),
         _quit_choice(),
     ])
 
-    ans = numbered_select(
-        t("wizard.select_board"),
-        choices=choices
-    )
+    while True:
+        if detected:
+            print(f"  {INFO}{t('catalog.detected_processor', mcu=detected.upper())}{RESET}")
+            for line in _wrapped_prompt_lines(t("catalog.board_unconfirmed")):
+                print("  " + line)
+        if not suggested_configs:
+            for line in _wrapped_prompt_lines(t("catalog.no_exact_board")):
+                print("  " + line)
+        ans = preselected or autocomplete_select(
+            t("wizard.select_board"), choices=choices, require_explicit=True,
+            allow_auto_default=False,
+        )
+        if ans == "__search_boards__":
+            ans = autocomplete_select(
+                t("catalog.search_board_prompt"),
+                choices=[
+                    *[board_choice(board) for board in dict.fromkeys([*suggested_configs, *board_configs])],
+                    _back_choice(), _quit_choice(),
+                ],
+                require_explicit=True, search_first=True, renumber_results=True,
+                allow_auto_default=False,
+            )
+            if ans == _BACK:
+                continue
+        models = board_mcu_candidates(ans)
+        if detected and models and detected not in models:
+            message = t("catalog.mcu_conflict", mcu=detected.upper(),
+                        board=ans, expected=", ".join(models).upper())
+            if preselected:
+                print(f"  {ERROR}{message}{RESET}")
+                raise WizardExit()
+            for line in _wrapped_prompt_lines(message):
+                print(f"  {ERROR}{line}{RESET}")
+            continue
+        break
 
     if ans == _QUIT or ans is None:
         raise WizardExit()
     if ans == _BACK:
         return _BACK
-
-    if ans == "__search__":
-        ans = autocomplete_select(
-            t("wizard.select_board_manual"),
-            choices=board_configs
-        )
-        if ans is None:
-            return "__retry__"
 
     user_data["board"] = ans
 
@@ -132,6 +170,9 @@ def _step_board(user_data, suggested_configs, board_configs):
         user_data["board_parsed"]     = {}
     user_data["_board_parsed_for"] = ans
 
+    print(f"  {INFO}{t('catalog.confirmed_board')}{RESET}: "
+          f"{WARNING}{board_model_label(ans, detected)}{RESET}")
+
     return ans
 
 
@@ -162,7 +203,7 @@ def _step_fan_assignment(user_data: dict) -> str:
     part_choices = []
     if default_fan_pin:
         part_choices.append({
-            "name": t("wizard.fan_board_default").format(pin=default_fan_pin),
+            "name": f"{t('wizard.fan_board_default').format(pin=default_fan_pin)} {WARNING}{t('choice.recommended')}{RESET}",
             "value": "default"
         })
 
@@ -330,6 +371,7 @@ def _step_z_socket_assignment(user_data):
     _parsed_full   = None
     z_idx          = 2
     assigned_drivers = {}
+    assignment_snapshots = {}
 
     while z_idx <= z_motors:
         motor_name = f"stepper_z{z_idx - 1}"
@@ -362,21 +404,23 @@ def _step_z_socket_assignment(user_data):
             raise WizardExit()
 
         if selected_driver == "back":
-            if z_idx > 2:
-                z_idx -= 1
-                prev_motor = f"stepper_z{z_idx - 1}"
-                if prev_motor in assigned_drivers:
-                    prev_key = assigned_drivers[prev_motor]
-                    if prev_key != "custom":
-                        _label = prev_key.replace("extruder_stepper ", "").upper() \
-                            if prev_key.startswith("extruder_stepper ") \
-                            else f"E{prev_key.replace('extruder', '')}"
-                        available_driver_sockets.append((prev_key, _label))
-                        available_driver_sockets.sort(key=lambda t_: t_[0])
-                        parsed_data.pop(prev_motor, None)
-                continue
-            else:
+            if not assigned_drivers:
                 return _BACK
+            # Return to the last question actually answered, skipping motors
+            # already defined by the board. Restore custom assignments and
+            # reused source sockets alike before asking that question again.
+            prev_motor = next(reversed(assigned_drivers))
+            previous_parsed, previous_sockets = assignment_snapshots.pop(prev_motor)
+            parsed_data.clear()
+            parsed_data.update(previous_parsed)
+            available_driver_sockets = previous_sockets
+            assigned_drivers.pop(prev_motor)
+            z_idx = int(prev_motor.removeprefix("stepper_z")) + 1
+            continue
+
+        assignment_snapshots[motor_name] = (
+            copy.deepcopy(parsed_data), list(available_driver_sockets)
+        )
 
         if selected_driver == "custom":
             print(t("wizard.assign_custom_pins_header", motor=motor_name))
@@ -524,7 +568,8 @@ def _step_tmc_currents(user_data):
         raise GenerationError("Explicit TMC settings required: " + ", ".join(missing))
     if missing:
         print(f"\n{SECTION}{t('wizard.tmc_current.title')}{RESET}")
-        print(t("wizard.tmc_current.help"))
+        width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns - 2)
+        print(textwrap.fill(t("wizard.tmc_current.help"), width=width))
     for key in missing:
         model = canonical_tmc_model(staged.get("driver_type", ""))
         option, target = key.rsplit("_", 1)
@@ -538,7 +583,7 @@ def _step_tmc_currents(user_data):
             except GenerationError:
                 return t("wizard.tmc_current.invalid")
         label = "wizard.tmc_current.input" if not optional else "wizard.tmc_current." + option
-        value = simple_input(t(label, motor=target.upper()),
+        value = simple_input(f"{WARNING}{t(label, motor=target.upper())}{RESET}",
                              default="", validate=validate, back_value=_BACK)
         if value == _BACK:
             return _BACK
@@ -563,7 +608,7 @@ def _step_tmc_currents(user_data):
             option, target = key.rsplit("_", 1)
             value = reviewed.get(key, t("wizard.tmc_current.omitted"))
             unit = "mm/s" if option == "stealthchop_threshold" else "A RMS"
-            print(f"  {target.upper()} · {option}: {value}" + (f" {unit}" if key in reviewed else ""))
+            print(f"  {WARNING}{target.upper()}{RESET} · {option}: {value}" + (f" {unit}" if key in reviewed else ""))
             if owners.get(key) == "UNRESOLVED":
                 print(f"{ERROR}{t('wizard.tmc_current.invalid')}{RESET}")
                 return "__retry__"

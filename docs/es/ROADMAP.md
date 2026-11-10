@@ -11,13 +11,15 @@ Existen configuración guiada, publicación revisada, recuperación persistente,
 El mapeo revisado de conectores TMC extraíbles cubre diez perfiles exactos; los ajustes eléctricos entre modelos siguen requiriendo revisión del usuario. Ver [alcance (EN)](../TMC_SOCKET_MAPPING.md).
 
 La geometría Z de la sonda se revisa antes de preparar firmware; los flujos
-inconclusos con firmware verificado pueden revisar su mínimo Z guardado sin
-descartar esa evidencia. La calificación aún debe comprobar rechazo temprano,
+inconclusos con firmware verificado pueden revisar su mínimo Z guardado o un
+offset conocido de sonda personalizada sin descartar esa evidencia. La calificación aún debe comprobar rechazo temprano,
 cancelación, corrección guardada y activación/verificación completas sobre el
 candidato exacto; estas comprobaciones no calibran la sonda ni completan solas
 una instalación.
 
 ## 🧭 Prioridades
+
+El código incluye recomendaciones de placas en una lista común, números de selección amarillos, navegación Volver entre pasos interactivos y reutilización del homing revisado. El cuestionario continuo conserva explicaciones en recuadros, el dibujo de la sonda y la revisión completa del perfil; los catálogos muestran una vista acotada y filtros opcionales sobre todas las entradas, sin páginas. El resumen generado mantiene pendientes la aplicación y la verificación. Crowsnest distingue archivos y estado del servicio. Validar estos recorridos, incluida la cancelación y corrección del rango de la sonda, en la Pi real y el candidato distribuido exacto; las regresiones de código no acreditan la calificación física.
 
 | Prioridad | Resultado requerido | Referencia |
 | --- | --- | --- |

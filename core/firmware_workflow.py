@@ -201,6 +201,20 @@ def discard_checkpoint(checkpoint):
         if checkpoint_revision(destination) != tuple(expected):
             raise CheckpointConflict("checkpoint changed before discard; reload it")
         os.replace(destination, destination + ".discarded-" + uuid.uuid4().hex)
+    # Observation only: the old installation is archived, not completed or
+    # replaced by a hardware checkpoint before the questionnaire is answered.
+    if os.environ.get("KACE_MACHINE_OUTPUT") == "1":
+        try:
+            from core.moonraker_deployer import JsonEventSink
+            JsonEventSink()({
+                "schema": 2, "workflow_kind": "firmware_deployment",
+                "workflow_id": checkpoint["workflow_id"],
+                "sequence": checkpoint["sequence"] + 1,
+                "state": "DISCARDED",
+                "data": {"language": checkpoint.get("wizard_data", {}).get("language", "English")},
+            })
+        except (OSError, ValueError):
+            pass  # Terminal loss cannot undo the operator's committed archive.
 
 
 def _jsonable(value: Any) -> Any:
@@ -546,6 +560,7 @@ def write_checkpoint(
                 "staged_path": artifact.get("path", ""),
                 "final_filename": artifact.get("final_filename", ""),
                 "download_available": state in {"ARTIFACT_READY", "AWAITING_FLASH", "VERIFYING_MCU"},
+                "configuration_download_available": state in {"CONFIG_GENERATED", "READY_TO_DEPLOY", "DEPLOYING", "COMPLETE"},
             },
         })
     except (OSError, ValueError):

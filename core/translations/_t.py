@@ -29,6 +29,81 @@ def translate_comment(comment, lang):
         return comment
 
     translations = {
+        "Value provenance (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | INFERRED | UNRESOLVED):": {
+            "Español": "Origen de valores (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | INFERRED | UNRESOLVED):",
+            "Português": "Origem dos valores (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | INFERRED | UNRESOLVED):",
+        },
+        "Required for LPC176x boards (SKR 1.4/1.4 Turbo) to prevent USB hang on FIRMWARE_RESTART": {
+            "Español": "Requerido en LPC176x (SKR 1.4/1.4 Turbo) para evitar bloqueos USB con FIRMWARE_RESTART",
+            "Português": "Necessário em LPC176x (SKR 1.4/1.4 Turbo) para evitar travamentos USB com FIRMWARE_RESTART",
+        },
+        "Native utility features": {
+            "Español": "Funciones auxiliares nativas", "Português": "Funções auxiliares nativas",
+        },
+        "Minimum valid X position": {
+            "Español": "Posición mínima válida en X", "Português": "Posição mínima válida em X",
+        },
+        "Minimum valid Y position": {
+            "Español": "Posición mínima válida en Y", "Português": "Posição mínima válida em Y",
+        },
+        "Minimum valid Z position": {
+            "Español": "Posición mínima válida en Z", "Português": "Posição mínima válida em Z",
+        },
+        "Gear ratio of this Z motor": {
+            "Español": "Relación de transmisión de este motor Z", "Português": "Relação de transmissão deste motor Z",
+        },
+        "Nozzle coordinate that centers the probe within its reachable bed area": {
+            "Español": "Coordenada de boquilla que centra la sonda en su área alcanzable de cama",
+            "Português": "Coordenada do bico que centraliza a sonda na área alcançável da mesa",
+        },
+        "Probe grid size (NxN derived from bed size)": {
+            "Español": "Puntos de la malla (NxN según tamaño de cama)",
+            "Português": "Pontos da malha (NxN conforme o tamanho da mesa)",
+        },
+        "Controller Cooling Fan": {
+            "Español": "Ventilador de la controladora", "Português": "Ventoinha da controladora",
+        },
+        "2. Run PID_CALIBRATE for hotend": {
+            "Español": "2. Ejecutar PID_CALIBRATE para el hotend", "Português": "2. Executar PID_CALIBRATE para o hotend",
+        },
+        "3. Run PID_CALIBRATE for heater bed": {
+            "Español": "3. Ejecutar PID_CALIBRATE para la cama", "Português": "3. Executar PID_CALIBRATE para a mesa",
+        },
+        "4. Calibrate Z offset (PROBE_CALIBRATE)": {
+            "Español": "4. Calibrar el offset Z (PROBE_CALIBRATE)", "Português": "4. Calibrar o offset Z (PROBE_CALIBRATE)",
+        },
+        "4. Calibrate the physical Z endstop (Z_ENDSTOP_CALIBRATE)": {
+            "Español": "4. Calibrar el fin de carrera físico Z (Z_ENDSTOP_CALIBRATE)",
+            "Português": "4. Calibrar o fim de curso físico Z (Z_ENDSTOP_CALIBRATE)",
+        },
+        "5. Verify endstops and axis directions": {
+            "Español": "5. Verificar finales de carrera y sentidos de los ejes",
+            "Português": "5. Verificar fins de curso e sentidos dos eixos",
+        },
+        "Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver": {
+            "Español": "Señal de paso; ! invierte el pulso (ej. !PA1), solo si lo requiere el driver",
+            "Português": "Sinal de passo; ! inverte o pulso (ex. !PA1), só se exigido pelo driver",
+        },
+        "Direction signal; ! reverses motor rotation (e.g. !PA1)": {
+            "Español": "Señal de dirección; ! invierte el giro del motor (ej. !PA1)",
+            "Português": "Sinal de direção; ! inverte a rotação do motor (ex. !PA1)",
+        },
+        "Driver enable; ! means active-low (e.g. !PA1)": {
+            "Español": "Habilitación del driver; ! activa en nivel bajo (ej. !PA1)",
+            "Português": "Habilitação do driver; ! ativa em nível baixo (ex. !PA1)",
+        },
+        "Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both": {
+            "Español": "Fin de carrera; ^PA1: pull-up interno; !PA1: lógica invertida; ^!PA1: ambos",
+            "Português": "Fim de curso; ^PA1: pull-up interno; !PA1: lógica invertida; ^!PA1: ambos",
+        },
+        "Probe virtual endstop; no ^ or ! prefixes here": {
+            "Español": "Fin de carrera virtual de la sonda; sin prefijos ^ ni ! aquí",
+            "Português": "Fim de curso virtual da sonda; sem prefixos ^ ou ! aqui",
+        },
+        "Sensorless virtual endstop; no ^ or ! prefixes here": {
+            "Español": "Fin de carrera virtual sensorless; sin prefijos ^ ni ! aquí",
+            "Português": "Fim de curso virtual sensorless; sem prefixos ^ ou ! aqui",
+        },
         "Serial connection to the printer controller board. Auto-detected by KACE. Verify in /dev/serial/by-id/ if connection fails.": {
             "Español": "Conexión serial a la placa controladora. Auto-detectado por KACE. Verifica en /dev/serial/by-id/ si falla.",
             "Português": "Conexão serial com a placa controladora. Auto-detectado pelo KACE. Verifique em /dev/serial/by-id/ se falhar."
@@ -645,25 +720,33 @@ def translate_comment(comment, lang):
             "Español": "Altura Z de seguridad al moverse entre puntos (mm)",
             "Português": "Altura Z de segurança ao mover entre puntos (mm)"
         },
-        "Maximum number of attempts to reach tolerance": {
-            "Español": "Número máximo de intentos hasta alcanzar tolerancia",
-            "Português": "Número máximo de tentativas para atingir a tolerância"
+        "Additional probing cycles after the first measurement": {
+            "Español": "Ciclos adicionales de sondeo después de la primera medición",
+            "Português": "Ciclos adicionais de sondagem após a primeira medição"
         },
-        "Maximum acceptable difference between Z motors (mm). Typical values: 0.005–0.02": {
-            "Español": "Diferencia máxima aceptable entre motores Z (mm). Valores típicos: 0.005–0.02",
-            "Português": "Diferença máxima aceitável entre motores Z (mm). Valores típicos: 0.005–0.02"
+        "Maximum range of probed Z values for retries (mm)": {
+            "Español": "Rango máximo de valores Z sondeados para los reintentos (mm)",
+            "Português": "Amplitude máxima dos valores Z sondados para as novas tentativas (mm)"
         },
         "Gantry leveling for CoreXY printers with 4 independent Z motors (e.g. Voron).": {
             "Español": "Nivelación del gantry para impresoras CoreXY con 4 motores Z independientes (ej: Voron).",
             "Português": "Nivelamento do gantry para impressoras CoreXY com 4 motores Z independentes (ex: Voron)."
         },
         "Klipper adjusts all 4 corner motors to keep the gantry perfectly level.": {
-            "Español": "Klipper adjusts all 4 corner motors to keep the gantry perfectly level.",
+            "Español": "Klipper ajusta los 4 motores de las esquinas para nivelar el pórtico.",
             "Português": "O Klipper ajusta os 4 motores de canto para manter o gantry perfeitamente nivelado."
         },
         "Uncomment this section and run QUAD_GANTRY_LEVEL from the Klipper console.": {
             "Español": "Descomenta esta sección y ejecuta QUAD_GANTRY_LEVEL desde la consola de Klipper.",
             "Português": "Descomente esta seção e execute QUAD_GANTRY_LEVEL no console do Klipper."
+        },
+        "Verify motor order first: Z front-left, Z1 rear-left, Z2 rear-right, Z3 front-right.": {
+            "Español": "Verifica primero el orden de los motores: Z frontal izquierdo, Z1 trasero izquierdo, Z2 trasero derecho, Z3 frontal derecho.",
+            "Português": "Verifique primeiro a ordem dos motores: Z dianteiro esquerdo, Z1 traseiro esquerdo, Z2 traseiro direito, Z3 dianteiro direito."
+        },
+        "Points satisfy declared bounds only; measure corners and verify physical clearance.": {
+            "Español": "Los puntos sólo cumplen los límites declarados; mide las esquinas y verifica el espacio físico libre.",
+            "Português": "Os pontos atendem apenas aos limites declarados; meça os cantos e verifique o espaço físico livre."
         },
         "gantry_corners are the physical corners of the gantry in nozzle coordinates.": {
             "Español": "gantry_corners son las esquinas físicas del gantry en coordenadas de boquilla.",
@@ -685,13 +768,9 @@ def translate_comment(comment, lang):
             "Español": "Esquina trasera derecha",
             "Português": "Canto traseiro direito"
         },
-        "Maximum acceptable difference between gantry corners (mm)": {
-            "Español": "Diferencia máxima aceptable entre esquinas del gantry (mm)",
-            "Português": "Diferença máxima aceitável entre os cantos do gantry (mm)"
-        },
-        "Maximum safety adjustment limit (mm). Stops if exceeded.": {
-            "Español": "Límite de ajuste máximo por seguridad (mm). Detiene si se excede.",
-            "Português": "Limite máximo de ajuste por segurança (mm). Para se excedido."
+        "Largest positive computed adjustment allowed (mm); not a bound on absolute motor travel.": {
+            "Español": "Mayor ajuste positivo calculado permitido (mm); no limita el recorrido absoluto de los motores.",
+            "Português": "Maior ajuste positivo calculado permitido (mm); não limita o curso absoluto dos motores."
         }
     }
 
@@ -730,8 +809,8 @@ def translate_comment(comment, lang):
         if lang == "Português":
             return f"Sensor (Probe): {probe_val}"
             
-    if comment.startswith("Z Motors:"):
-        z_val = comment[9:].strip()
+    if comment.startswith(("Z Motors:", "Z Drivers:")):
+        z_val = comment.split(":", 1)[1].strip()
         if lang == "Español":
             return f"Motores Z: {z_val}"
         if lang == "Português":

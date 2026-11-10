@@ -244,24 +244,15 @@ def normalize_and_validate_configuration(user_data: dict) -> None:
     y_size, y_min, y_max = axes["y"]
     _, z_min, z_max = axes["z"]
 
-    printable_x_min = finite_number(
-        "printable_x_min",
-        user_data.get("printable_x_min", x_min if x_min > 0.0 else 0.0),
-        minimum=-2000.0,
-        maximum=2000.0,
-    )
-    printable_x_max = finite_number(
-        "printable_x_max", user_data.get("printable_x_max", x_size), minimum=-2000.0, maximum=2000.0
-    )
-    printable_y_min = finite_number(
-        "printable_y_min",
-        user_data.get("printable_y_min", y_min if y_min > 0.0 else 0.0),
-        minimum=-2000.0,
-        maximum=2000.0,
-    )
-    printable_y_max = finite_number(
-        "printable_y_max", user_data.get("printable_y_max", y_size), minimum=-2000.0, maximum=2000.0
-    )
+    from core.motion_model import resolve_printable_xy, PrintableGeometryError
+    try:
+        printable, printable_defaults = resolve_printable_xy(user_data, {
+            "x": (x_size, x_min, x_max), "y": (y_size, y_min, y_max),
+        })
+    except PrintableGeometryError as exc:
+        raise GenerationError(str(exc)) from exc
+    printable_x_min, printable_x_max = printable["printable_x_min"], printable["printable_x_max"]
+    printable_y_min, printable_y_max = printable["printable_y_min"], printable["printable_y_max"]
     printable_z_max = finite_number(
         "printable_z_max", user_data.get("printable_z_max", user_data.get("z_size", z_max)), minimum=0.0,
         maximum=2000.0, minimum_inclusive=False,
@@ -291,6 +282,7 @@ def normalize_and_validate_configuration(user_data: dict) -> None:
     user_data["printable_x_max"] = f"{printable_x_max:g}"
     user_data["printable_y_min"] = f"{printable_y_min:g}"
     user_data["printable_y_max"] = f"{printable_y_max:g}"
+    user_data["_printable_bounds_defaults"] = printable_defaults
     user_data["printable_z_max"] = f"{printable_z_max:g}"
     user_data["printable_center_x"] = f"{(printable_x_min + printable_x_max) / 2:g}"
     user_data["printable_center_y"] = f"{(printable_y_min + printable_y_max) / 2:g}"

@@ -23,6 +23,60 @@ def _safe_float(val, default):
 class ProbeGeometryError(ValueError):
     """Raised when nozzle/probe geometry has no physically usable overlap."""
 
+
+class PrintableGeometryError(ValueError):
+    """Printable bounds cannot be resolved without an explicit bed decision."""
+
+
+def resolve_printable_xy(user_data: dict, axes: dict) -> tuple[dict, dict]:
+    """Resolve bed bounds without translating them to fit mechanical travel.
+
+    ``axes`` maps X/Y to (nominal size, travel minimum, travel maximum).
+    Materialized defaults retain their origin until edited or explicitly accepted.
+    Explicit bounds may exceed travel here: effective review intersects the bed
+    with probe reach, while generation separately validates its printable area.
+    """
+    previous = user_data.get("_printable_bounds_defaults")
+    previous = previous if isinstance(previous, dict) else {}
+    ownership = user_data.get("_value_provenance")
+    ownership = ownership if isinstance(ownership, dict) else {}
+    resolved, defaults = {}, {}
+    for axis, (size, travel_min, travel_max) in axes.items():
+        implicit = []
+        for bound, fallback in (("min", max(travel_min, 0.0)), ("max", size)):
+            key = f"printable_{axis}_{bound}"
+            supplied = user_data.get(key)
+            inherited = False
+            if key in previous and ownership.get(key) not in ("USER_OVERRIDE", "PROFILE"):
+                try:
+                    inherited = float(supplied) == float(previous[key])
+                except (TypeError, ValueError):
+                    pass
+            use_default = supplied is None or inherited
+            try:
+                value = float(fallback if use_default else supplied)
+            except (TypeError, ValueError):
+                raise PrintableGeometryError(f"{key} must be a finite number.") from None
+            if not math.isfinite(value):
+                raise PrintableGeometryError(f"{key} must be a finite number.")
+            resolved[key] = value
+            if use_default:
+                defaults[key] = f"{value:g}"
+                implicit.append(key)
+        low, high = resolved[f"printable_{axis}_min"], resolved[f"printable_{axis}_max"]
+        if implicit and (low < travel_min or high > travel_max or low >= high):
+            raise PrintableGeometryError(
+                f"Printable {axis.upper()} origin is unresolved: default bounds [{low:g}, {high:g}] "
+                f"do not fit travel [{travel_min:g}, {travel_max:g}]. Set explicit "
+                f"printable_{axis}_min and printable_{axis}_max; the bed was not shifted."
+            )
+        if low >= high:
+            raise PrintableGeometryError(
+                f"printable_{axis}_min ({low:g}) must be less than printable_{axis}_max ({high:g})."
+            )
+    return resolved, defaults
+
+
 class PrinterMotionSpace:
     """Represents the printer's physical coordinate system and motion space.
 
@@ -51,62 +105,13 @@ class PrinterMotionSpace:
         self.y_size = _safe_float(user_data.get("y_size"), self.y_max)
         self.z_size = _safe_float(user_data.get("z_size"), self.z_max)
 
-        # 3. Printable Area Limits
-        # Derive X printable limits
-        if "printable_x_min" in user_data and user_data["printable_x_min"] is not None:
-            self.printable_x_min = _safe_float(user_data["printable_x_min"], self.x_min if self.x_min > 0.0 else 0.0)
-            x_min_explicit = True
-        else:
-            self.printable_x_min = self.x_min if self.x_min > 0.0 else 0.0
-            x_min_explicit = False
-
-        if "printable_x_max" in user_data and user_data["printable_x_max"] is not None:
-            self.printable_x_max = _safe_float(user_data["printable_x_max"], self.x_size)
-            x_max_explicit = True
-        else:
-            self.printable_x_max = self.x_size
-            x_max_explicit = False
-
-        # Align printable X area within physical limits if possible, only if NOT explicitly set by user
-        if not (x_min_explicit or x_max_explicit):
-            if self.printable_x_max > self.x_max:
-                shift_x = self.printable_x_max - self.x_max
-                if self.printable_x_min - shift_x >= self.x_min:
-                    self.printable_x_min -= shift_x
-                    self.printable_x_max -= shift_x
-            elif self.printable_x_min < self.x_min:
-                shift_x = self.x_min - self.printable_x_min
-                if self.printable_x_max + shift_x <= self.x_max:
-                    self.printable_x_min += shift_x
-                    self.printable_x_max += shift_x
-
-        # Derive Y printable limits
-        if "printable_y_min" in user_data and user_data["printable_y_min"] is not None:
-            self.printable_y_min = _safe_float(user_data["printable_y_min"], self.y_min if self.y_min > 0.0 else 0.0)
-            y_min_explicit = True
-        else:
-            self.printable_y_min = self.y_min if self.y_min > 0.0 else 0.0
-            y_min_explicit = False
-
-        if "printable_y_max" in user_data and user_data["printable_y_max"] is not None:
-            self.printable_y_max = _safe_float(user_data["printable_y_max"], self.y_size)
-            y_max_explicit = True
-        else:
-            self.printable_y_max = self.y_size
-            y_max_explicit = False
-
-        # Align printable Y area within physical limits if possible, only if NOT explicitly set by user
-        if not (y_min_explicit or y_max_explicit):
-            if self.printable_y_max > self.y_max:
-                shift_y = self.printable_y_max - self.y_max
-                if self.printable_y_min - shift_y >= self.y_min:
-                    self.printable_y_min -= shift_y
-                    self.printable_y_max -= shift_y
-            elif self.printable_y_min < self.y_min:
-                shift_y = self.y_min - self.printable_y_min
-                if self.printable_y_max + shift_y <= self.y_max:
-                    self.printable_y_min += shift_y
-                    self.printable_y_max += shift_y
+        # 3. Printable Area Limits: the same origin policy used by generation.
+        printable, _ = resolve_printable_xy(user_data, {
+            "x": (self.x_size, self.x_min, self.x_max),
+            "y": (self.y_size, self.y_min, self.y_max),
+        })
+        for key, value in printable.items():
+            setattr(self, key, value)
 
         # Derive Z printable limits
         if "printable_z_max" in user_data and user_data["printable_z_max"] is not None:
@@ -173,12 +178,12 @@ class PrinterMotionSpace:
         """Returns the intersection of the physical bed and probe-reachable area.
 
         Computes probe_reachable_area() (probe-tip coordinates) intersected
-        with the physical bed bounds [0, x_size] × [0, y_size].  The result
-        is in probe-tip / bed coordinates, matching Klipper's convention for
-        mesh_min / mesh_max and z_tilt / qgl probe points.
+        with the resolved printable bed bounds. The result is in probe-tip /
+        bed coordinates, matching Klipper's mesh_min / mesh_max convention.
 
         This is the canonical geometry source for any configuration value that
-        represents a probe point — mesh limits, z_tilt sample points, etc.
+        represents a probe point. z_tilt and quad_gantry_level points instead
+        require nozzle coordinates: subtract probe offsets before rendering.
         """
         x_probe_min, x_probe_max = self.probe_reachable_area()["x"]
         y_probe_min, y_probe_max = self.probe_reachable_area()["y"]

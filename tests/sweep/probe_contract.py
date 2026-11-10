@@ -66,7 +66,10 @@ def choose_generic(parsed, user, original):
             patch.object(sensors, 'simple_input', side_effect=pin):
         assert sensors._step_custom_probe_pin(user) == 'done'
     for option, flag in (('pullup', '^'), ('inverted', '!')):
-        with patch.object(sensors, 'yes_no', return_value=flag in original['pin'][:3]):
+        with patch.object(sensors, 'yes_no', return_value=flag in original['pin'][:3]), \
+                patch.object(sensors, 'numbered_select', return_value=(
+                    (flag in original['pin'][:3]) if option == 'pullup' else
+                    ('inverted' if flag in original['pin'][:3] else 'normal'))):
             assert sensors._step_custom_probe_signal_option(user, option) == 'done'
 
 
@@ -81,8 +84,8 @@ def require_missing_geometry(parsed, user, original):
         confirm.assert_not_called()
     assert all(k not in user for k in ('custom_probe_x_offset', 'custom_probe_y_offset',
                                       'probe_x_offset', 'probe_y_offset'))
-    assert sensors._step_custom_probe(user) == '__retry__'
-    assert sensors._step_custom_probe_review(user) == '__retry__'
+    assert sensors._step_custom_probe(user) == sensors._BACK
+    assert sensors._step_custom_probe_review(user) == sensors._BACK
     assert 'custom_probe' not in user and 'custom_probe_settings' not in user
 
 
@@ -130,12 +133,18 @@ def choose_probe(parsed, user, kind, original):
             def answer(*args, value=value, **kwargs):
                 assert kwargs['validate'](value) is True
                 return value
-            with patch.object(sensors, 'simple_input', side_effect=answer):
+            def known_offset(*args, **kwargs):
+                assert key == 'custom_probe_z_offset'
+                assert 'known' in [choice['value'] for choice in kwargs['choices']]
+                return 'known'
+            with patch.object(sensors, 'simple_input', side_effect=answer), \
+                    patch.object(sensors, 'numbered_select', side_effect=known_offset):
                 assert sensors._step_guided_custom_probe_value(user, key) == 'done'
         with patch.object(sensors, 'numbered_select', return_value=answers['samples_result']):
             assert sensors._step_custom_probe_samples_result(user) == 'done'
         assert sensors._step_custom_probe(user) == 'done'
-        assert sensors._step_custom_probe_review(user) == 'done'
+        with patch.object(sensors, 'numbered_select', return_value='continue'):
+            assert sensors._step_custom_probe_review(user) == 'done'
     return answers
 
 

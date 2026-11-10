@@ -5,6 +5,7 @@ import pytest
 
 from core.board_bx_panel import PROFILE
 from core.configuration_review import build_configuration_review, render_configuration_review
+from core.config_geometry import load_geometry_context
 from core.generator import generate_config
 from core.managed_config import build_managed_config_plan
 from core.pin_validator import _read_pin_config
@@ -18,6 +19,7 @@ def test_print_strategy_is_not_required_or_replaced_on_effective_plan(tmp_path, 
     _, board, choices = board_case(PROFILE)
     text = generate_config(board, choices, include_macros=starter,
         output_path=str(tmp_path / "printer.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text)
     assert b"BX PRINT_START is not generated" not in text
     assert not any(n.casefold() == "gcode_macro print_start" for n in _read_pin_config(text.decode())[0])
     macros = (tmp_path / "macros.cfg").read_bytes() if starter else None
@@ -37,8 +39,8 @@ def test_print_strategy_is_not_required_or_replaced_on_effective_plan(tmp_path, 
         remote["printer.cfg"] += b"\n"+custom
     originals = dict(remote)
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, macros, remote).artifacts})
-    plan = build_managed_config_plan(text, macros, remote)
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text, macros, remote, geometry_context=geometry).artifacts})
+    plan = build_managed_config_plan(text, macros, remote, geometry_context=geometry)
     if noop:
         assert not plan.changed_artifacts
     review = build_configuration_review(plan, selected_board=board)
@@ -72,8 +74,9 @@ def test_unselected_or_mechanical_bx_cannot_add_notice(tmp_path):
 def test_invalid_selected_source_stays_blocking_not_just_a_warning(tmp_path):
     _, board, choices = board_case(PROFILE)
     text = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text)
     board.pop("_board_bx_panel_source")
-    review = build_configuration_review(build_managed_config_plan(text, None, {}), selected_board=board)
+    review = build_configuration_review(build_managed_config_plan(text, None, {}, geometry_context=geometry), selected_board=board)
     assert not review.validation.valid
     assert any(m.code == "board-electrical-dependency" for m in review.validation.errors)
     assert not any(m.code.startswith("bx-print-start-") for m in review.validation.warnings)

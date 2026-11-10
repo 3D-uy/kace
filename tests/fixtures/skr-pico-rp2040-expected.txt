@@ -43,12 +43,12 @@ enable_force_move: True
 # --------------------------------------------------
 
 [stepper_x]
-step_pin: gpio11                                # Step pin for the X stepper driver
-dir_pin: !gpio10                                # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !gpio12                             # Enable pin for the stepper driver
+step_pin: gpio11                                # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: !gpio10                                # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !gpio12                             # Driver enable; ! means active-low (e.g. !PA1)
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 40                           # Distance in mm the axis travels per full rotation of the motor
-endstop_pin: ^gpio4                             # Endstop pin. Add or remove "!" to invert logic
+endstop_pin: ^gpio4                             # Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both
 position_endstop: 0                             # Location of the endstop (usually 0)
 position_min: 0                                 # Minimum valid X position
 position_max: 235                               # Maximum valid X position
@@ -58,12 +58,12 @@ homing_speed: 50                                # Maximum velocity (in mm/s) of 
 # homing_positive_dir: false
 
 [stepper_y]
-step_pin: gpio6                                 # Step pin for the Y stepper driver
-dir_pin: !gpio5                                 # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !gpio7                              # Enable pin for the stepper driver
+step_pin: gpio6                                 # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: !gpio5                                 # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !gpio7                              # Driver enable; ! means active-low (e.g. !PA1)
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 40                           # Distance in mm the axis travels per full rotation of the motor
-endstop_pin: ^gpio3                             # Endstop pin. Add or remove "!" to invert logic
+endstop_pin: ^gpio3                             # Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both
 position_endstop: 0                             # Location of the endstop (usually 0)
 position_min: 0                                 # Minimum valid Y position
 position_max: 235                               # Maximum valid Y position
@@ -73,12 +73,12 @@ homing_speed: 50                                # Maximum velocity (in mm/s) of 
 # homing_positive_dir: false
 
 [stepper_z]
-step_pin: gpio19                                # Step pin for the Z stepper driver
-dir_pin: !gpio28                                # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !gpio2                              # Enable pin for the stepper driver
+step_pin: gpio19                                # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: !gpio28                                # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !gpio2                              # Driver enable; ! means active-low (e.g. !PA1)
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 8                            # Distance in mm the axis travels per full rotation of the motor
-endstop_pin: ^gpio25                            # Endstop pin. Add or remove "!" to invert logic
+endstop_pin: ^gpio25                            # Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both
 position_endstop: 0.0                           # Location of the endstop (usually 0)
 position_min: 0                                 # Minimum valid Z position
 position_max: 300                               # Maximum valid Z position
@@ -87,9 +87,9 @@ position_max: 300                               # Maximum valid Z position
 # homing_positive_dir: false
 
 [extruder]
-step_pin: gpio14                                # Step pin for the extruder driver
-dir_pin: !gpio13                                # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !gpio15                             # Enable pin for the stepper driver
+step_pin: gpio14                                # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: !gpio13                                # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !gpio15                             # Driver enable; ! means active-low (e.g. !PA1)
 heater_pin: gpio23                              # Pin connected to the hotend heater cartridge
 sensor_pin: gpio26                              # Pin connected to the hotend thermistor
 microsteps: 16                                  # Number of microsteps per full step
@@ -124,10 +124,10 @@ max_temp: 130                                   # Maximum safe temperature
 # --------------------------------------------------
 # [board_pins]
 # aliases:
-#                                               # EXP1 header
+# EXP1 header
 #     EXP1_1=TODO, EXP1_3=TODO, EXP1_5=TODO, EXP1_7=TODO, EXP1_9=<GND>,
 #     EXP1_2=TODO, EXP1_4=TODO, EXP1_6=TODO, EXP1_8=TODO, EXP1_10=<5V>,
-#                                               # EXP2 header
+# EXP2 header
 #     EXP2_1=TODO, EXP2_3=TODO, EXP2_5=TODO, EXP2_7=TODO, EXP2_9=<GND>,
 #     EXP2_2=TODO, EXP2_4=TODO, EXP2_6=TODO, EXP2_8=TODO, EXP2_10=<5V>
 

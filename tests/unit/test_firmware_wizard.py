@@ -15,11 +15,18 @@ from core.firmware_wizard import (
 from core.exceptions import DerivationAmbiguityError
 from core.mcu_monitor import McuIdentity, McuMonitorUnavailable
 from core.moonraker_deployer import DeployResult, DeployState
-from core.translations import t
+from core.translations import t, get_lang, set_lang
 from core.workflow_outcome import WorkflowOutcome, WorkflowResult
 from firmware.deployment import DeploymentMethodId
 
 class TestFirmwareWizard(unittest.TestCase):
+
+    def setUp(self):
+        self.previous_language = get_lang()
+        set_lang("English")
+
+    def tearDown(self):
+        set_lang(self.previous_language)
 
     @patch("core.mcu_monitor.McuIdentityReader.read")
     def test_deployment_usb_identity_uses_observed_udev_facts(self, mock_read):
@@ -87,6 +94,7 @@ class TestFirmwareWizard(unittest.TestCase):
         mock_select.side_effect = [
             t("builder.edit_proc"),
             "8000000",
+            t("firmware.review.details"),
             t("builder.compile_now"),
             "none",
         ]
@@ -107,7 +115,7 @@ class TestFirmwareWizard(unittest.TestCase):
         self.assertEqual(config["CONFIG_FLASH_START"], "0x8000")
         self.assertNotIn("CONFIG_MACH_LPC176X", config)
         self.assertNotIn("CONFIG_CLOCK_FREQ", config)
-        self.assertIn("Firmware configuration diff", output.getvalue())
+        self.assertIn(t("firmware.review.diff"), output.getvalue())
         self.assertIn("-CONFIG_CLOCK_FREQ=120000000", output.getvalue())
 
     @patch('core.firmware_wizard.yes_no', return_value=True)

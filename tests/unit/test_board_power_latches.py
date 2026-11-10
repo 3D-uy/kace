@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from core.board_auxiliary import selected_board_digital_outputs, selected_board_electrical_source
+from core.config_geometry import load_geometry_context
 from core.config_transaction import ConfigDeploymentTransaction, ConfigTransactionState
 from core.configuration_review import validate_configuration_plan
 from core.exceptions import GenerationError
@@ -44,6 +45,7 @@ def generated(tmp_path, profile):
 
 def test_real_source_recovery_provenance_and_repeat_publication(tmp_path, profile):
     raw, board, text = generated(tmp_path, profile)
+    geometry = load_geometry_context(tmp_path/'printer.cfg', text.encode())
     section, pin, shutdown = CASES[profile]
     expected = {'pin': pin, 'value': '1', 'shutdown_value': shutdown}
     assert _read_pin_config(text)[0][section] == expected
@@ -52,7 +54,7 @@ def test_real_source_recovery_provenance_and_repeat_publication(tmp_path, profil
     recovered = selected_board_electrical_source({'board': profile, 'board_raw_config': raw})
     dest = FakeTransport()
     for _ in range(2):
-        result = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=recovered,
+        result = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=recovered, geometry_context=geometry,
             activation='none', snapshot_root=str(tmp_path/'snapshots'), poll_interval=0).run()
         assert result.state == ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION, result.detail
 
@@ -61,15 +63,16 @@ def test_real_source_recovery_provenance_and_repeat_publication(tmp_path, profil
 @pytest.mark.parametrize('noop', [False, True])
 def test_effective_overrides_fail_before_confirmation_or_writes(tmp_path, profile, field, value, noop):
     _, board, text = generated(tmp_path, profile)
+    geometry = load_geometry_context(tmp_path/'printer.cfg', text.encode())
     section, _, shutdown = CASES[profile]
     if value == 'opposite': value = str(1-int(shutdown))
     remote = {'printer.cfg': text.encode()+b'\n[include user.cfg]\n',
               'user.cfg': f'[{section}]\n{field}: {value}\n'.encode()}
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text.encode(),None,remote).artifacts})
-        assert not build_managed_config_plan(text.encode(),None,remote).changed_artifacts
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(text.encode(),None,remote,geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(text.encode(),None,remote,geometry_context=geometry).changed_artifacts
     dest, confirm = FakeTransport(remote), Mock(return_value=True)
-    result = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=board,
+    result = ConfigDeploymentTransaction(dest, text.encode(), None, selected_board=board, geometry_context=geometry,
         confirm=confirm, activation='firmware', snapshot_root=str(tmp_path/'snapshots')).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED
     assert dest.files == remote and all(c[0] == 'read' for c in dest.calls)
@@ -95,13 +98,14 @@ def test_invalid_source_preserves_existing_files(tmp_path, profile, mutation):
 
 def test_reservations_collisions_and_missing_artifact_block(tmp_path, profile):
     _, board, text = generated(tmp_path, profile)
+    geometry = load_geometry_context(tmp_path/'printer.cfg', text.encode())
     section, pin, shutdown = CASES[profile]
     reservations = {'mcu': {pin: 'reserved bus'}}
     _, _, user = board_case(profile)
     with patch('core.firmware_workflow.generation_pin_reservations', return_value=reservations):
         with pytest.raises(GenerationError, match='reserved bus'):
             generate_config(board,user,output_path=str(tmp_path/'bad.cfg'),verbose=False)
-    review = validate_configuration_plan(build_managed_config_plan(text.encode(),None,{}),
+    review = validate_configuration_plan(build_managed_config_plan(text.encode(),None,{},geometry_context=geometry),
         selected_board=board, firmware_reservation_reader=lambda _: reservations)
     assert not review.valid and any('reserved bus' in e.message for e in review.errors)
     board[section]['pin'] = board['fan']['pin']

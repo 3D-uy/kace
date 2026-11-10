@@ -18,7 +18,10 @@ from core.config_transaction import ConfigDeploymentTransaction, ConfigTransacti
 from core.snapshot import create_snapshot, verify_snapshot_restored
 from unittest.mock import Mock
 
-from core.managed_config import build_managed_config_plan, HARDWARE_REMOTE, ROOT_REMOTE, MACROS_REMOTE
+from core.managed_config import (
+    build_managed_config_plan, HARDWARE_REMOTE, ROOT_REMOTE, MACROS_REMOTE,
+    ROOT_MACROS_REMOTE, ROOT_MACROS_MARKER, MANAGED_BEGIN, MANAGED_END,
+)
 from core.configuration_review import build_configuration_review, render_configuration_review
 
 
@@ -41,11 +44,115 @@ class ManagedSettingWarningsTests(unittest.TestCase):
 
     def test_removed_managed_section_and_changed_macro_body_are_reported(self):
         plan = build_managed_config_plan(b"[mcu]\nserial: same\n", b"[gcode_macro START]\ngcode:\n  G28\n", {
+            ROOT_REMOTE: (
+                f"{MANAGED_BEGIN}\n[include {HARDWARE_REMOTE}]\n"
+                f"[include {MACROS_REMOTE}]\n{MANAGED_END}\n"
+            ).encode(),
             HARDWARE_REMOTE: b"[input_shaper]\nshaper_freq_x: 42\n",
             MACROS_REMOTE: b"[gcode_macro START]\ngcode:\n  M117 customized\n",
         })
         self.assertTrue(any("shaper_freq_x" in w and HARDWARE_REMOTE in w for w in plan.warnings))
         self.assertTrue(any("gcode" in w and "M117 customized" in w for w in plan.warnings))
+        macro = next(a for a in plan.changed_artifacts if a.remote_name == MACROS_REMOTE)
+        self.assertIn(b"M117 customized", macro.previous)
+        self.assertIn(b"G28", macro.content)
+        rendered = render_configuration_review(build_configuration_review(plan), color=False)
+        self.assertIn("M117 customized", rendered)
+
+    def test_active_macro_body_change_is_reported_when_its_file_is_relocated(self):
+        old_macros = b"[gcode_macro START]\ngcode:\n  M117 customized\n"
+        plan = build_managed_config_plan(
+            b"[mcu]\nserial: same\n", b"[gcode_macro START]\ngcode:\n  G28\n",
+            {
+                ROOT_REMOTE: (
+                    f"# KACE layout: root-v1\n{MANAGED_BEGIN}\n[mcu]\nserial: same\n"
+                    f"[include {MACROS_REMOTE}]\n{MANAGED_END}\n"
+                ).encode(),
+                MACROS_REMOTE: old_macros,
+            },
+        )
+        files = {a.remote_name: a.content for a in plan.artifacts}
+        self.assertNotIn(MACROS_REMOTE, files)
+        self.assertEqual(dict(plan.source_files)[MACROS_REMOTE], old_macros)
+        self.assertNotIn(f"[include {MACROS_REMOTE}]".encode(), files[ROOT_REMOTE])
+        self.assertIn(b"[include macros.cfg]", files[ROOT_REMOTE])
+        self.assertIn(b"G28", files[ROOT_MACROS_REMOTE])
+        self.assertTrue(any(
+            MACROS_REMOTE in warning and "M117 customized" in warning and "G28" in warning
+            for warning in plan.warnings
+        ))
+        rendered = render_configuration_review(build_configuration_review(plan), color=False)
+        self.assertIn("M117 customized", rendered)
+
+    def test_owned_root_macro_replacement_keeps_the_loss_warning(self):
+        old_macros = ROOT_MACROS_MARKER + b"[gcode_macro START]\ngcode:\n  M117 customized\n"
+        plan = build_managed_config_plan(
+            b"[mcu]\nserial: same\n", b"[gcode_macro START]\ngcode:\n  G28\n",
+            {
+                ROOT_REMOTE: b"# KACE layout: root-v1\n[include macros.cfg]\n",
+                ROOT_MACROS_REMOTE: old_macros,
+            },
+        )
+        macro = next(a for a in plan.changed_artifacts if a.remote_name == ROOT_MACROS_REMOTE)
+        self.assertEqual(macro.previous, old_macros)
+        self.assertTrue(macro.content.startswith(ROOT_MACROS_MARKER))
+        self.assertTrue(any(
+            ROOT_MACROS_REMOTE in warning and "M117 customized" in warning and "G28" in warning
+            for warning in plan.warnings
+        ))
+
+    def test_unreferenced_legacy_macro_is_not_reported_as_replaced_on_first_install(self):
+        old_macros = b"[gcode_macro START]\ngcode:\n  M117 customized\n"
+        plan = build_managed_config_plan(
+            b"[mcu]\nserial: same\n", b"[gcode_macro START]\ngcode:\n  G28\n",
+            {MACROS_REMOTE: old_macros},
+        )
+        self.assertNotIn(MACROS_REMOTE, plan.remote_names)
+        self.assertEqual(dict(plan.source_files)[MACROS_REMOTE], old_macros)
+        self.assertIn(ROOT_MACROS_REMOTE, plan.remote_names)
+        self.assertFalse(any("M117 customized" in warning for warning in plan.warnings))
+
+    def test_relocating_an_unchanged_active_macro_does_not_warn_of_loss(self):
+        macros = b"[gcode_macro START]\ngcode:\n  M117 customized\n"
+        plan = build_managed_config_plan(
+            b"[mcu]\nserial: same\n", macros,
+            {
+                ROOT_REMOTE: (
+                    f"# KACE layout: root-v1\n{MANAGED_BEGIN}\n[mcu]\nserial: same\n"
+                    f"[include {MACROS_REMOTE}]\n{MANAGED_END}\n"
+                ).encode(),
+                MACROS_REMOTE: macros,
+            },
+        )
+        self.assertIn(ROOT_MACROS_REMOTE, plan.remote_names)
+        self.assertNotIn(MACROS_REMOTE, plan.remote_names)
+        self.assertFalse(plan.warnings)
+
+    def test_disabling_owned_macros_reports_lost_effect_without_deleting_file(self):
+        for macro_path in (MACROS_REMOTE, ROOT_MACROS_REMOTE):
+            with self.subTest(macro_path=macro_path):
+                root_layout = macro_path == ROOT_MACROS_REMOTE
+                macros = b"[gcode_macro START]\ngcode:\n  M117 customized\n"
+                if root_layout:
+                    macros = ROOT_MACROS_MARKER + macros
+                root = (
+                    ("# KACE layout: root-v1\n" if root_layout else "")
+                    + f"{MANAGED_BEGIN}\n[include {macro_path}]\n{MANAGED_END}\n"
+                ).encode()
+                plan = build_managed_config_plan(
+                    b"[mcu]\nserial: same\n", None,
+                    {ROOT_REMOTE: root, macro_path: macros},
+                )
+                self.assertNotIn(macro_path, plan.remote_names)
+                self.assertEqual(dict(plan.source_files)[macro_path], macros)
+                self.assertNotIn(
+                    f"[include {macro_path}]".encode(),
+                    next(a.content for a in plan.artifacts if a.remote_name == ROOT_REMOTE),
+                )
+                self.assertTrue(any(
+                    macro_path in warning and "M117 customized" in warning and "removed" in warning
+                    for warning in plan.warnings
+                ))
 
     def test_retained_tuning_user_sections_and_idempotent_plan_do_not_warn_of_loss(self):
         generated = b"[printer]\nmax_velocity: 300\n"

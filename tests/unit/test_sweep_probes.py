@@ -125,7 +125,11 @@ def test_missing_geometry_cancel_does_not_create_payload(generated, answers):
             patch.object(contract.offsets, 'numbered_select') as confirm:
         assert contract.sensors._step_guided_custom_probe_offsets(user) == '__back__'
         confirm.assert_not_called()
-    assert contract.sensors._step_custom_probe(user) == '__retry__'
+    # A builder cannot collect missing answers itself: return to an editable
+    # step instead of retrying the same incomplete payload indefinitely.
+    before_build = dict(user)
+    assert contract.sensors._step_custom_probe(user) == '__back__'
+    assert user == before_build
     assert 'custom_probe' not in user
 
 

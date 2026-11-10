@@ -43,12 +43,12 @@ enable_force_move: True
 # --------------------------------------------------
 
 [stepper_x]
-step_pin: PC2                                   # Step pin for the X stepper driver
-dir_pin: PB9                                    # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !PC3                                # Enable pin for the stepper driver
+step_pin: PC2                                   # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: PB9                                    # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !PC3                                # Driver enable; ! means active-low (e.g. !PA1)
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 40                           # Distance in mm the axis travels per full rotation of the motor
-endstop_pin: ^PA5                               # Endstop pin. Add or remove "!" to invert logic
+endstop_pin: ^PA5                               # Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both
 position_endstop: 0                             # Location of the endstop (usually 0)
 position_min: 0                                 # Minimum valid X position
 position_max: 235                               # Maximum valid X position
@@ -58,12 +58,12 @@ homing_speed: 50                                # Maximum velocity (in mm/s) of 
 # homing_positive_dir: false
 
 [stepper_y]
-step_pin: PB8                                   # Step pin for the Y stepper driver
-dir_pin: PB7                                    # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !PC3                                # Enable pin for the stepper driver
+step_pin: PB8                                   # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: PB7                                    # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !PC3                                # Driver enable; ! means active-low (e.g. !PA1)
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 40                           # Distance in mm the axis travels per full rotation of the motor
-endstop_pin: ^PA6                               # Endstop pin. Add or remove "!" to invert logic
+endstop_pin: ^PA6                               # Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both
 position_endstop: 0                             # Location of the endstop (usually 0)
 position_min: 0                                 # Minimum valid Y position
 position_max: 235                               # Maximum valid Y position
@@ -73,21 +73,21 @@ homing_speed: 50                                # Maximum velocity (in mm/s) of 
 # homing_positive_dir: false
 
 [stepper_z]
-step_pin: PB6                                   # Step pin for the Z stepper driver
-dir_pin: PB5                                    # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !PC3                                # Enable pin for the stepper driver
+step_pin: PB6                                   # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: PB5                                    # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !PC3                                # Driver enable; ! means active-low (e.g. !PA1)
 microsteps: 16                                  # Number of microsteps per full step
 rotation_distance: 8                            # Distance in mm the axis travels per full rotation of the motor
-endstop_pin: probe:z_virtual_endstop            # Endstop pin. Add or remove "!" to invert logic
+endstop_pin: probe:z_virtual_endstop            # Probe virtual endstop; no ^ or ! prefixes here
 position_min: 0                                 # Minimum valid Z position
 position_max: 250                               # Maximum valid Z position
 # Automatic probe homing: Klipper uses probe:z_virtual_endstop and Z travel limits.
 # homing_positive_dir:                          # Optional override: true = toward position_max; false = toward position_min.
 
 [extruder]
-step_pin: PB4                                   # Step pin for the extruder driver
-dir_pin: PB3                                    # Direction pin. Add or remove "!" to invert motor direction
-enable_pin: !PC3                                # Enable pin for the stepper driver
+step_pin: PB4                                   # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
+dir_pin: PB3                                    # Direction signal; ! reverses motor rotation (e.g. !PA1)
+enable_pin: !PC3                                # Driver enable; ! means active-low (e.g. !PA1)
 heater_pin: PA1                                 # Pin connected to the hotend heater cartridge
 sensor_pin: PC5                                 # Pin connected to the hotend thermistor
 microsteps: 16                                  # Number of microsteps per full step
@@ -151,10 +151,10 @@ max_temp: 130                                   # Maximum safe temperature
 # --------------------------------------------------
 # [board_pins]
 # aliases:
-#                                               # EXP1 header
+# EXP1 header
 #     EXP1_1=TODO, EXP1_3=TODO, EXP1_5=TODO, EXP1_7=TODO, EXP1_9=<GND>,
 #     EXP1_2=TODO, EXP1_4=TODO, EXP1_6=TODO, EXP1_8=TODO, EXP1_10=<5V>,
-#                                               # EXP2 header
+# EXP2 header
 #     EXP2_1=TODO, EXP2_3=TODO, EXP2_5=TODO, EXP2_7=TODO, EXP2_9=<GND>,
 #     EXP2_2=TODO, EXP2_4=TODO, EXP2_6=TODO, EXP2_8=TODO, EXP2_10=<5V>
 

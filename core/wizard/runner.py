@@ -24,6 +24,7 @@ PHASE_MAP = {
     "y_limits": "Motion",
     "z_limits": "Motion",
     "homing_directions": "Motion",
+    "motor_directions": "Motion",
     "z_mechanics": "Motion",
     "tmc_currents": "Motion",
     "probe": "Sensors",
@@ -48,6 +49,7 @@ PHASE_MAP = {
     "bed_therm": "Sensors",
     "display": "Software",
     "web_ui": "Software",
+    "starter_macros": "Software",
 }
 
 PHASE_KEYS = {
@@ -69,6 +71,7 @@ class WizardRunner:
         self.user_data = initial_data if initial_data is not None else {}
         self.last_step_id = None
         self.completed_phases = set()
+        self.back_targets = set()
 
     def run(self, start_step_id):
         # Local import to avoid circular dependency
@@ -109,23 +112,44 @@ class WizardRunner:
                 _print_step_header(current_id, self.user_data, active_steps=active_steps)
             
             try:
+                from core.menu import interaction_revision
+                before_prompt = interaction_revision()
                 ans = step_cfg["prompt"](self.user_data)
             except (KeyboardInterrupt, EOFError):
                 raise WizardExit()
-                
+            if ans == _QUIT:
+                raise WizardExit()
+
             if ans == _BACK:
-                if self.history_stack:
-                    prev_id = self.history_stack[-1]
-                    self.rollback_to(prev_id)
-                    current_id = prev_id
+                # Automatic validation, projections and authoritative skips
+                # are not destinations: rerunning them would bounce forward
+                # to the same question without giving the user any control.
+                prev_id = next((sid for sid in reversed(self.history_stack)
+                                if sid in self.back_targets), None)
+                if prev_id is None:
+                    self.rollback_to(current_id)
+                    raise WizardExit()
+                self.rollback_to(prev_id)
+                current_id = prev_id
                 continue
                 
             if ans == "__retry__":
                 self.rollback_to(current_id)
                 continue
+
+            if step_cfg.get("preserve_on_back", False):
+                # A review editor accepts several independent edits. Returning
+                # from a later validation must reopen those accepted values,
+                # rather than silently undoing the user's attempted correction.
+                self.snapshots[current_id] = copy.deepcopy(self.user_data)
                 
             if current_id not in self.history_stack:
                 self.history_stack.append(current_id)
+            if (not step_cfg.get("track_interaction", False)
+                    or interaction_revision() != before_prompt):
+                self.back_targets.add(current_id)
+            else:
+                self.back_targets.discard(current_id)
             self.last_step_id = current_id
                 
             next_func = step_cfg.get("next")
@@ -141,8 +165,8 @@ class WizardRunner:
         return self.user_data
 
     def rollback_to(self, step_id):
-        """Rolls back user_data state to the snapshot taken before step_id was run,
-        and removes step_id and all subsequent steps from history and snapshots."""
+        """Restore a step's entry (or explicitly accepted review) snapshot,
+        removing that step and later steps from history and snapshots."""
         snapshot = self.snapshots.get(step_id)
         if snapshot is not None:
             self.user_data.clear()
@@ -155,6 +179,7 @@ class WizardRunner:
         # Clean up all snapshots that are not in the active history stack path.
         # This prevents orphaned snapshots from branch changes or back navigation.
         active_steps = set(self.history_stack)
+        self.back_targets.intersection_update(active_steps)
         for sid in list(self.snapshots.keys()):
             if sid not in active_steps:
                 self.snapshots.pop(sid, None)

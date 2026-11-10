@@ -18,11 +18,34 @@ import klippy  # noqa: E402
 import reactor  # noqa: E402
 
 
+def validate_fan_references(printer) -> None:
+    """Resolve the pinned fan consumers against already constructed objects.
+
+    ControllerFan.handle_connect only resolves heater and stepper names. For
+    HeaterFan, perform its heater lookups without handle_ready, which would
+    also register a timer. Never send global connect/ready or identify an MCU.
+    The loaded registry, not an approximation from section names, is authority.
+    """
+    for name, fan in printer.lookup_objects():
+        parts = name.split()
+        if len(parts) < 2:
+            continue
+        if parts[0] == "heater_fan":
+            heaters = printer.lookup_object("heaters")
+            for heater_name in fan.heater_names:
+                heaters.lookup_heater(heater_name)
+        elif parts[0] == "controller_fan":
+            fan.handle_connect()
+
+
 def validate_config(config_path: Path) -> dict:
-    """Run Klipper's real object loaders and unused-option validation."""
+    """Load real objects/options, then resolve deferred fan references."""
     started = time.monotonic()
     input_fd = os.open(os.devnull, os.O_RDONLY)
     printer = None
+    stage = "object_load"
+    checks = []
+    unsupported_runtime = []
     try:
         start_args = {
             "config_file": str(config_path),
@@ -31,20 +54,43 @@ def validate_config(config_path: Path) -> dict:
             "software_version": os.environ.get("KLIPPER_REF", "matrix"),
             "start_reason": "matrix_validation",
         }
-        printer = klippy.Printer(reactor.Reactor(), None, start_args)
-        # Deliberately stop before klippy:mcu_identify. _read_config loads every
-        # configured module and calls check_unused_options(), but opens no MCU.
+        main_reactor = reactor.Reactor()
+        def reject_pause(waketime):
+            # AIO constructors may wait for reactor work. Starting the reactor
+            # would also run Printer._connect; sleeping without it cannot finish
+            # that work. This is an unavailable validator capability, not proof
+            # of an invalid Klipper configuration. Keep the marker even when a
+            # constructor catches and wraps the exception.
+            reason = "Constructor requires an active reactor; offline validation is incomplete"
+            unsupported_runtime.append(reason)
+            raise RuntimeError(reason)
+        main_reactor.pause = reject_pause
+        printer = klippy.Printer(main_reactor, None, start_args)
+        # Do not start klippy:mcu_identify. Constructors still may perform file
+        # IO, so the caller must isolate the filesystem (matrix runner staging).
         printer._read_config()
+        if unsupported_runtime:
+            raise RuntimeError(unsupported_runtime[0])
+        checks.append(stage)
+        stage = "fan_references"
+        validate_fan_references(printer)
+        if unsupported_runtime:
+            raise RuntimeError(unsupported_runtime[0])
+        checks.append(stage)
         return {
             "valid": True,
-            "reason": "Klipper loaded all sections and options",
+            "reason": "Klipper loaded all sections/options and resolved fan references",
+            "checks": checks,
             "duration_seconds": round(time.monotonic() - started, 6),
         }
     except Exception as exc:  # Klipper uses several config exception classes.
         return {
             "valid": False,
+            "stage": stage,
+            "checks": checks,
             "reason": str(exc) or exc.__class__.__name__,
             "exception": exc.__class__.__name__,
+            **({"infrastructure_error": unsupported_runtime[0]} if unsupported_runtime else {}),
             "traceback": traceback.format_exc(limit=8),
             "duration_seconds": round(time.monotonic() - started, 6),
         }

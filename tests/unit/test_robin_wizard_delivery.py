@@ -63,7 +63,7 @@ def test_wizard_persists_actual_final_plan_and_recovery_download(tmp_path, board
         set_mode(previous)
     copy = tmp_path/'recovery/firmware-downloads'/prepared.plan.final_filename
     assert copy.read_bytes() == Path(prepared.staged_path).read_bytes()
-    assert t('deployment.robin.transformed', filename=prepared.plan.final_filename) in capsys.readouterr().out
+    assert t('deployment.robin.transformed', filename=prepared.plan.final_filename) in " ".join(capsys.readouterr().out.split())
 
 
 @pytest.mark.parametrize('lcd', [False, True])

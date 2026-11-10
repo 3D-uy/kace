@@ -183,6 +183,7 @@ def test_all_available_pinned_board_and_printer_profiles_offer_only_valid_declar
 def test_reported_selection_generates_a_probe_transition_and_effective_includes_remain_authoritative(tmp_path):
     import importlib.util
     from core.configuration_review import validate_configuration_plan
+    from core.config_geometry import load_geometry_context
     from core.custom_probe import GuidedCustomProbeSettings
     from core.generator import generate_config
     from core.managed_config import build_managed_config_plan
@@ -198,7 +199,8 @@ def test_reported_selection_generates_a_probe_transition_and_effective_includes_
     assert "position_endstop" not in actual["stepper_z"]
     assert not any(name.startswith("tmc2130 ") for name in actual)
     generated = result["content"].encode()
-    fresh = build_managed_config_plan(generated, None, {})
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
+    fresh = build_managed_config_plan(generated, None, {}, geometry_context=geometry)
     assert validate_configuration_plan(fresh).valid
     pinned_parser = _PINNED_CONFIG.parent/"klippy/configfile.py"
     assert pinned_parser.is_file(), "Pinned Klipper parser is required for this integration regression"
@@ -219,7 +221,7 @@ def test_reported_selection_generates_a_probe_transition_and_effective_includes_
     # A later user include can still own a conflicting consumer. It must not be
     # bypassed merely because the compact menu accepted the declared Z input.
     existing = {"printer.cfg": b"[include user.cfg]\n", "user.cfg": b"[fan]\npin: P1.27\n"}
-    plan = build_managed_config_plan(generated, None, existing)
+    plan = build_managed_config_plan(generated, None, existing, geometry_context=geometry)
     review = validate_configuration_plan(plan)
     assert not review.valid
     assert any(error.code == "probe-pin-conflict" for error in review.errors)

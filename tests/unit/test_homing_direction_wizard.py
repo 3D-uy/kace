@@ -7,7 +7,7 @@ import pytest
 
 from core.exceptions import GenerationError, WizardExit
 from core.menu import parse_choices
-from core.translations import get_lang, set_lang
+from core.translations import get_lang, set_lang, t
 from core.wizard.runner import _BACK, _QUIT
 from core.wizard.steps import motion
 
@@ -153,7 +153,7 @@ def test_editor_shows_an_axis_direction_row_and_current_automatic_inference():
         assert motion._step_profile_editor_inner(dict(data), {}, data) == "back"
     rows = dict((value, title) for title, value in menus[0])
     assert "+X" in rows["homing_positive_dir_x"]
-    assert "Automatic" in rows["homing_positive_dir_x"]
+    assert t("profile.editor.homing_auto", direction=t("profile.editor.homing_max", axis="X")) in rows["homing_positive_dir_x"]
     assert "-Y" in rows["homing_positive_dir_y"]
 
 

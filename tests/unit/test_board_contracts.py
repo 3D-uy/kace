@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import glob
 import json
 import os
+from pathlib import Path
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -33,6 +36,7 @@ from firmware.boards.upstream import (
     load_klipper_source_contract,
     sha256_lf,
 )
+from firmware.boards import upstream as upstream_contract
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -54,6 +58,57 @@ def _resign(payload):
 
 
 class BoardContractSchemaTests(unittest.TestCase):
+    def test_source_gate_rejects_changed_upstream_content(self):
+        result = unittest.TestResult()
+        verify = upstream_contract.verify_upstream_content
+
+        def changed_content(contract, content, **kwargs):
+            return verify(contract, content + b"\n# controlled upstream mutation\n", **kwargs)
+
+        with patch.object(upstream_contract, "verify_upstream_content", side_effect=changed_content):
+            BoardContractSchemaTests("test_global_source_contract_is_full_and_reproducible").run(result)
+        self.assertEqual([], result.skipped)
+        self.assertEqual([], result.errors)
+        self.assertEqual(1, len(result.failures))
+        self.assertIn("upstream content", result.failures[0][1])
+
+    def test_source_gate_rejects_changed_hashes_header_and_identity(self):
+        verify = upstream_contract.verify_upstream_content
+        changes = {
+            "config_sha256_lf": "0" * 64,
+            "header_sha256_lf": "0" * 64,
+            "header_text": "# altered reviewed header\n",
+            "validated_commit": "0" * 40,
+            "repository": "https://example.invalid/other.git",
+        }
+        for field, value in changes.items():
+            with self.subTest(field=field):
+                result = unittest.TestResult()
+
+                def altered_contract(contract, content, **kwargs):
+                    changed = replace(contract, upstream=replace(contract.upstream, **{field: value}))
+                    return verify(changed, content, **kwargs)
+
+                with patch.object(upstream_contract, "verify_upstream_content", side_effect=altered_contract):
+                    BoardContractSchemaTests("test_global_source_contract_is_full_and_reproducible").run(result)
+                self.assertEqual([], result.skipped)
+                self.assertEqual([], result.errors)
+                self.assertEqual(1, len(result.failures))
+                self.assertIn("upstream content", result.failures[0][1])
+
+    def test_source_gate_requires_the_exact_local_checkout(self):
+        for observed in ("0" * 40, None):
+            with self.subTest(observed_commit=observed):
+                result = unittest.TestResult()
+                check = (patch.object(Path, "is_dir", return_value=False) if observed is None
+                         else patch.object(subprocess, "check_output", return_value=observed))
+                with check:
+                    BoardContractSchemaTests("test_global_source_contract_is_full_and_reproducible").run(result)
+                self.assertEqual([], result.skipped)
+                self.assertEqual([], result.errors)
+                self.assertEqual(1, len(result.failures))
+                self.assertIn("pinned Klipper", result.failures[0][1])
+
     def test_schema_gate_fails_instead_of_skipping_without_jsonschema(self):
         result = unittest.TestResult()
         with patch.dict("sys.modules", {"jsonschema": None}):
@@ -110,6 +165,14 @@ class BoardContractSchemaTests(unittest.TestCase):
         self.assertEqual("https://github.com/Klipper3d/klipper.git", source.repository)
         self.assertEqual("refs/heads/master", source.upstream_monitor_ref)
         self.assertFalse(source.upstream_monitor_mutation_allowed)
+        checkout = Path(ROOT) / ".klipper-contract-source"
+        self.assertTrue(checkout.is_dir(), "Prepare the pinned Klipper checkout before running the BoardContract gate.")
+        observed = subprocess.check_output(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+        self.assertEqual(source.validated_commit, observed, "Wrong pinned Klipper checkout revision.")
+        self.assertEqual("", subprocess.check_output(
+            ["git", "-C", str(checkout), "status", "--porcelain"], text=True).strip(),
+            "The pinned Klipper checkout must be clean.")
         for contract in load_default_catalog(refresh=True).contracts:
             self.assertEqual(source.validated_commit, contract.upstream.validated_commit)
             self.assertEqual(source.repository, contract.upstream.repository)
@@ -117,6 +180,14 @@ class BoardContractSchemaTests(unittest.TestCase):
                 contract.upstream.header_sha256_lf,
                 sha256_lf(contract.upstream.header_text),
             )
+            config = checkout / contract.upstream.config_path
+            self.assertTrue(config.is_file(), f"{contract.board_id}: pinned Klipper source is missing: {config}")
+            try:
+                verification = upstream_contract.verify_upstream_content(
+                    contract, config.read_bytes(), source_contract=source)
+            except upstream_contract.UpstreamContractError as exc:
+                self.fail(f"{contract.board_id}: upstream content identity failed: {exc}")
+            self.assertTrue(verification.ok, f"{contract.board_id}: upstream content differs from its reviewed contract: {verification}")
 
 
 class BoardCatalogIdentityTests(unittest.TestCase):

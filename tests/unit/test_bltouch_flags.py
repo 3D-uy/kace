@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from core.configuration_review import validate_configuration_plan
+from core.config_geometry import load_geometry_context
 from core.exceptions import GenerationError
 from core.generator import generate_config
 from core.managed_config import build_managed_config_plan, effective_hardware_text
@@ -123,15 +124,16 @@ def test_unused_bltouch_options_are_not_applied_to_other_probes(tmp_path, probe)
 
 def test_existing_explicit_flags_survive_omission_and_second_plan_is_noop(tmp_path):
     generated = generate(tmp_path)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
     current = {"printer.cfg": generated.replace(b"[bltouch]", b"[bltouch]\n" +
         b"pin_up_touch_mode_reports_triggered: False\nprobe_with_touch_mode: True"),
         "moonraker.conf": None}
-    first = build_managed_config_plan(generated, None, current)
+    first = build_managed_config_plan(generated, None, current, geometry_context=geometry)
     section = _read_pin_config(effective_hardware_text(first))[0]["bltouch"]
     assert section[FLAGS[0]] == "False" and section[FLAGS[1]] == "True"
     assert not any(e.code == "bltouch-flags" for e in validate_configuration_plan(first).errors)
     current.update({a.remote_name: a.content for a in first.artifacts})
-    assert not build_managed_config_plan(generated, None, current).changed_artifacts
+    assert not build_managed_config_plan(generated, None, current, geometry_context=geometry).changed_artifacts
 
 
 @pytest.mark.parametrize("flag", FLAGS)
@@ -141,16 +143,18 @@ def test_invalid_late_include_blocks_transaction_before_confirmation(tmp_path, f
     from tests.unit.test_config_transaction import FakeTransport
 
     generated = generate(tmp_path)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
     current = {"printer.cfg": generated + b"\n[include user.cfg]\n",
                "user.cfg": b"[include nested.cfg]\n",
                "nested.cfg": f"[bltouch]\n{flag}: invalid\n".encode(), "moonraker.conf": None}
     if noop:
-        plan = build_managed_config_plan(generated, None, current)
+        plan = build_managed_config_plan(generated, None, current, geometry_context=geometry)
         current.update({a.remote_name: a.content for a in plan.artifacts})
-        assert not build_managed_config_plan(generated, None, current).changed_artifacts
+        assert not build_managed_config_plan(generated, None, current, geometry_context=geometry).changed_artifacts
     transport = FakeTransport({k: v for k, v in current.items() if v is not None})
     before, confirm = dict(transport.files), Mock(return_value=True)
     result = ConfigDeploymentTransaction(transport, generated, None, activation="none", confirm=confirm,
+        geometry_context=geometry,
         output=lambda _: None, snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED
     assert flag in result.detail
@@ -171,8 +175,9 @@ def test_rendered_invalid_flag_is_checked_before_writing(tmp_path, monkeypatch):
 
 def test_valid_late_include_wins_over_generated_flag(tmp_path):
     generated = generate(tmp_path, {FLAGS[0]: "True"})["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
     current = {"printer.cfg": generated + b"\n[include user.cfg]\n",
                "user.cfg": b"[bltouch]\npin_up_touch_mode_reports_triggered: False\n"}
-    plan = build_managed_config_plan(generated, None, current)
+    plan = build_managed_config_plan(generated, None, current, geometry_context=geometry)
     assert _read_pin_config(effective_hardware_text(plan))[0]["bltouch"][FLAGS[0]] == "False"
     assert not any(e.code == "bltouch-flags" for e in validate_configuration_plan(plan).errors)

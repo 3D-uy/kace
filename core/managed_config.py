@@ -1,12 +1,14 @@
 """Plan KACE-owned configuration updates without mutating a live printer.
 
-KACE owns generated files below ``kace/`` and one small include block in the
-user's root ``printer.cfg``. Everything else remains user-owned. The planner is
+Initial installations keep hardware in ``printer.cfg`` and starter ``macros.cfg``
+beside it. Existing user layouts retain managed files below ``kace/`` and one
+include block in the root. Everything else remains user-owned. The planner is
 pure: callers supply remote bytes and receive immutable artifacts plus a diff.
 """
 
 from __future__ import annotations
 
+import configparser
 import difflib
 import posixpath
 import re
@@ -15,11 +17,14 @@ from typing import Mapping, Optional
 
 from core.reconciler import reconcile_moonraker_conf_content
 from core.config_sections import section_identity
+from core.config_geometry import GeometryContext
 
 
 HARDWARE_REMOTE = "kace/generated-hardware.cfg"
 MACROS_REMOTE = "kace/generated-macros.cfg"
-LEGACY_MACROS_REMOTE = "macros.cfg"
+ROOT_MACROS_REMOTE = "macros.cfg"
+LEGACY_MACROS_REMOTE = ROOT_MACROS_REMOTE
+ROOT_MACROS_MARKER = b"# KACE managed macros: root-v1\n"
 ROOT_REMOTE = "printer.cfg"
 MOONRAKER_REMOTE = "moonraker.conf"
 MANAGED_BEGIN = "# BEGIN KACE MANAGED: generated-includes"
@@ -52,7 +57,8 @@ _PRESERVED_OPTIONS = {
     "force_move": {"enable_force_move"},
     "probe": {"z_offset"},
     "bltouch": {"z_offset"},
-    "bed_mesh": {"horizontal_move_z", "probe_count", "algorithm", "mesh_pps", "bicubic_tension"},
+    "bed_mesh": {"horizontal_move_z", "probe_count", "algorithm", "mesh_pps", "bicubic_tension",
+                 "speed", "fade_start", "fade_end", "fade_target", "adaptive_margin"},
     "input_shaper": {"shaper_freq_x", "shaper_freq_y", "shaper_type_x", "shaper_type_y"},
 }
 _PRESERVED_PREFIX_OPTIONS = {
@@ -93,6 +99,7 @@ class ManagedConfigPlan:
     legacy_migration: bool = False
     warnings: tuple[str, ...] = ()
     source_files: tuple[tuple[str, Optional[bytes]], ...] = ()
+    geometry_context: GeometryContext | None = None
 
     @property
     def remote_names(self) -> tuple[str, ...]:
@@ -104,6 +111,53 @@ class ManagedConfigPlan:
 
     def dry_run_diff(self) -> str:
         return "\n".join(diff for item in self.artifacts if (diff := item.unified_diff()))
+
+
+@dataclass(frozen=True)
+class PreservedHomingConflict:
+    source: str
+    section: str
+    option: str
+    existing: str
+    proposed: str
+    saved_calibration: bool = False
+
+
+def preserved_homing_conflicts(generated_hardware: bytes, remote_files) -> tuple[PreservedHomingConflict, ...]:
+    """Expose destination-owned values that would replace reviewed homing inputs.
+
+    This is an observation, not permission to replace calibration. User includes
+    and SAVE_CONFIG retain their ownership and are not silently rewritten.
+    """
+    generated = _section_options(generated_hardware.decode("utf-8"))
+    root = (remote_files.get(ROOT_REMOTE) or b"").decode("utf-8")
+    saved = _section_options(_autosave_text(root))
+    sources = [(HARDWARE_REMOTE, _section_options((remote_files.get(HARDWARE_REMOTE) or b"").decode("utf-8"))),
+               (ROOT_REMOTE, _section_options(root))]
+    conflicts = []
+    for section, options in generated.items():
+        option = "position_endstop" if section in {"stepper_x", "stepper_y", "stepper_z"} else "z_offset" if section in {"probe", "bltouch"} else None
+        if option is None or option not in options:
+            continue
+        previous = None
+        for source, values in sources:
+            if option in values.get(section, {}):
+                previous = (source, values[section][option], False)
+        if previous is None and option in saved.get(section, {}):
+            previous = (ROOT_REMOTE + " (SAVE_CONFIG)", saved[section][option], True)
+        if previous is None:
+            continue
+        source, old, saved_value = previous
+        # Active duplicates do not revoke SAVE_CONFIG's calibration ownership.
+        saved_value = saved_value or option in saved.get(section, {})
+        new = options[option]
+        try:
+            equal = float(old) == float(new)
+        except (TypeError, ValueError):
+            equal = old == new
+        if not equal:
+            conflicts.append(PreservedHomingConflict(source, section, option, old, new, saved_value))
+    return tuple(conflicts)
 
 
 def _newline(text: str) -> str:
@@ -196,7 +250,7 @@ def _replace_or_insert_option(text: str, section: str, option: str, value: str) 
     return text
 
 
-def _carry_user_tuning(generated: str, existing_root: str) -> str:
+def _carry_user_tuning(generated: str, existing_root: str, replace_preserved=frozenset()) -> str:
     existing = _section_options(existing_root)
     generated_options = _section_options(generated)
     generated_sections = set(generated_options)
@@ -205,6 +259,8 @@ def _carry_user_tuning(generated: str, existing_root: str) -> str:
             continue
         preserved = _preserved_names(section) | (set(options) - set(generated_options[section]))
         for option in sorted(preserved):
+            if (section, option) in replace_preserved:
+                continue
             if (
                 section in {"extruder", "heater_bed"}
                 and option.startswith("pid_")
@@ -237,14 +293,38 @@ def _strip_owned_sections(root: str, owned_sections: set[str]) -> str:
     return root
 
 
-def _managed_block(extra_includes: list[str], include_macros: bool, newline: str) -> str:
+def _managed_block(extra_includes: list[str], include_macros: bool, newline: str,
+                   macros_remote: str = MACROS_REMOTE) -> str:
     lines = [MANAGED_BEGIN]
     lines.extend(extra_includes)
     lines.append(f"[include {HARDWARE_REMOTE}]")
     if include_macros:
-        lines.append(f"[include {MACROS_REMOTE}]")
+        lines.append(f"[include {macros_remote}]")
     lines.append(MANAGED_END)
     return newline.join(lines) + newline
+
+
+def _inline_default_includes(generated: str, directives: list[str], newline: str) -> str:
+    """Put defaults under the generated Includes heading, before hardware options."""
+    if not directives:
+        return generated
+    from core.translations import translate_comment
+
+    headings = {"# " + translate_comment("Includes", language)
+                for language in ("English", "Español", "Português")}
+    lines = generated.splitlines(True)
+    for index, line in enumerate(lines):
+        if _SECTION_RE.match(line):
+            break  # A later comment must never move defaults after active options.
+        if line.strip() in headings:
+            insertion = index + 1
+            if insertion < len(lines) and re.fullmatch(r"\s*#\s*[-=─]+\s*", lines[insertion]):
+                insertion += 1
+            prefix = "".join(lines[:insertion]).rstrip("\r\n") + newline
+            suffix = "".join(lines[insertion:]).lstrip("\r\n")
+            return prefix + newline.join(directives) + newline * 2 + suffix
+    # Hand-written/minimal generated fixtures may not have a heading.
+    return newline.join(directives) + newline * 2 + generated
 
 
 def _has_include(text: str, remote_name: str) -> bool:
@@ -316,10 +396,11 @@ def config_includes(content: bytes, source: str):
     """Resolve explicit relative includes; reject unreviewable path patterns."""
     for line in content.decode("utf-8").splitlines():
         # Klipper processes includes at column zero, stripping '#' first.
-        match = re.match(r"\[include ([^\]]+)\]", line.split("#", 1)[0])
-        if not match:
+        match = configparser.RawConfigParser.SECTCRE.match(line.split("#", 1)[0])
+        header = match and match.group("header")
+        if not header or not header.startswith("include "):
             continue
-        spec = match.group(1).strip()
+        spec = header[8:].strip()
         name = posixpath.normpath(posixpath.join(posixpath.dirname(source), spec))
         if (not spec or spec.startswith("/") or "\\" in spec
                 or name == ".." or name.startswith("../") or ":" in spec
@@ -361,8 +442,12 @@ def effective_hardware_text(plan: ManagedConfigPlan, *, strict: bool = True) -> 
     return text
 
 
-def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: str = "", active: str = "", inline: bool = False) -> tuple[str, str, bool]:
+def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: str = "", active: str = "", inline: bool = False,
+                    macros_remote: str = MACROS_REMOTE) -> tuple[str, str, bool]:
     nl = _newline(existing or generated)
+    # Generated text may use a different newline style from the destination.
+    # Normalize only owned content so retries cannot reshuffle mixed endings.
+    generated = generated.replace("\r\n", "\n").replace("\n", nl)
     generated, generated_includes = _extract_generated_includes(generated)
     owned = {section_identity(name) for name, _, _ in _section_spans(generated)}
     migrated = _LEGACY_HEADER in existing and MANAGED_BEGIN not in existing
@@ -378,11 +463,29 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
             managed = _MANAGED_RE.search(existing).group(0)
             managed = managed.replace(MANAGED_BEGIN, "").replace(MANAGED_END, "")
             own_includes = {f"include {HARDWARE_REMOTE}", f"include {MACROS_REMOTE}"}
+            if macros_remote == ROOT_MACROS_REMOTE:
+                own_includes.add(f"include {ROOT_MACROS_REMOTE}")
+            # A reviewed switch to physical Z retires the old generated probe
+            # branch. These sections belong to the previous inline KACE block;
+            # preserving them would revive the probe and can claim the same GPIO
+            # as the newly selected physical endstop. User sections/includes
+            # outside the block and SAVE_CONFIG retain their ownership.
+            from core.probe_configuration import is_probe_virtual_endstop
+            previous = _section_options(managed)
+            selected = _section_options(generated)
+            old_z = previous.get("stepper_z", {}).get("endstop_pin", "")
+            new_z = selected.get("stepper_z", {}).get("endstop_pin", "")
+            retired_probe = set()
+            if (is_probe_virtual_endstop(old_z) and new_z
+                    and not is_probe_virtual_endstop(new_z)
+                    and {"probe", "bltouch"} & previous.keys()
+                    and not {"probe", "bltouch"} & selected.keys()):
+                retired_probe = {"probe", "bltouch", "safe_z_home", "bed_mesh"}
             # Users edit printer.cfg directly in root layout. Preserve added
             # sections/includes even when they sit inside the generated block.
             retained = "".join(
                 managed[start:end] for name, start, end in _section_spans(managed)
-                if section_identity(name) not in owned | own_includes
+                if section_identity(name) not in owned | own_includes | retired_probe
                 and f"[{name}]" not in generated_includes
             )
         base = _MANAGED_RE.sub(lambda _: retained, existing, count=1)
@@ -414,7 +517,9 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
         base = "".join(retained_lines)
         header_includes.extend(line for line in extra if mainsail.fullmatch(line))
         extra = [line for line in extra if not mainsail.fullmatch(line)]
-    block = _managed_block(extra, include_macros, nl)
+    if inline and include_macros:
+        header_includes.append(f"[include {macros_remote}]")
+    block = _managed_block(extra, include_macros and not inline, nl, macros_remote)
     if inline:
         # SAVE_CONFIG remains authoritative when its value is not explicitly
         # active in the root. Keep other calibration defaults beside their pins.
@@ -426,6 +531,7 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
             lines = generated[start:end].splitlines(True)
             lines = [line for line in lines if not any(re.match(r"^" + re.escape(key) + r"\s*[:=]", line) for key in removed)]
             generated = generated[:start] + "".join(lines) + generated[end:]
+        generated = _inline_default_includes(generated, header_includes, nl)
         block = block.replace("[include " + HARDWARE_REMOTE + "]", generated.rstrip())
         calibration = ""
     else:
@@ -434,8 +540,6 @@ def _reconcile_root(existing: str, generated: str, include_macros: bool, saved: 
         block = block.replace(MANAGED_END, calibration.replace("\n", nl) + MANAGED_END)
     base = base.lstrip("\r\n")
     reconciled = block + (nl if base else "") + base
-    if header_includes:
-        reconciled = nl.join(header_includes) + nl * 2 + reconciled
     if not reconciled.endswith(nl):
         reconciled += nl
     return reconciled, generated, migrated
@@ -445,9 +549,18 @@ def build_managed_config_plan(
     generated_hardware: bytes,
     generated_macros: Optional[bytes],
     remote_files: Mapping[str, Optional[bytes]],
+    *, replace_preserved: frozenset[tuple[str, str]] = frozenset(),
+    geometry_context: GeometryContext | None = None,
 ) -> ManagedConfigPlan:
     """Return the exact remote changes for a KACE configuration deployment."""
     generated = generated_hardware.decode("utf-8")
+    if geometry_context is not None:
+        geometry_context.validate_source(generated_hardware)
+    if replace_preserved:
+        conflicts = preserved_homing_conflicts(generated_hardware, remote_files)
+        allowed = {(item.section, item.option) for item in conflicts if not item.saved_calibration}
+        if not set(replace_preserved) <= allowed:
+            raise ValueError("Only explicitly reviewed active homing values can be replaced; preserve SAVE_CONFIG and resolve its calibration separately.")
     existing_root_bytes = remote_files.get(ROOT_REMOTE)
     existing_root = (existing_root_bytes or b"").decode("utf-8", errors="strict")
     # Klipper owns everything from the SAVE_CONFIG header through EOF.
@@ -470,20 +583,28 @@ def build_managed_config_plan(
     existing_hardware = (remote_files.get(HARDWARE_REMOTE) or b"").decode(
         "utf-8", errors="strict",
     )
-    generated = _carry_user_tuning(generated, existing_hardware)
-    generated = _carry_user_tuning(generated, existing_root)
-    preserve_existing_macros = (
-        remote_files.get(LEGACY_MACROS_REMOTE) is not None
-        and _has_include(existing_root, LEGACY_MACROS_REMOTE)
-    )
-    effective_macros = None if preserve_existing_macros else generated_macros
+    generated = _carry_user_tuning(generated, existing_hardware, replace_preserved)
+    generated = _carry_user_tuning(generated, existing_root, replace_preserved)
     root_layout = (existing_root_bytes is None or "# KACE layout: root-v1" in existing_root
                    or (_section_options(existing_root).get("printer", {}).get("kinematics") == "none"
                        and not any(name.startswith("stepper_") for name in _section_options(existing_root))))
-    existing_root = existing_root.replace("# KACE layout: root-v1\n", "")
+    root_macros = remote_files.get(ROOT_MACROS_REMOTE)
+    owns_root_macros = (root_layout and root_macros is not None
+                       and root_macros.splitlines()[:1] == [ROOT_MACROS_MARKER.rstrip(b"\n")])
+    preserve_existing_macros = (root_macros is not None
+                                and _has_include(existing_root, ROOT_MACROS_REMOTE)
+                                and not owns_root_macros)
+    # A pre-existing, unreferenced macros.cfg is still user-owned. Use the
+    # established managed path in that case; never overwrite it by filename.
+    macros_remote = (ROOT_MACROS_REMOTE if root_layout and (root_macros is None or owns_root_macros)
+                     else MACROS_REMOTE)
+    effective_macros = None if preserve_existing_macros else generated_macros
+    if effective_macros is not None and macros_remote == ROOT_MACROS_REMOTE:
+        effective_macros = ROOT_MACROS_MARKER + effective_macros
+    existing_root = re.sub(r"(?m)^# KACE layout: root-v1\r?\n", "", existing_root)
     root, generated, migrated = _reconcile_root(
         existing_root, generated, effective_macros is not None, save_config,
-        existing_hardware + "\n" + existing_root, inline=root_layout,
+        existing_hardware + "\n" + existing_root, inline=root_layout, macros_remote=macros_remote,
     )
     if root_layout:
         root = "# KACE layout: root-v1\n" + root
@@ -501,7 +622,7 @@ def build_managed_config_plan(
         artifacts = [item for item in artifacts if item.remote_name != HARDWARE_REMOTE]
     if effective_macros is not None:
         artifacts.append(PlannedConfigArtifact(
-            MACROS_REMOTE, effective_macros, remote_files.get(MACROS_REMOTE)
+            macros_remote, effective_macros, remote_files.get(macros_remote)
         ))
 
     existing_moonraker = remote_files.get(MOONRAKER_REMOTE)
@@ -528,11 +649,23 @@ def build_managed_config_plan(
     final_hardware = effective_hardware_text(ManagedConfigPlan(tuple(artifacts), source_files=sources), strict=False)
     warnings = _setting_loss_warnings(ROOT_REMOTE, existing_root, final_hardware)
     warnings += _setting_loss_warnings(HARDWARE_REMOTE, existing_hardware, final_hardware)
-    if effective_macros is not None and remote_files.get(MACROS_REMOTE) is not None:
+    if effective_macros is not None and remote_files.get(macros_remote) is not None:
         warnings += _setting_loss_warnings(
-            MACROS_REMOTE, remote_files[MACROS_REMOTE].decode("utf-8", errors="strict"),
+            macros_remote, remote_files[macros_remote].decode("utf-8", errors="strict"),
             effective_macros.decode("utf-8", errors="strict"),
         )
+    # Relocation or deselection can remove a managed include without changing
+    # the old file's bytes. Report options that lose effect, not file deletion;
+    # identical macros retained at their new destination are not losses.
+    for previous_macros in (MACROS_REMOTE, ROOT_MACROS_REMOTE):
+        previous_content = remote_files.get(previous_macros)
+        if (previous_content is not None
+                and _has_include(existing_root, previous_macros)
+                and not _has_include(root, previous_macros)):
+            warnings += _setting_loss_warnings(
+                previous_macros, previous_content.decode("utf-8", errors="strict"),
+                final_hardware,
+            )
     if preserve_existing_macros and generated_macros is not None:
         warnings += (
             "Existing macros.cfg remains user-owned; generated starter macros were not deployed to avoid duplicate macro definitions.",
@@ -546,4 +679,5 @@ def build_managed_config_plan(
         legacy_migration=migrated,
         warnings=warnings,
         source_files=sources,
+        geometry_context=geometry_context,
     )

@@ -17,7 +17,11 @@ class TestCustomProbeParsing(unittest.TestCase):
 
         self.assertIsNone(settings.z_offset)
         self.assertEqual(settings.samples, GUIDED_PROBE_DEFAULTS["samples"])
-        self.assertIn("[probe]\npin: ^PA1\nx_offset: -12\ny_offset: 4", config.config_text)
+        self.assertTrue(config.config_text.startswith("[probe]\npin: ^PA1"))
+        self.assertIn("# Probe signal input:", config.config_text.splitlines()[1])
+        self.assertIn("pin: ^PA1", config.config_text)
+        self.assertEqual((config.x_offset, config.y_offset), (-12, 4))
+        self.assertIn("UNCALIBRATED", config.config_text)
         self.assertIn("z_offset: 0", config.config_text)
         self.assertIn("samples: 2", config.config_text)
         self.assertIn("samples_result: median", config.config_text)

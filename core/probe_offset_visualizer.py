@@ -25,9 +25,13 @@
 #     - reachable-area preview
 
 import sys
+import shutil
+import textwrap
+import math
 from core.menu import simple_input, numbered_select
 from core.translations import t
 from core.exceptions import WizardExit
+from core.motion_model import PrinterMotionSpace, ProbeGeometryError, PrintableGeometryError
 
 # ── ANSI color constants (SSH/Pi-safe subset) ────────────────────────────────
 _CY  = "\033[96m"   # cyan   — info / borders
@@ -35,7 +39,7 @@ _GR  = "\033[92m"   # green  — nozzle symbol / success
 _YL  = "\033[93m"   # yellow — probe symbol / warnings
 _RD  = "\033[91m"   # red    — out-of-range errors
 _DIM = "\033[2m"    # dim    — legend / secondary text
-_B   = "\033[1m"    # bold
+_B   = ""           # normal-weight preview headings
 _RS  = "\033[0m"    # reset
 
 # Symbols — intentionally ASCII-friendly for all terminal encodings
@@ -46,6 +50,17 @@ _OVERLAP = "X"  # nozzle/probe overlap
 # Bed preview dimensions (terminal characters)
 _BED_W = 14   # inner width
 _BED_H = 7    # inner height
+
+
+def _compact_preview() -> bool:
+    return shutil.get_terminal_size(fallback=(80, 24)).lines <= 24
+
+
+def _print_wrapped(text: str, color: str) -> None:
+    width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns - 2)
+    for line in textwrap.wrap(text, width=width, break_long_words=False,
+                              break_on_hyphens=False):
+        print(f"  {color}{line}{_RS}")
 
 
 def _offset_to_cell(offset_mm: float, bed_mm: float, cells: int, center_idx: int) -> int:
@@ -160,10 +175,13 @@ def _render_bed(
 
         left_colored = f"{_DIM}{left[0]}{_RS}{left[1]}" if left.strip() else left
         right_colored = f"{right[0]}{_DIM}{right[1]}{_RS}" if right.strip() else right
-        comment_colored = f"{_DIM}{comment}{_RS}" if comment else ""
-
+        comment_width = max(12, shutil.get_terminal_size(fallback=(80, 24)).columns - 18)
+        comment_lines = textwrap.wrap(comment, width=comment_width,
+                                      break_long_words=False, break_on_hyphens=False) if comment else []
+        comment_colored = f"{_DIM}{comment_lines[0]}{_RS}" if comment_lines else ""
         line = f"{left_colored}{_CY}|{_RS}{rendered_row}{_CY}|{_RS}{right_colored}{comment_colored}"
         lines.append(line)
+        lines.extend(f"{' ' * 18}{_DIM}{part}{_RS}" for part in comment_lines[1:])
 
     # 3. Bottom border
     lines.append(f"  {_CY}O---- {_B}{t('probe.front')}{_RS}{_CY} ---+{_RS}")
@@ -178,6 +196,7 @@ def _print_frame(
     bed_h: float,
     probe_name: str,
     out_of_range_msg: str = "",
+    *, geometry_error: bool = False,
 ) -> None:
     """Print the full probe offset visualization frame.
 
@@ -185,19 +204,14 @@ def _print_frame(
     Each call to _print_frame() simply prints — no cursor manipulation
     is used, keeping it SSH/Pi safe.
     """
-    print()
-    print(f"  {_CY}{_B}{t('probe.preview_title')}{_RS}  {_DIM}({probe_name}){_RS}")
-    print(f"  {_DIM}{t('probe.legend')}{_RS}")
-    print()
-
-    bed_lines = _render_bed(x_off, y_off, bed_w, bed_h)
-    for line in bed_lines:
-        print(line)
-
-    # Coordinate labels
     x_label = f"X: {x_off:+.1f} mm"
     y_label = f"Y: {y_off:+.1f} mm"
-    print(f"\n  {_DIM}{x_label}   {y_label}{_RS}")
+    print()
+    _print_wrapped(f"{t('probe.preview_title')} ({probe_name})", _CY)
+    _print_wrapped(t('probe.legend'), _DIM)
+    for line in _render_bed(x_off, y_off, bed_w, bed_h):
+        print(line)
+    _print_wrapped(f"{x_label} | {y_label}", _YL)
 
     # Use high-resolution limit of 50mm for mapping to the visual grid (max_range represents total bed size, which is halved in _offset_to_cell)
     max_range = 100.0
@@ -206,10 +220,10 @@ def _print_frame(
     overlap = (px == 6 and py == 3)
 
     if overlap:
-        print(f"  {_YL}[!] {t('probe.overlap_warning')}{_RS}")
+        _print_wrapped(f"[!] {t('probe.overlap_warning')}", _YL)
 
     if out_of_range_msg:
-        print(f"  {_RD}{out_of_range_msg}{_RS}")
+        _print_wrapped(out_of_range_msg, _RD if geometry_error else _YL)
 
     print()
 
@@ -220,10 +234,9 @@ def _validate_offset(value: str) -> bool | str:
     if not v:
         return True   # allow empty → will use default
     try:
-        float(v)
-        return True
+        return True if math.isfinite(float(v)) else t("probe.finite_offset")
     except ValueError:
-        return "Enter a number (e.g. -38, 0, 23.5)"
+        return t("probe.finite_offset")
 
 
 def _check_reachability(
@@ -239,11 +252,10 @@ def _check_reachability(
     temp_data["probe_x_offset"] = str(x_off)
     temp_data["probe_y_offset"] = str(y_off)
 
-    from core.motion_model import PrinterMotionSpace
     space = PrinterMotionSpace(temp_data)
 
     printable = space.printable_bed_area()
-    probeable = space.probeable_bed_area()
+    probeable = space.validate_probeable_area()
 
     issues = []
     bed_x_min, bed_x_max = printable["x"]
@@ -252,12 +264,12 @@ def _check_reachability(
     prob_y_min, prob_y_max = probeable["y"]
 
     if prob_x_min > bed_x_min:
-        issues.append(t('probe.misses_left', distance=prob_x_min))
+        issues.append(t('probe.misses_left', distance=prob_x_min - bed_x_min))
     if prob_x_max < bed_x_max:
         issues.append(t('probe.misses_right', distance=bed_x_max - prob_x_max))
 
     if prob_y_min > bed_y_min:
-        issues.append(t('probe.misses_front', distance=prob_y_min))
+        issues.append(t('probe.misses_front', distance=prob_y_min - bed_y_min))
     if prob_y_max < bed_y_max:
         issues.append(t('probe.misses_back', distance=bed_y_max - prob_y_max))
 
@@ -314,25 +326,28 @@ def run_probe_offset_step(
     except (ValueError, TypeError):
         bed_w, bed_h = 235.0, 235.0
 
-    # Working values — updated on each input
-    x_off = 0.0
-    y_off = 0.0
+    # Existing accepted offsets are the defaults; draft edits stay local until
+    # confirmation and the caller remains responsible for merging the result.
+    initial = []
+    for axis in ("x", "y"):
+        value = user_data.get(f"probe_{axis}_offset", "0")
+        initial.append(float(value) if str(value).strip() and _validate_offset(str(value)) is True else 0.0)
+    x_off, y_off = initial
 
     while True:
         # ── Print initial/current frame ────────────────────────────────────────
         _print_frame(x_off, y_off, bed_w, bed_h, probe_name)
 
-        print(f"  {_CY}{t('probe.instructions')}{_RS}")
-        print(f"  {_DIM}  {t('probe.negative_x')}{_RS}")
-        print(f"  {_DIM}  {t('probe.positive_x')}{_RS}")
-        print(f"  {_DIM}  {t('probe.negative_y')}{_RS}")
-        print(f"  {_DIM}  {t('probe.positive_y')}{_RS}")
-        print()
+        _print_wrapped(t('probe.instructions'), _CY)
+        if not _compact_preview():
+            for key in ('probe.negative_x', 'probe.positive_x', 'probe.negative_y', 'probe.positive_y'):
+                _print_wrapped(t(key), _DIM)
+            print()
 
         # ── X offset ─────────────────────────────────────────────────────────────
         raw_x = simple_input(
             t("wizard.probe_x_offset") or "Probe X offset from nozzle (mm, e.g. -38 or 0):",
-            default=f"{x_off:.1f}" if x_off != 0.0 else "0",
+            default="0" if x_off == 0 else str(x_off),
             validate=_validate_offset,
             back_value="__back__",
         )
@@ -342,19 +357,25 @@ def run_probe_offset_step(
             result["probe_x_offset"] = "__back__"
             return result
 
-        raw_x = raw_x.strip() or "0"
+        raw_x = raw_x.strip() or str(x_off)
         try:
             x_off = float(raw_x)
         except ValueError:
             x_off = 0.0
 
-        warn = _check_reachability(x_off, y_off, user_data)
-        _print_frame(x_off, y_off, bed_w, bed_h, probe_name, warn)
+        try:
+            warn = _check_reachability(x_off, y_off, user_data)
+            geometry_error = False
+        except PrintableGeometryError as exc:
+            warn, geometry_error = str(exc), True
+        except ProbeGeometryError:
+            warn, geometry_error = t("probe.empty_reach"), True
+        _print_frame(x_off, y_off, bed_w, bed_h, probe_name, warn, geometry_error=geometry_error)
 
         # ── Y offset ─────────────────────────────────────────────────────────────
         raw_y = simple_input(
             t("wizard.probe_y_offset") or "Probe Y offset from nozzle (mm, e.g. 0 or 25):",
-            default=f"{y_off:.1f}" if y_off != 0.0 else "0",
+            default="0" if y_off == 0 else str(y_off),
             validate=_validate_offset,
             back_value="__back__",
         )
@@ -363,14 +384,20 @@ def run_probe_offset_step(
             result["probe_y_offset"] = "__back__"
             return result
 
-        raw_y = raw_y.strip() or "0"
+        raw_y = raw_y.strip() or str(y_off)
         try:
             y_off = float(raw_y)
         except ValueError:
             y_off = 0.0
 
-        warn = _check_reachability(x_off, y_off, user_data)
-        _print_frame(x_off, y_off, bed_w, bed_h, probe_name, warn)
+        try:
+            warn = _check_reachability(x_off, y_off, user_data)
+            geometry_error = False
+        except PrintableGeometryError as exc:
+            warn, geometry_error = str(exc), True
+        except ProbeGeometryError:
+            warn, geometry_error = t("probe.empty_reach"), True
+        _print_frame(x_off, y_off, bed_w, bed_h, probe_name, warn, geometry_error=geometry_error)
 
         # ── Confirm offsets ──────────────────────────────────────────────────────
         choice_yes = t("wizard.probe_confirm_yes") or "Yes, continue"
@@ -380,8 +407,9 @@ def run_probe_offset_step(
 
         ans = numbered_select(
             t("wizard.probe_confirm_offsets") or "Are these probe offsets correct?",
-            choices=[
+            choices=([
                 {"name": choice_yes, "value": "yes"},
+            ] if not geometry_error else []) + [
                 {"name": choice_retry, "value": "retry"},
                 {"name": choice_back, "value": "back"},
                 {"name": choice_quit, "value": "quit"},
@@ -396,13 +424,14 @@ def run_probe_offset_step(
         elif ans == "retry":
             # Loop again, maintaining current values as defaults
             continue
-        else:
+        elif ans == "yes" and not geometry_error:
             # "yes"
             break
 
     # ── Final confirmation frame ──────────────────────────────────────────────
-    print(f"  {_GR}✓  {t('probe.confirmed', x=x_off, y=y_off)}{_RS}")
-    print(f"  {_DIM}  {t('probe.z_calibration_hint')}{_RS}\n")
+    _print_wrapped(f"✓  {t('probe.confirmed', x=x_off, y=y_off)}", _GR)
+    _print_wrapped(t('probe.z_calibration_hint'), _DIM)
+    print()
 
     result["probe_x_offset"] = f"{x_off}"
     result["probe_y_offset"] = f"{y_off}"

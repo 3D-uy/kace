@@ -2,6 +2,7 @@ import copy
 import os
 import shutil
 import textwrap
+from wcwidth import wcwidth, wcswidth
 from core.menu import simple_input, yes_no, numbered_select, autocomplete_select, Separator, Choice
 from core.scraper import fetch_raw_config, parse_config, extract_profile_defaults
 from core.translations import t
@@ -28,6 +29,93 @@ from core.profile_values import (
 
 _PRINTER_PROFILES_DB = None
 _INTERACTIVE_MODE = True
+
+
+def _motor_board(user):
+    parsed = user.get("board_parsed") or {}
+    if user.get("_board_parsed_for") not in (None, user.get("board")):
+        raise GenerationError("Motor pin source belongs to another board.")
+    return parsed
+
+
+def _motor_label(user, section):
+    name = section.removeprefix("stepper_").upper()
+    if section == "extruder":
+        return t("motor.extruder")
+    if user.get("kinematics") == "corexy" and section in ("stepper_x", "stepper_y"):
+        name = "A / stepper_x" if section == "stepper_x" else "B / stepper_y"
+    return t("motor.label", motor=name)
+
+
+def _motor_direction_value(parsed, user, section, *, compact=False):
+    from core.motor_direction import direction_mode, effective_direction_pin
+    try:
+        return t("motor.compact_value" if compact else "motor.value",
+                 mode=t("motor." + ("compact_" if compact else "") + direction_mode(parsed, user, section)),
+                 pin=effective_direction_pin(parsed, user, section))
+    except GenerationError:
+        return t("motor.review_source")
+
+
+def _choose_motor_direction(user, section):
+    from core.motor_direction import direction_mode, source_direction_pin, set_motor_direction
+    from core.menu import _wrapped_prompt_lines
+    parsed = _motor_board(user)
+    for line in _wrapped_prompt_lines(t("motor.guide")):
+        print("  " + line)
+    print(f"\n  {SECTION}{_motor_label(user, section)}{RESET}")
+    print(f"  {t('motor.source', pin=source_direction_pin(parsed, section))}\n")
+    try:
+        current = direction_mode(parsed, user, section)
+    except GenerationError:
+        current = "keep"
+    answer = numbered_select(t("motor.choose"), choices=[
+        {"name": t("motor.keep"), "value": "keep"},
+        {"name": t("motor.invert"), "value": "invert"},
+        _back_choice(), _quit_choice(),
+    ], default=1 if current == "invert" else 0)
+    if answer in (None, _QUIT):
+        raise WizardExit()
+    if answer != _BACK:
+        set_motor_direction(user, parsed, section, answer)
+    return answer
+
+
+def _step_motor_directions(user_data):
+    """The profile branch already exposes these options in its staged editor."""
+    from core.motor_direction import available_motor_sections, apply_motor_directions
+    if user_data.get("profile_loaded") or os.environ.get("KACE_AUTO") == "1":
+        apply_motor_directions(copy.deepcopy(_motor_board(user_data)), user_data)
+        return "done"
+    staged = copy.deepcopy(user_data)
+    parsed = _motor_board(staged)
+    motors = available_motor_sections(parsed, staged)
+    if not motors:
+        apply_motor_directions(copy.deepcopy(parsed), staged)
+        return "done"
+    while True:
+        choices = [{"name": f"{_motor_label(staged, motor)}: {_motor_direction_value(parsed, staged, motor)}",
+                    "value": motor} for motor in motors]
+        choices.extend([
+            {"name": t("choice.continue"), "value": "done"},
+            _back_choice(), _quit_choice(),
+        ])
+        answer = numbered_select(t("motor.review"), choices=choices, default=len(motors))
+        if answer in (None, _QUIT):
+            raise WizardExit()
+        if answer == _BACK:
+            return _BACK
+        if answer == "done":
+            try:
+                apply_motor_directions(copy.deepcopy(parsed), staged)
+            except GenerationError as exc:
+                print(f"{ERROR}{exc}{RESET}")
+                continue
+            if "motor_directions" in staged:
+                user_data["motor_directions"] = staged["motor_directions"]
+            return "done"
+        elif answer in motors:
+            _choose_motor_direction(staged, answer)
 
 
 def _homing_direction_mode(data, axis, defaults=None, parsed=None):
@@ -63,6 +151,31 @@ def _homing_direction_label(mode, inferred, axis):
                      else t("wizard.homing.unresolved"))
         return t("wizard.homing.automatic_direction", direction=direction)
     return t("wizard.homing.maximum" if mode == "True" else "wizard.homing.minimum", axis=axis.upper())
+
+
+def _editor_homing_label(mode, inferred, axis):
+    direction = inferred if mode == "auto" else mode
+    if direction not in ("True", "False"):
+        return t("profile.editor.homing_unresolved")
+    text = t("profile.editor.homing_max" if direction == "True" else "profile.editor.homing_min",
+             axis=axis.upper())
+    return t("profile.editor.homing_auto", direction=text) if mode == "auto" else text
+
+
+def _editor_cell_text(text, width):
+    """Abbreviate display text only; field editing retains the complete value."""
+    from core.menu import _plain_label
+    text = " ".join(_plain_label(str(text)).split())
+    if wcswidth(text) <= width:
+        return text
+    result, cells = [], 0
+    for char in text:
+        size = max(0, wcwidth(char))
+        if cells + size > max(0, width - 1):
+            break
+        result.append(char)
+        cells += size
+    return "".join(result) + "…"
 
 
 def _select_homing_direction(data, axis, defaults=None, parsed=None):
@@ -315,89 +428,129 @@ def _get_printer_profiles() -> list:
     return _PRINTER_PROFILES_DB
 
 
-def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict = None) -> None:
-    """Print detected profile as a clean information screen."""
-    is_custom = False
-    if user_data:
-        is_custom = user_data.get("printer_profile") == "Custom / Scratch Build"
-    elif defaults:
-        is_custom = defaults.get("printer_profile") == "Custom / Scratch Build"
+def _printable_bounds_value(defaults: dict, user_data: dict) -> str:
+    """Present saved bed coordinates without deriving them from rail travel."""
+    values = dict(defaults)
+    values.update(user_data or {})
+    axes = []
+    for axis in ("x", "y"):
+        bounds = [values.get(f"printable_{axis}_{bound}") for bound in ("min", "max")]
+        shown = [t("profile.bounds_undefined") if value in (None, "") else str(value)
+                 for value in bounds]
+        interval = shown[0] if all(value in (None, "") for value in bounds) else "..".join(shown)
+        if all(value not in (None, "") for value in bounds):
+            interval += " mm"
+        axes.append(f"{axis.upper()} {interval}")
+    return " / ".join(axes)
 
+
+def print_detected_profile_summary(defaults: dict, parsed: dict, user_data: dict = None) -> None:
+    """Print the complete profile and its explanations without clipping content."""
+    is_custom = (user_data or defaults).get("printer_profile") == "Custom / Scratch Build"
+    width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns - 2)
     header_key = "profile.custom_header" if is_custom else "profile.detected_header"
     print(f"\n{SECTION}{t(header_key)}{RESET}")
 
-    def print_val(label: str, val: str, comment_key: str) -> None:
-        comment = t(comment_key)
-        dim_comment = f"{DIM}# {comment}{RESET}"
-        print(f"  - {label:<24} {str(val):<8} {dim_comment}")
+    def section(key):
+        title = t(key)
+        for line in textwrap.wrap(title, width=width - 2):
+            print(f"  {SECTION}{line}{RESET}")
+        print(f"  {SECTION}{'─' * min(len(title), width - 2)}{RESET}\n")
 
-    # ── Motion System ─────────────────────────────────────────────────────────
-    kinematics = parsed.get('printer', {}).get('kinematics') or defaults.get('kinematics')
-    has_any_axis = any(
-        parsed.get(f'stepper_{a}', {}).get(k) is not None or (is_custom and defaults.get(f'{a}_{k}') is not None)
-        for a in ['x', 'y', 'z']
-        for k in ('position_min', 'position_max', 'position_endstop')
+    def print_val(label, value, comment_key):
+        text = f"  - {label:<24} {value}  # {t(comment_key)}"
+        in_comment = False
+        for line in textwrap.wrap(text, width=width, subsequent_indent="      ",
+                                  break_long_words=False, break_on_hyphens=False):
+            if "#" in line:
+                content, comment = line.split("#", 1)
+                print(f"{content}{DIM}#{comment}{RESET}")
+                in_comment = True
+            elif in_comment:
+                print(f"{DIM}{line}{RESET}")
+            else:
+                print(line)
+
+    kinematics = parsed.get("printer", {}).get("kinematics") or defaults.get("kinematics")
+    has_axis = any(
+        parsed.get(f"stepper_{axis}", {}).get(field) is not None
+        or (is_custom and defaults.get(f"{axis}_{field}") is not None)
+        for axis in ("x", "y", "z")
+        for field in ("position_min", "position_max", "position_endstop")
     )
-    has_motion = bool(kinematics or has_any_axis)
-
-    if has_motion:
-        print(f"  {SECTION}Motion System{RESET}")
-        print(f"  {SECTION}─────────────{RESET}")
-        print("")
-
+    if kinematics or has_axis:
+        section("wizard.review_profile.motion")
         if kinematics:
-            print_val("Kinematics:", kinematics, "profile.comment_kinematics")
-            print("")
+            print_val(f"{t('profile.kinematics')}:", kinematics, "profile.comment_kinematics")
+            print()
+        for axis in ("x", "y", "z"):
+            axis_data = parsed.get(f"stepper_{axis}", {})
+            values = {}
+            for field in ("position_min", "position_max", "position_endstop"):
+                value = axis_data.get(field)
+                if value is None and is_custom:
+                    value = defaults.get(f"{axis}_{field}")
+                if value is not None:
+                    values[field] = value
+            if not values:
+                continue
+            for field, value in values.items():
+                print_val(f"{axis.upper()} {field}:", value, f"profile.comment_{field}_{axis}")
+            homing_data = dict(defaults)
+            homing_data.update(user_data or {})
+            for field in ("position_min", "position_max", "position_endstop"):
+                key = f"{axis}_{field}"
+                if key not in homing_data and axis_data.get(field) is not None:
+                    homing_data[key] = axis_data[field]
+            mode = _homing_direction_mode(homing_data, axis, defaults, parsed)
+            print_val(t("wizard.homing.axis_label", axis=axis.upper()),
+                      _homing_direction_label(mode, _homing_direction_inferred(homing_data, axis), axis),
+                      "wizard.homing.comment")
+            if axis == "z" and mode == "auto":
+                for line in textwrap.wrap(t("wizard.homing.z_probe_hint"), width=width - 2,
+                                          break_long_words=False, break_on_hyphens=False):
+                    print(f"  {DIM}{line}{RESET}")
+            print()
 
-        for axis in ['x', 'y', 'z']:
-            sec = f'stepper_{axis}'
-            axis_data = parsed.get(sec, {})
-            axis_rows = [
-                (f"{axis.upper()} position_min:",     axis_data.get('position_min') or (defaults.get(f'{axis}_position_min') if is_custom else None),     f"profile.comment_position_min_{axis}"),
-                (f"{axis.upper()} position_max:",     axis_data.get('position_max') or (defaults.get(f'{axis}_position_max') if is_custom else None),     f"profile.comment_position_max_{axis}"),
-                (f"{axis.upper()} position_endstop:", axis_data.get('position_endstop') or (defaults.get(f'{axis}_position_endstop') if is_custom else None), f"profile.comment_position_endstop_{axis}"),
-            ]
-            if any(v is not None for _, v, _ in axis_rows):
-                for label, val, comment_key in axis_rows:
-                    if val is not None:
-                        print_val(label, val, comment_key)
-                homing_data = dict(defaults)
-                homing_data.update(user_data or {})
-                for field in ("position_min", "position_max", "position_endstop"):
-                    key = f"{axis}_{field}"
-                    if key not in homing_data and axis_data.get(field) is not None:
-                        homing_data[key] = axis_data[field]
-                mode = _homing_direction_mode(homing_data, axis, defaults, parsed)
-                print_val(t("wizard.homing.axis_label", axis=axis.upper()),
-                          _homing_direction_label(mode, _homing_direction_inferred(homing_data, axis), axis),
-                          "wizard.homing.comment")
-                if axis == "z" and mode == "auto":
-                    print(f"  {DIM}{t('wizard.homing.z_probe_hint')}{RESET}")
-                print("")
+    from core.motor_direction import available_motor_sections
+    motor_user = user_data or {}
+    motor_source = _motor_board(motor_user)
+    motors = available_motor_sections(motor_source, motor_user)
+    if motors:
+        section("motor.review")
+        for motor in motors:
+            print_val(_motor_label(motor_user, motor), _motor_direction_value(motor_source, motor_user, motor), "motor.comment")
+        print()
 
-    # ── Build Volume ──────────────────────────────────────────────────────────
-    x_size = (user_data.get('x_size') if user_data else None) or defaults.get('x_size') or parsed.get('stepper_x', {}).get('position_max')
-    y_size = (user_data.get('y_size') if user_data else None) or defaults.get('y_size') or parsed.get('stepper_y', {}).get('position_max')
-    z_size = (user_data.get('z_size') if user_data else None) or defaults.get('z_size') or parsed.get('stepper_z', {}).get('position_max')
-    if x_size and y_size and z_size:
-        print(f"  {SECTION}Build Volume{RESET}")
-        print(f"  {SECTION}────────────{RESET}")
-        print("")
-        print_val("Build volume:", f"{x_size} x {y_size} x {z_size}", "profile.comment_build_volume")
-        print("")
+    sizes = [(user_data or {}).get(f"{axis}_size") or defaults.get(f"{axis}_size")
+             or parsed.get(f"stepper_{axis}", {}).get("position_max") for axis in ("x", "y", "z")]
+    section("wizard.review_profile.volume")
+    if all(sizes):
+        print_val(f"{t('profile.build_volume')}:", " x ".join(str(value) for value in sizes),
+                  "profile.comment_build_volume")
+    print_val(f"{t('profile.printable_bounds')}:", _printable_bounds_value(defaults, user_data),
+              "profile.comment_printable_bounds")
+    print()
+    from core.nozzle_bed_visualizer import print_nozzle_bed_preview
+    geometry = dict(defaults)
+    for axis in ('x', 'y'):
+        for field in ('position_min', 'position_max', 'position_endstop'):
+            value = parsed.get(f'stepper_{axis}', {}).get(field)
+            if value is not None:
+                geometry[f'{axis}_{field}'] = value
+    geometry.update(user_data or {})
+    print_nozzle_bed_preview(geometry)
+    print()
 
-    # ── Thermistors ───────────────────────────────────────────────────────────
-    hotend_therm = parsed.get('extruder', {}).get('sensor_type') or (defaults.get('hotend_thermistor') if is_custom else None)
-    bed_therm = parsed.get('heater_bed', {}).get('sensor_type') or (defaults.get('bed_thermistor') if is_custom else None)
-    if hotend_therm or bed_therm:
-        print(f"  {SECTION}Thermistors{RESET}")
-        print(f"  {SECTION}───────────{RESET}")
-        print("")
-        if hotend_therm:
-            print_val("Hotend thermistor:", hotend_therm, "profile.comment_hotend_therm")
-        if bed_therm:
-            print_val("Bed thermistor:", bed_therm, "profile.comment_bed_therm")
-        print("")
+    hotend = parsed.get("extruder", {}).get("sensor_type") or (defaults.get("hotend_thermistor") if is_custom else None)
+    bed = parsed.get("heater_bed", {}).get("sensor_type") or (defaults.get("bed_thermistor") if is_custom else None)
+    if hotend or bed:
+        section("wizard.review_profile.thermistors")
+        if hotend:
+            print_val(f"{t('profile.hotend_thermistor')}:", hotend, "profile.comment_hotend_therm")
+        if bed:
+            print_val(f"{t('profile.bed_thermistor')}:", bed, "profile.comment_bed_therm")
+        print()
 
 
 def interactive_profile_review(defaults: dict, parsed: dict, user_data: dict) -> str:
@@ -405,29 +558,29 @@ def interactive_profile_review(defaults: dict, parsed: dict, user_data: dict) ->
 
 
 def _step_profile_review_inner(defaults: dict, parsed: dict, user_data: dict) -> str:
-    """Profile information screen."""
+    """Show the explained profile before Continue, Edit or Back."""
     while True:
         print_detected_profile_summary(defaults, parsed, user_data)
-
         action = numbered_select(
             t("wizard.profile_review_prompt"),
             choices=[
-                {"name": t("choice.continue"),      "value": "confirm"},
-                {"name": t("choice.edit_profile"),  "value": "edit"},
-                {"name": f"🔙  {t('choice.arrow_back') if t('choice.arrow_back') else 'Back'}",    "value": "back"},
-            ]
+                {"name": t("choice.continue"), "value": "confirm"},
+                {"name": t("choice.edit_profile"), "value": "edit"},
+                {"name": t("choice.arrow_back"), "value": "back"},
+            ],
         )
-
         if action is None:
             raise WizardExit()
         if action == "confirm":
-            return "confirm"
-        if action == "back":
-            return "back"
-
-        editor_result = _step_profile_editor_inner(defaults, parsed, user_data)
-        if editor_result == "back":
-            continue
+            from core.motor_direction import apply_motor_directions
+            try:
+                apply_motor_directions(copy.deepcopy(_motor_board(user_data)), user_data)
+            except GenerationError as exc:
+                print(f"{ERROR}{exc}{RESET}")
+                continue
+        if action in ("confirm", "back"):
+            return action
+        _step_profile_editor_inner(defaults, parsed, user_data)
 
 
 def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) -> str:
@@ -435,6 +588,21 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
     staged_defaults  = copy.deepcopy(defaults)
     staged_parsed    = copy.deepcopy(parsed)
     staged_user_data = copy.deepcopy(user_data)
+
+    def validated_candidate(overrides=None):
+        candidate = safe_defaults()
+        candidate.update(staged_defaults)
+        candidate.update(staged_user_data)
+        if overrides:
+            candidate.update(overrides)
+            mark_user_override(candidate, *overrides)
+        if "_profile_parsed" in staged_user_data or "board_parsed" in staged_user_data:
+            resolved, _ = resolve_generation_values(
+                staged_user_data.get("board_parsed") or {}, candidate, validate_motors=False,
+            )
+            candidate.update(resolved)
+        normalize_and_validate_configuration(candidate)
+        return candidate
 
     def validate_pos_float(val):
         try:
@@ -470,13 +638,33 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
 
         C = "\033[96m"   # cyan
         D = "\033[2m"    # dim
-        B = "\033[1m"    # bold
+        B = ""           # normal-weight wizard headings
         R = "\033[0m"    # reset
-        SEP = "─" * 62
+        columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+        separator_width = max(1, min(62, columns - 7))
+        SEP = "─" * separator_width
+        editor_details = {}
 
-        def _row(label, value, comment_key):
-            comment = t(comment_key)
-            return f"{label:<22} {C}{value}{R}  {D}# {comment}{R}"
+        def _row(label, value, comment_key, *, full_value=None):
+            # Reserve the two-digit numbered_select prefix and one spare cell.
+            # Hints yield space before values; no stored setting is shortened.
+            width = max(3, columns - 9)
+            label_width = min(22, max(1, width // 2))
+            shown_label = _editor_cell_text(label, label_width)
+            shown_value = _editor_cell_text(value, max(1, width - label_width - 1))
+            row = f"{shown_label}{' ' * (label_width - wcswidth(shown_label))} {C}{shown_value}{R}"
+            short_key = comment_key.replace("profile.comment_", "profile.editor.")
+            if comment_key.startswith("profile.comment_position_"):
+                short_key = short_key.rsplit("_", 1)[0]
+            if comment_key == "wizard.homing.comment":
+                short_key = "profile.editor.homing"
+            elif comment_key == "motor.comment":
+                short_key = "profile.editor.motor"
+            hint = "  # " + t(short_key)
+            if label_width + 1 + wcswidth(shown_value) + wcswidth(hint) <= width:
+                row += f"{D}{hint}{R}"
+            editor_details[row] = (label, value if full_value is None else full_value, t(comment_key))
+            return row
 
         print(f"\n  {B}{t('choice.edit_profile')}{R}")
         print(f"  {SEP}")
@@ -487,22 +675,26 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
         choices = [
             Choice(title=_ansi_choice(_row("Kinematics",         kin,                             "profile.comment_kinematics")), value="kinematics"),
             Choice(title=_ansi_choice(_row("Build Volume",        f"{x_sz} x {y_sz} x {z_sz} mm", "profile.comment_build_volume")), value="volume"),
-            Separator("  " + "─" * 62),
+            Choice(title=_row(
+                t("profile.printable_bounds"),
+                _printable_bounds_value(staged_defaults, staged_user_data), "profile.comment_printable_bounds",
+            ), value="printable_bounds"),
+            Separator("  " + SEP),
             Choice(title=_ansi_choice(_row("X position_min",      x_min, "profile.comment_position_min_x")), value="x_position_min"),
             Choice(title=_ansi_choice(_row("X position_max",      x_max, "profile.comment_position_max_x")), value="x_position_max"),
             Choice(title=_ansi_choice(_row("X position_endstop",  x_end, "profile.comment_position_endstop_x")), value="x_position_endstop"),
-            Separator("  " + "─" * 62),
+            Separator("  " + SEP),
             Choice(title=_ansi_choice(_row("Y position_min",      y_min, "profile.comment_position_min_y")), value="y_position_min"),
             Choice(title=_ansi_choice(_row("Y position_max",      y_max, "profile.comment_position_max_y")), value="y_position_max"),
             Choice(title=_ansi_choice(_row("Y position_endstop",  y_end, "profile.comment_position_endstop_y")), value="y_position_endstop"),
-            Separator("  " + "─" * 62),
+            Separator("  " + SEP),
             Choice(title=_ansi_choice(_row("Z position_min",      z_min, "profile.comment_position_min_z")), value="z_position_min"),
             Choice(title=_ansi_choice(_row("Z position_max",      z_max, "profile.comment_position_max_z")), value="z_position_max"),
             Choice(title=_ansi_choice(_row("Z position_endstop",  z_end, "profile.comment_position_endstop_z")), value="z_position_endstop"),
-            Separator("  " + "─" * 62),
+            Separator("  " + SEP),
             Choice(title=_ansi_choice(_row("Hotend Thermistor",   ht,    "profile.comment_hotend_therm")), value="hotend_thermistor"),
             Choice(title=_ansi_choice(_row("Bed Thermistor",      bt,    "profile.comment_bed_therm")), value="bed_thermistor"),
-            Separator("  " + "─" * 62),
+            Separator("  " + SEP),
             Choice(title=_ansi_choice(f"{B}{t('choice.save_continue')}{R}"), value="save"),
             Choice(title=_ansi_choice(f"{B}{t('choice.back_discard')}{R}"), value="back")
         ]
@@ -520,26 +712,44 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             insert_at = next(i for i, choice in enumerate(choices)
                              if getattr(choice, "value", None) == f"{axis}_position_endstop") + 1
             choices.insert(insert_at, Choice(
-                title=_row(t("wizard.homing.axis_label", axis=axis.upper()), label, "wizard.homing.comment"),
+                title=_row(t("wizard.homing.axis_label", axis=axis.upper()),
+                           _editor_homing_label(mode, _homing_direction_inferred(homing_data, axis), axis),
+                           "wizard.homing.comment", full_value=label),
                 value=f"homing_positive_dir_{axis}",
             ))
             if axis == "z" and mode == "auto":
-                print(f"  {D}{t('wizard.homing.z_probe_hint')}{R}")
+                from core.menu import _wrapped_prompt_lines
+                for line in _wrapped_prompt_lines(t('wizard.homing.z_probe_hint')):
+                    print(f"  {D}{line}{R}")
+
+        from core.motor_direction import available_motor_sections
+        motor_source = _motor_board(staged_user_data)
+        motors = available_motor_sections(motor_source, staged_user_data)
+        for motor in motors:
+            axis = motor.removeprefix("stepper_")
+            anchor = f"homing_positive_dir_{axis}" if axis in ("x", "y", "z") else None
+            insert_at = (next(i for i, choice in enumerate(choices) if getattr(choice, "value", None) == anchor) + 1
+                         if anchor else next(i for i, choice in enumerate(choices)
+                                             if getattr(choice, "value", None) == "hotend_thermistor"))
+            choices.insert(insert_at, Choice(title=_row(
+                _motor_label(staged_user_data, motor),
+                _motor_direction_value(motor_source, staged_user_data, motor, compact=True),
+                "motor.comment", full_value=_motor_direction_value(motor_source, staged_user_data, motor)),
+                value="motor_direction_" + motor))
 
         prop = numbered_select(
             t("wizard.profile_editor_prompt"),
             choices=choices
         )
 
-        if prop is None:
+        if prop in (None, _QUIT):
             raise WizardExit()
 
         if prop == "save":
             try:
-                validation_data = safe_defaults()
-                validation_data.update(staged_defaults)
-                validation_data.update(staged_user_data)
-                normalize_and_validate_configuration(validation_data)
+                from core.motor_direction import apply_motor_directions
+                apply_motor_directions(copy.deepcopy(motor_source), staged_user_data)
+                validation_data = validated_candidate()
             except GenerationError as exc:
                 print(f"\n{ERROR}[!] Configuration Validation Failed:{RESET}")
                 print(f"    - {exc}")
@@ -552,6 +762,9 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 "printable_y_min", "printable_y_max", "printable_z_max",
             ):
                 staged_defaults[key] = staged_user_data[key]
+            staged_defaults["_printable_bounds_defaults"] = copy.deepcopy(
+                staged_user_data["_printable_bounds_defaults"]
+            )
 
             defaults.clear()
             defaults.update(staged_defaults)
@@ -564,12 +777,25 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
         if prop == "back":
             return "back"
 
-        if prop == "kinematics":
+        selected = next((choice for choice in choices if getattr(choice, "value", None) == prop), None)
+        detail = editor_details.get(getattr(selected, "title", None))
+        if detail:
+            from core.menu import _wrapped_prompt_lines
+            label, value, explanation = detail
+            for line in _wrapped_prompt_lines(f"{label}: {value}\n{explanation}"):
+                print("  " + line)
+
+        if prop.startswith("motor_direction_"):
+            _choose_motor_direction(staged_user_data, prop.removeprefix("motor_direction_"))
+
+        elif prop == "kinematics":
             new_kin = numbered_select(
                 "Select Kinematics:",
-                choices=list(supported_kinematics()),
+                choices=[*supported_kinematics(), _back_choice()],
                 default=list(supported_kinematics()).index(kin) if kin in supported_kinematics() else 0
             )
+            if new_kin == _BACK:
+                continue
             if new_kin:
                 staged_user_data["kinematics"] = new_kin
                 mark_user_override(staged_user_data, "kinematics")
@@ -579,15 +805,15 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
         elif prop == "volume":
             new_x = simple_input("Enter X build volume (mm):", default=str(x_sz), back_value=_BACK)
             if new_x == _BACK:
-                return "back"
+                continue
             if new_x is not None and validate_pos_float(new_x):
                 new_y = simple_input("Enter Y build volume (mm):", default=str(y_sz), back_value=_BACK)
                 if new_y == _BACK:
-                    return "back"
+                    continue
                 if new_y is not None and validate_pos_float(new_y):
                     new_z = simple_input("Enter Z build volume (mm):", default=str(z_sz), back_value=_BACK)
                     if new_z == _BACK:
-                        return "back"
+                        continue
                     if new_z is not None and validate_pos_float(new_z):
                         # Update bed sizes (Printable Area logical bounds)
                         for key, val in [("x_size", new_x), ("y_size", new_y), ("z_size", new_z),
@@ -603,11 +829,13 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                             "printable_y_min", "printable_y_max", "printable_z_max",
                         )
 
-                        # Safe adjustment to avoid validation errors if mechanical limits are smaller
+                        # Proposed mechanical changes remain visible in the editor
+                        # until Save; generation must retain them as user overrides.
                         try:
                             curr_x_max = float(staged_user_data.get("x_position_max", x_max))
                             if curr_x_max < float(new_x):
                                 staged_user_data["x_position_max"] = new_x
+                                mark_user_override(staged_user_data, "x_position_max")
                                 staged_defaults["x_position_max"] = new_x
                                 staged_parsed.setdefault('stepper_x', {})['position_max'] = new_x
                         except (ValueError, TypeError):
@@ -617,6 +845,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                             curr_y_max = float(staged_user_data.get("y_position_max", y_max))
                             if curr_y_max < float(new_y):
                                 staged_user_data["y_position_max"] = new_y
+                                mark_user_override(staged_user_data, "y_position_max")
                                 staged_defaults["y_position_max"] = new_y
                                 staged_parsed.setdefault('stepper_y', {})['position_max'] = new_y
                         except (ValueError, TypeError):
@@ -626,10 +855,43 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                             curr_z_max = float(staged_user_data.get("z_position_max", z_max))
                             if curr_z_max < float(new_z):
                                 staged_user_data["z_position_max"] = new_z
+                                mark_user_override(staged_user_data, "z_position_max")
                                 staged_defaults["z_position_max"] = new_z
                                 staged_parsed.setdefault('stepper_z', {})['position_max'] = new_z
                         except (ValueError, TypeError):
                             pass
+
+        elif prop == "printable_bounds":
+            help_width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns - 4)
+            for line in textwrap.wrap(t("profile.printable_bounds_help"), width=help_width):
+                print(f"  {INFO}{line}{RESET}")
+            updates = {}
+            for axis, fallback_max in (("x", x_sz), ("y", y_sz)):
+                for bound, fallback in (("min", "0"), ("max", fallback_max)):
+                    key = f"printable_{axis}_{bound}"
+                    current = staged_user_data.get(key, staged_defaults.get(key, fallback))
+                    answer = simple_input(
+                        t("profile.printable_bound_prompt", field=t(f"profile.printable_{bound}", axis=axis.upper())),
+                        default=str(current), validate=questionary_numeric_validator, back_value=_BACK,
+                    )
+                    if answer in (None, _BACK):
+                        break
+                    updates[key] = answer.strip() or str(current)
+                else:
+                    continue
+                break
+            if len(updates) != 4:
+                continue
+            try:
+                candidate = validated_candidate(updates)
+            except GenerationError as exc:
+                print(f"\n{ERROR}{t('profile.printable_bounds_invalid')}{RESET}")
+                print(f"    - {exc}")
+                continue
+            for key in updates:
+                staged_user_data[key] = candidate[key]
+                staged_defaults[key] = candidate[key]
+            mark_user_override(staged_user_data, *updates)
 
         elif prop in ("x_position_min", "x_position_max", "x_position_endstop",
                       "y_position_min", "y_position_max", "y_position_endstop",
@@ -651,7 +913,7 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
                 back_value=_BACK,
             )
             if new_val == _BACK:
-                return "back"
+                continue
             
             if new_val is not None and new_val.strip().lower() not in ("<", "back", "volver", ""):
                 val_clean = new_val.strip()
@@ -683,13 +945,15 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             th_choices = list(THERMISTOR_PRESETS) + ["Other (Manual Entry)"]
             new_th = numbered_select(
                 "Select Hotend Thermistor:",
-                choices=th_choices,
+                choices=[*th_choices, _back_choice()],
                 default=th_choices.index(ht) if ht in THERMISTOR_PRESETS else 0
             )
+            if new_th == _BACK:
+                continue
             if new_th == "Other (Manual Entry)":
                 new_th = simple_input("Enter custom hotend thermistor name:", validate=questionary_thermistor_validator, back_value=_BACK)
                 if new_th == _BACK:
-                    return "back"
+                    continue
             if new_th:
                 staged_user_data["hotend_thermistor"] = new_th
                 mark_user_override(staged_user_data, "hotend_thermistor")
@@ -700,13 +964,15 @@ def _step_profile_editor_inner(defaults: dict, parsed: dict, user_data: dict) ->
             bt_choices = list(THERMISTOR_PRESETS) + ["Other (Manual Entry)"]
             new_tb = numbered_select(
                 "Select Bed Thermistor:",
-                choices=bt_choices,
+                choices=[*bt_choices, _back_choice()],
                 default=bt_choices.index(bt) if bt in THERMISTOR_PRESETS else 0
             )
+            if new_tb == _BACK:
+                continue
             if new_tb == "Other (Manual Entry)":
                 new_tb = simple_input("Enter custom bed thermistor name:", validate=questionary_thermistor_validator, back_value=_BACK)
                 if new_tb == _BACK:
-                    return "back"
+                    continue
             if new_tb:
                 staged_user_data["bed_thermistor"] = new_tb
                 mark_user_override(staged_user_data, "bed_thermistor")
@@ -772,9 +1038,14 @@ def _step_printer_profile(user_data, printer_configs):
     if ans == "search":
         ans = autocomplete_select(
             t("wizard.select_printer_model"),
-            choices=printer_configs
+            choices=[*printer_configs, _back_choice(), _quit_choice()],
+            require_explicit=True,
+            search_first=True,
+            renumber_results=True,
         )
-        if ans is None:
+        if ans == _QUIT:
+            raise WizardExit()
+        if ans in (None, _BACK):
             return "__retry__"
 
     print(f"\n{INFO}>>> Loading defaults for {ans}...{RESET}")
@@ -1017,17 +1288,19 @@ def _step_z_limits(user_data):
     return "done"
 
 
-def _step_homing_directions(user_data):
+def _step_homing_directions(user_data, *, reviewed=False):
     """Offer automatic/manual directions, committing only after every axis is reviewed."""
     staged = copy.deepcopy(user_data)
     for axis in ("x", "y", "z"):
         key = f"homing_positive_dir_{axis}"
-        if os.environ.get("KACE_AUTO") == "1":
+        if reviewed or os.environ.get("KACE_AUTO") == "1":
             answer = _homing_direction_mode(staged, axis, parsed=staged.get("_profile_parsed"))
             if answer == "auto" and _homing_direction_inferred(staged, axis) is None:
-                raise GenerationError(
-                    f"Cannot infer {key}; run the interactive wizard or provide it explicitly."
-                )
+                if os.environ.get("KACE_AUTO") == "1":
+                    raise GenerationError(
+                        f"Cannot infer {key}; run the interactive wizard or provide it explicitly."
+                    )
+                answer = _select_homing_direction(staged, axis, parsed=staged.get("_profile_parsed"))
         else:
             answer = _select_homing_direction(staged, axis, parsed=staged.get("_profile_parsed"))
         if answer == _BACK:

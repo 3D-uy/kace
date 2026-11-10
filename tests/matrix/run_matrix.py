@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -47,21 +49,36 @@ def run_docker_validation(artifact_dir: Path, manifest_path: Path) -> tuple[dict
     if build.returncode != 0:
         return {}, f"Docker build failed: {(build.stderr or build.stdout).strip()}"
     result_name = "klipper-results.json"
-    validation = _run([
-        docker, "run", "--rm", "--network", "none",
-        "--mount", f"type=bind,source={artifact_dir.resolve()},target=/matrix",
-        "-e", f"KLIPPER_REF={KLIPPER_REF}", image,
-        f"/matrix/{manifest_path.name}", f"/matrix/{result_name}",
-    ], PROJECT_ROOT)
-    if validation.returncode != 0:
-        return {}, f"Docker validation failed: {(validation.stderr or validation.stdout).strip()}"
-    try:
-        payload = json.loads((artifact_dir / result_name).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return {}, f"Invalid Docker result: {exc}"
-    if payload.get("klipper_ref") != KLIPPER_REF:
-        return {}, "Docker result reported a different Klipper commit"
-    return payload.get("results", {}), None
+    # Constructors can write files before MCU identification (save_variables,
+    # for example). Only expose a disposable copy, never the source artifacts.
+    with tempfile.TemporaryDirectory(prefix="kace-matrix-") as temporary:
+        staged = Path(temporary) / "matrix"
+        shutil.copytree(artifact_dir, staged)
+        result_path = staged / result_name
+        result_path.unlink(missing_ok=True)  # Never accept a previous run's result.
+        inputs = {p.relative_to(staged): hashlib.sha256(p.read_bytes()).digest()
+                  for p in staged.rglob("*") if p.is_file()}
+        validation = _run([
+            docker, "run", "--rm", "--network", "none",
+            "--mount", f"type=bind,source={staged.resolve()},target=/matrix",
+            "-e", f"KLIPPER_REF={KLIPPER_REF}", image,
+            f"/matrix/{manifest_path.name}", f"/matrix/{result_name}",
+        ], PROJECT_ROOT)
+        if validation.returncode != 0:
+            return {}, f"Docker validation failed: {(validation.stderr or validation.stdout).strip()}"
+        for name, digest in inputs.items():
+            path = staged / name
+            if not path.is_file() or hashlib.sha256(path.read_bytes()).digest() != digest:
+                return {}, f"Docker validation changed an input file: {name}"
+        try:
+            result_text = result_path.read_text(encoding="utf-8")
+            payload = json.loads(result_text)
+        except (OSError, json.JSONDecodeError) as exc:
+            return {}, f"Invalid Docker result: {exc}"
+        if payload.get("klipper_ref") != KLIPPER_REF:
+            return {}, "Docker result reported a different Klipper commit"
+        (artifact_dir / result_name).write_text(result_text, encoding="utf-8")
+        return payload.get("results", {}), None
 
 
 def classify(generation: dict, klipper: dict | None, infra_error: str | None) -> tuple[str, str]:
@@ -71,6 +88,8 @@ def classify(generation: dict, klipper: dict | None, infra_error: str | None) ->
         return FINAL_KACE_ERROR, generation["reason"]
     if infra_error:
         return FINAL_INFRA_ERROR, infra_error
+    if klipper and klipper.get("infrastructure_error"):
+        return FINAL_INFRA_ERROR, klipper["infrastructure_error"]
     if not klipper or not klipper.get("valid"):
         return FINAL_KLIPPER_ERROR, (klipper or {}).get("reason", "Klipper returned no result")
     return FINAL_PASS, klipper["reason"]

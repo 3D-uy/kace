@@ -65,6 +65,23 @@ def validate_probe_homing_geometry(sections: Mapping) -> None:
             "(position_min defaults to 0). Resolve the Z limits or calibrate the probe offset."
         ) from exc
 
+    # GenericPrinterRail uses the probe trigger as position_endstop for these
+    # same direction checks. Do not impose negative homing on every probe.
+    from core.profile_values import infer_homing_positive_dir
+    if "homing_positive_dir" in rail:
+        direction = ConfigParser.BOOLEAN_STATES.get(str(rail["homing_positive_dir"]).strip().casefold())
+        if direction is None:
+            raise GenerationError("[stepper_z] homing_positive_dir must be a Klipper boolean.")
+        if (direction and trigger == minimum) or (not direction and trigger == maximum):
+            raise GenerationError(
+                "[stepper_z] homing_positive_dir contradicts the probe z_offset at the Z travel limit."
+            )
+    elif infer_homing_positive_dir(trigger, minimum, maximum) is None:
+        raise GenerationError(
+            "[stepper_z] homing_positive_dir cannot be inferred from the probe z_offset; "
+            "select an explicit direction."
+        )
+
 
 def apply_probe_homing_defaults(user_ctx: dict, value_provenance: Mapping) -> None:
     """Apply the existing probe calibration range only to unresolved defaults."""

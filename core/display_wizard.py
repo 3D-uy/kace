@@ -66,7 +66,7 @@ _Y   = WARNING              # attention / adapter required
 _O   = WARNING              # experimental is an attention state
 _R   = ERROR                # unsafe / danger
 _C   = INFO                 # neutral information
-_B   = BOLD
+_B   = ""  # Normal-weight wizard text, including turquoise headings.
 _RS  = RESET
 _W   = QUESTION
 _M   = SECTION
@@ -299,10 +299,15 @@ def _run_manual_search(
 
     raw = autocomplete_select(
         t("wizard.display_manual_prompt"),
-        choices=autocomplete_choices,
+        choices=autocomplete_choices + [
+            {"name": t("choice.back"), "value": _BACK},
+            {"name": t("choice.quit"), "value": _QUIT},
+        ],
     )
 
-    if raw is None:
+    if raw == _QUIT:
+        raise WizardExit()
+    if raw is None or raw == _BACK:
         return None, None
 
     # Resolve back to section key
