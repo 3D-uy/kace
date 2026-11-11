@@ -151,8 +151,9 @@ def spi_transport_owners(parsed, *, require_declared_mcus=False):
     """
     try:
         sections = {name: options for name, options in parsed.items()
-                    if name.startswith(("tmc2130 ", "tmc2660 ", "tmc5160 "))
-                    or name.startswith("tmc2240 ") and "uart_pin" not in options}
+                    if len(parts := name.split()) >= 2
+                    and (parts[0] in ("tmc2130", "tmc2660", "tmc5160")
+                         or parts[0] == "tmc2240" and "uart_pin" not in options)}
         from core.profile_values import validate_tmc_spi_options
         validate_tmc_spi_options(sections)
         aliases = PinAliases(parsed)

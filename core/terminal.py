@@ -10,7 +10,7 @@ BOLD = "\033[1m"
 DIM = "\033[2m"
 
 # Interaction
-QUESTION = "\033[1;96m"   # cyan: a question or selectable prompt
+QUESTION = "\033[96m"     # cyan: a question or selectable prompt, normal weight
 INPUT = "\033[92m"         # green: the active/default user selection
 
 # Outcome and status

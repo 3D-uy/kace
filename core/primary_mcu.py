@@ -7,6 +7,27 @@ SOURCE = '_primary_mcu_active_options'
 METHODS = frozenset({'arduino', 'cheetah', 'command', 'rpi_usb'})
 
 
+def validate_mcu_connection_options(sections):
+    """Check configured transport options, without inferring device identity."""
+    for name, options in sections.items():
+        if name != 'mcu' and not name.startswith('mcu '):
+            continue
+        serial = str(options.get('serial', ''))
+        pipe_or_can = ('canbus_uuid' in options
+                       or serial.startswith(('/tmp/klipper_host_', '/dev/rpmsg_')))
+        if 'baud' in options:
+            if pipe_or_can:
+                raise GenerationError(f'[{name}] baud is not consumed for CAN or host/PRU pipes.')
+            try:
+                baud = int(str(options['baud']).strip())
+            except (TypeError, ValueError, OverflowError):
+                raise GenerationError(f'[{name}] baud must be an integer at least 2400.') from None
+            if baud < 2400:
+                raise GenerationError(f'[{name}] baud must be an integer at least 2400.')
+        if 'restart_method' in options:
+            _check(options['restart_method'], options)
+
+
 def _check(method, connection):
     if not isinstance(method, str) or method not in METHODS:
         raise GenerationError(f'MCU restart: invalid restart_method {method!r}.')

@@ -7,6 +7,63 @@ import tempfile
 
 from core.exceptions import GenerationError
 
+
+def _interactive_preserved_homing_resolution(conflicts):
+    """Resolve existing-vs-wizard values before semantic review, never by default."""
+    from core.menu import numbered_select
+    from core.translations import t
+    from core.terminal import QUESTION, RESET, WARNING
+    import textwrap
+    if os.environ.get("KACE_AUTO") == "1":
+        return frozenset()
+    width = min(100, max(22, shutil.get_terminal_size((80, 24)).columns - 2))
+
+    def paragraph(text, *, color=RESET, indent=""):
+        for line in textwrap.wrap(text, width=width, initial_indent=indent,
+                                  subsequent_indent=indent, break_on_hyphens=False):
+            print(f"{color}{line}{RESET}")
+
+    print()
+    paragraph(t("deploy.homing_conflict.title"), color=QUESTION)
+    paragraph(t("deploy.homing_conflict.help"))
+    if any(item.option == "position_endstop" for item in conflicts):
+        print()
+        paragraph(t("deploy.homing_conflict.endstop_help"))
+    if any(item.option == "z_offset" for item in conflicts):
+        print()
+        paragraph(t("deploy.homing_conflict.probe_help"))
+    labels = [t("deploy.homing_conflict.old"), t("deploy.homing_conflict.new")]
+    column = max(len(label) for label in labels)
+    for item in conflicts:
+        print()
+        label = (t("deploy.homing_conflict.endstop", axis=item.section[-1].upper())
+                 if item.option == "position_endstop" else t("deploy.homing_conflict.probe"))
+        paragraph(label, color=QUESTION, indent="  ")
+        paragraph(f"{item.source}: [{item.section}] {item.option}", indent="  ")
+        for label, value in zip(labels, (item.existing, item.proposed)):
+            prefix = f"  {label:<{column}}: "
+            rendered = textwrap.fill(f"{value} mm", width=width, initial_indent=prefix,
+                                     subsequent_indent=" " * len(prefix), break_on_hyphens=False)
+            for line in rendered.splitlines():
+                print(f"{RESET}{line[:len(prefix)]}{WARNING}{line[len(prefix):]}{RESET}")
+    print()
+    paragraph(t("deploy.homing_conflict.review"))
+    if any(item.saved_calibration for item in conflicts):
+        paragraph(t("deploy.homing_conflict.calibration"), color=WARNING)
+    answer = numbered_select(t("deploy.homing_conflict.prompt"), [
+        {"name": t("deploy.homing_conflict.keep"), "value": "keep"},
+        {"name": t("deploy.homing_conflict.replace"), "value": "replace"},
+        {"name": t("deploy.homing_conflict.cancel"), "value": "cancel"},
+    ], require_explicit=True)
+    if answer == "keep":
+        return frozenset()
+    if answer != "replace":
+        return None
+    if any(item.saved_calibration for item in conflicts):
+        print(t("deploy.homing_conflict.saved"))
+        return None
+    return frozenset((item.section, item.option) for item in conflicts)
+
 from core.known_hosts import (
     get_known_hosts_path,
     known_hosts_lock,
@@ -132,7 +189,7 @@ except (ImportError, SystemExit):
     _KACE_VERSION = "unknown"
 
 
-def _require_paramiko():
+def _require_paramiko(*, report=True):
     """Return the paramiko module, or None if not installed.
 
     Security note (S-01): KACE deliberately does NOT auto-install paramiko at
@@ -146,16 +203,15 @@ def _require_paramiko():
         import paramiko  # noqa: PLC0415
         return paramiko
     except ImportError:
-        print("\n\033[96m[SSH Deployment]\033[0m")
-        print("\033[91m[!] SSH support requires the 'paramiko' library, which is not installed.\033[0m")
-        print("\033[93m    Install it with one of the following commands and then retry:\033[0m")
-        print()
-        print("        pip install -r requirements-ssh.txt")
-        print("        # or on a system Python (outside venv):")
-        print("        pip install -r requirements-ssh.txt --break-system-packages")
-        print()
-        print("\033[96mContinuing without SSH support...\033[0m\n")
+        if report:
+            from core.translations import t
+            print(t("deploy.ssh_unavailable"))
         return None
+
+
+def ssh_deployment_available():
+    """Check the optional transport before collecting any SSH credentials."""
+    return _require_paramiko(report=False) is not None
 
 
 class _InteractiveHostKeyPolicy:
@@ -223,7 +279,7 @@ def _connect_ssh_client(paramiko, hostname, **connect_kwargs):
 
 
 
-def _generated_config_bytes():
+def _generated_config_bytes(user_data=None):
     hardware_path = os.path.expanduser("~/kace/printer.cfg")
     macros_path = os.path.expanduser("~/kace/macros.cfg")
     if not os.path.isfile(hardware_path):
@@ -234,7 +290,13 @@ def _generated_config_bytes():
     validate_generated_display_artifacts(hardware)
     macros = None
     from core.managed_config import _has_include
-    if _has_include(hardware.decode("utf-8"), "macros.cfg"):
+    # Generation no longer emits the live-path include; the managed planner
+    # owns it. Use the saved decision, never the mere presence of an old file.
+    # Legacy callers without a recorded decision retain their include contract.
+    requested = (user_data or {}).get("macros_generated")
+    include_macros = (requested if isinstance(requested, bool) else
+                      _has_include(hardware.decode("utf-8"), "macros.cfg"))
+    if include_macros:
         with open(macros_path, "rb") as source:
             macros = source.read()
     if macros is not None:
@@ -263,11 +325,16 @@ def _config_result_to_workflow(result):
 
 
 def _interactive_configuration_review(review, yes_no_fn, *, destination=False) -> bool:
-    from core.configuration_review import render_configuration_review
-    from core.translations import get_lang, get_mode
+    from core.configuration_review import (
+        render_configuration_change_details, render_configuration_review,
+    )
+    from core.translations import get_lang, get_mode, t
 
     language = get_lang()
     print("\n" + render_configuration_review(review, language=language))
+    if any(item.code == "managed-plan" for item in review.validation.warnings):
+        if yes_no_fn(t("deploy.changes.details_prompt"), default=False):
+            print("\n" + render_configuration_change_details(review, language=language))
     if review.diff and get_mode() == "Advanced":
         advanced_prompt = {
             "English": "Show full technical diff?",
@@ -323,12 +390,14 @@ def _run_config_transaction(
 
     from core.board_auxiliary import selected_board_electrical_source, validate_board_electrical_artifact
     try:
-        hardware_path, hardware, macros = generated or _generated_config_bytes()
+        hardware_path, hardware, macros = generated or _generated_config_bytes(user_data)
+        from core.config_geometry import load_geometry_context
+        geometry_context = load_geometry_context(hardware_path, hardware)
         from core.display_configuration import validate_generated_display_artifacts
         validate_generated_display_artifacts(hardware, macros)
         selected_board = selected_board_electrical_source(user_data)
         validate_board_electrical_artifact(selected_board, hardware)
-    except GenerationError as exc:
+    except (GenerationError, OSError, ValueError) as exc:
         return failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc))
     if not _preflight_check(hardware_path, user_data, yes_no):
         return failed(
@@ -364,11 +433,13 @@ def _run_config_transaction(
         macros,
         activation=activation,
         review=_review_configuration,
+        resolve_preserved_homing=_interactive_preserved_homing_resolution,
         activation_selector=activation_selector,
         board=user_data.get("board", ""),
         kace_version=_KACE_VERSION,
         state_sink=state_sink,
         verify_existing_ready=True,
+        geometry_context=geometry_context,
         selected_board=selected_board,
         firmware_reservation_reader=lambda hardware: generation_pin_reservations(user_data, config=hardware),
         verify_firmware=(
@@ -462,7 +533,7 @@ def deploy_config(user_data):
 
     password = user_data.pop("password", "")
     try:
-        generated = _generated_config_bytes()
+        generated = _generated_config_bytes(user_data)
     except (OSError, GenerationError) as exc:
         password = None
         print(f"\033[91m[!] Deployment aborted: {exc}\033[0m")
@@ -538,7 +609,7 @@ def deploy_moonraker(user_data):
     from core.moonraker import DEFAULT_PORT, _base_url, check_moonraker
     from core.translations import t
 
-    # The menu offers installation on this Raspberry when a local config exists.
+    # A local config directory also permits the first installation without cfg.
     # Keep that action on loopback even if a previous attempt saved a LAN host.
     local_install = local_moonraker_available()
     host = "127.0.0.1" if local_install else simple_input(
@@ -570,7 +641,7 @@ def deploy_moonraker(user_data):
 
     ok, detail = check_moonraker(host, port, api_key=api_key)
     if not ok:
-        if yes_no(t("moonraker.fallback_ssh"), default=False):
+        if ssh_deployment_available() and yes_no(t("moonraker.fallback_ssh"), default=False):
             user_data["host"] = host
             user_data["user"] = simple_input(
                 t("kace.ssh_user_prompt"),
@@ -603,10 +674,18 @@ def deploy_moonraker(user_data):
     return result
 
 
+_FOLDER_EXPORT_BOUNDARY = (
+    "Folder export supports configuration only. Use the verified firmware "
+    "deployment workflow for MCU firmware."
+)
+
+
 def _copy_artifacts(user_data, dest, artifact_type) -> bool:
-    config_success = artifact_type not in ["config", "all"]
-    firmware_success = artifact_type not in ["firmware", "all"]
-    if artifact_type in ["config", "all"]:
+    if artifact_type != "config":
+        print(_FOLDER_EXPORT_BOUNDARY)
+        return False
+    config_success = False
+    if artifact_type == "config":
         from core.config_transaction import (
             ConfigDeploymentTransaction,
             ConfigTransactionState,
@@ -617,13 +696,17 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
         try:
             from core.firmware_workflow import generation_pin_reservations
             from core.board_auxiliary import selected_board_electrical_source
-            _, hardware, macros = _generated_config_bytes()
+            hardware_path, hardware, macros = _generated_config_bytes(user_data)
+            from core.config_geometry import load_geometry_context
+            geometry_context = load_geometry_context(hardware_path, hardware)
             transaction = ConfigDeploymentTransaction(
                 LocalConfigTransport(dest),
                 hardware,
                 macros,
                 activation="none",
+                geometry_context=geometry_context,
                 review=lambda review: _review_configuration_export(review, yes_no),
+                resolve_preserved_homing=_interactive_preserved_homing_resolution,
                 board=user_data.get("board", ""),
                 kace_version=_KACE_VERSION,
                 selected_board=selected_board_electrical_source(user_data),
@@ -639,37 +722,17 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
         except Exception as exc:
             print(f"\033[91mConfiguration export failed: {exc}\033[0m")
             config_success = False
-        # An "all" export is a combined handoff. Do not stage firmware on the
-        # selected media after its companion configuration failed or was denied.
-        if not config_success:
-            return False
-    
-    if artifact_type in ["firmware", "all"]:
-        fw_path = user_data.get("firmware_path")
-        if fw_path and os.path.exists(os.path.expanduser(fw_path)):
-            firmware_bin = os.path.expanduser(fw_path)
-            ext = os.path.basename(firmware_bin)
-            print(f"Copying firmware {ext} to {dest}...")
-            shutil.copy2(firmware_bin, os.path.join(dest, ext))
-            firmware_success = True
-        else:
-            for ext in ['klipper.bin', 'klipper.uf2', 'klipper.elf.hex']:
-                firmware_bin = os.path.expanduser(f'~/kace/{ext}')
-                if os.path.exists(firmware_bin):
-                    print(f"Copying firmware {ext} to {dest}...")
-                    shutil.copy2(firmware_bin, os.path.join(dest, ext))
-                    firmware_success = True
-                    
-    return config_success and firmware_success
+    return config_success
 
 def deploy_usb(user_data, artifact_type="all"):
-    """Deploys the generated artifact(s) to a USB/SD card."""
+    """Export managed configuration; reject legacy firmware/all before prompts."""
+    if artifact_type != "config":
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, _FOLDER_EXPORT_BOUNDARY)
     try:
         from core.menu import simple_input
         from core.translations import t
         
-        artifact_key = "deployment.artifact_config" if artifact_type == "config" else \
-                       "deployment.artifact_firmware" if artifact_type == "firmware" else "deployment.artifact_all"
+        artifact_key = "deployment.artifact_config"
         name_prompt = t(artifact_key)
                       
         is_non_windows = platform.system() != "Windows"
@@ -720,13 +783,14 @@ def deploy_usb(user_data, artifact_type="all"):
         return failed(WorkflowOutcome.DEPLOYMENT_FAILED, f"Removable-media deployment failed: {e}")
 
 def deploy_local(user_data, artifact_type="all"):
-    """Copy artifacts to a folder local to the device running KACE."""
+    """Export managed configuration; retain the legacy default as an explicit error."""
+    if artifact_type != "config":
+        return failed(WorkflowOutcome.PRECONDITION_FAILED, _FOLDER_EXPORT_BOUNDARY)
     try:
         from core.menu import simple_input
         from core.translations import t
         
-        artifact_key = "deployment.artifact_config" if artifact_type == "config" else \
-                       "deployment.artifact_firmware" if artifact_type == "firmware" else "deployment.artifact_all"
+        artifact_key = "deployment.artifact_config"
         name_prompt = t(artifact_key)
                       
         is_non_windows = platform.system() != "Windows"
@@ -902,7 +966,7 @@ def deploy_firmware_installation(user_data):
 def _deploy_firmware_installation_locked(user_data):
     from core.mcu_monitor import McuPresenceMonitor
     from core.config_transaction import (
-        configuration_transport, read_config_state, revalidate_config_state, require_conditional_writes,
+        ConfigConflictError, configuration_transport, read_config_state, revalidate_config_state, require_conditional_writes,
     )
     from core.managed_config import build_managed_config_plan
     from core.menu import yes_no
@@ -962,7 +1026,9 @@ def _deploy_firmware_installation_locked(user_data):
     # Configuration is planned and backed up before any firmware action. A
     # failed/ambiguous read is never interpreted as an empty config root.
     try:
-        hardware_path, generated_hardware, generated_macros = _generated_config_bytes()
+        hardware_path, generated_hardware, generated_macros = _generated_config_bytes(user_data)
+        from core.config_geometry import load_geometry_context
+        geometry_context = load_geometry_context(hardware_path, generated_hardware)
         from core.board_auxiliary import selected_board_electrical_source, validate_board_electrical_artifact
         selected_board = selected_board_electrical_source(user_data)
         validate_board_electrical_artifact(selected_board, generated_hardware)
@@ -981,8 +1047,17 @@ def _deploy_firmware_installation_locked(user_data):
         client._config_transport = config_transport
         config_transport.validate_activation_target()
         remote_files = read_config_state(config_transport, generated_hardware, generated_macros)
+        from core.managed_config import preserved_homing_conflicts
+        replacements = frozenset()
+        conflicts = preserved_homing_conflicts(generated_hardware, remote_files)
+        if conflicts:
+            replacements = _interactive_preserved_homing_resolution(conflicts)
+            if replacements is None:
+                return DeployResult(DeployState.ABORTED, "homing/calibration review cancelled before firmware deployment")
         config_plan = build_managed_config_plan(
-            generated_hardware, generated_macros, remote_files
+            generated_hardware, generated_macros, remote_files,
+            geometry_context=geometry_context,
+            **({"replace_preserved": frozenset(replacements)} if replacements else {}),
         )
         from core.display_configuration import validate_generated_display_artifacts
         validate_generated_display_artifacts(
@@ -1007,10 +1082,25 @@ def _deploy_firmware_installation_locked(user_data):
                 DeployState.FAILED_PRECONDITION,
                 "semantic configuration validation failed before firmware deployment",
             )
+        from core.klipper_preflight import plan_digest, validate_plan
+        klipper_preflight = validate_plan(config_plan)
+        if klipper_preflight.status != "valid":
+            raise ValueError(
+                f"isolated Klipper preflight {klipper_preflight.status}: {klipper_preflight.detail}"
+            )
+        def _check_preflight_plan():
+            try:
+                current_digest = plan_digest(config_plan)
+            except Exception as exc:
+                raise ConfigConflictError(f"Klipper preflight plan could not be revalidated: {exc}") from exc
+            if not klipper_preflight.tree_digest or current_digest != klipper_preflight.tree_digest:
+                raise ConfigConflictError("Klipper preflight plan changed after validation")
+        _check_preflight_plan()
         if config_plan.changed_artifacts and not _interactive_configuration_review(
             configuration_review, yes_no
         ):
             return DeployResult(DeployState.ABORTED, "configuration deployment cancelled")
+        _check_preflight_plan()
         snapshot = None
         current_files = revalidate_config_state(config_transport, remote_files)
         require_conditional_writes(config_transport, config_plan)
@@ -1036,20 +1126,6 @@ def _deploy_firmware_installation_locked(user_data):
             f"configuration preflight/snapshot failed before firmware deployment: {exc}",
         )
 
-    try:
-        power_controller = configured_power_controller(
-            host=host, port=port, api_key=api_key
-        )
-        if power_controller is not None:
-            # The same controller backs Studio's button. Firmware work never
-            # starts until Moonraker has confirmed the configured device ON.
-            power_controller.power_on()
-    except PowerControllerError as exc:
-        return DeployResult(
-            DeployState.FAILED_PRECONDITION,
-            f"printer power is not ready: {exc}",
-        )
-
     printer_cfg = os.path.expanduser("~/kace/printer.cfg")
     macros_cfg = os.path.expanduser("~/kace/macros.cfg")
     bundle = tempfile.TemporaryDirectory(prefix="kace-config-transaction-")
@@ -1061,12 +1137,36 @@ def _deploy_firmware_installation_locked(user_data):
                 output.write(artifact.content)
                 output.flush()
                 os.fsync(output.fileno())
-            config_artifacts.append(ConfigArtifact(local_path, artifact.remote_name))
+            config_artifacts.append(ConfigArtifact(local_path, artifact.remote_name, artifact.content))
     except Exception as exc:
         bundle.cleanup()
         return DeployResult(
             DeployState.FAILED_PRECONDITION,
             f"could not stage managed configuration: {exc}",
+        )
+
+    def _validate_staged_configuration():
+        # Bind the temporary delivery files to the reviewed plan, even if the
+        # firmware operation is long-running or a local file is modified.
+        for item in config_artifacts:
+            item.read_content()
+
+    try:
+        _check_preflight_plan()
+        revalidate_config_state(config_transport, current_files)
+        _validate_staged_configuration()
+        power_controller = configured_power_controller(
+            host=host, port=port, api_key=api_key
+        )
+        if power_controller is not None:
+            # The same controller backs Studio's button. Firmware work never
+            # starts until Moonraker has confirmed the configured device ON.
+            power_controller.power_on()
+    except (ConfigConflictError, PowerControllerError, OSError, ValueError) as exc:
+        bundle.cleanup()
+        return DeployResult(
+            DeployState.FAILED_PRECONDITION,
+            f"printer power or staged configuration is not ready: {exc}",
         )
     manifest = DeploymentManifest(
         targets=[McuTarget(mcu_name, identity.reported_version, identity.to_dict())],
@@ -1087,9 +1187,17 @@ def _deploy_firmware_installation_locked(user_data):
         )
 
     def _run_firmware_method():
+        _check_preflight_plan()
+        revalidate_config_state(config_transport, current_files)
+        _validate_staged_configuration()
         result = service.execute(prepared, _firmware_execution_context(user_data))
         print(f"\n[*] {result.detail}")
         return result
+
+    def _before_config_upload():
+        _check_preflight_plan()
+        _validate_staged_configuration()
+        return revalidate_config_state(config_transport, current_files)
 
     def _confirm_power_off():
         print("\n\033[93m[!] Firmware media is prepared.\033[0m")
@@ -1152,7 +1260,7 @@ def _deploy_firmware_installation_locked(user_data):
             # including when the broader CLI was started with --dev-deploy.
             verify_firmware=True,
             snapshot=snapshot,
-            before_config_upload=lambda: revalidate_config_state(config_transport, current_files),
+            before_config_upload=_before_config_upload,
             verify_config_state=lambda: revalidate_config_state(config_transport, {
                 **current_files,
                 **{item.remote_name: item.content for item in config_plan.artifacts},

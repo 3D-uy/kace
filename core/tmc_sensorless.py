@@ -1,4 +1,5 @@
 """Review native TMC virtual endstops without operating the driver or motor."""
+import math
 import re
 
 from core.exceptions import GenerationError
@@ -14,13 +15,16 @@ def validate_tmc_virtual_endstops(sections):
 
     Unused DIAG strings are not allocated by Klipper. Active DIAG is an
     endstop GPIO and need not belong to the same MCU as the driver transport.
-    Physical homing, driver tuning and arbitrary external models are not covered.
+    Native sensorless rails require zero retract and no hold current on their
+    participating motors. Physical homing, driver tuning and arbitrary external
+    models are not covered.
     """
     drivers = {}
     for name, options in sections.items():
-        model, separator, target = name.partition(" ")
-        if not separator or model not in _MODELS:
+        parts = name.split(maxsplit=1)
+        if len(parts) < 2 or parts[0] not in _MODELS:
             continue
+        model, target = parts
         if not target.strip():
             raise GenerationError(f"[{name}]: TMC driver requires a stepper name.")
         allowed = (() if model == "tmc2208" else ("diag_pin",) if model == "tmc2209"
@@ -88,5 +92,35 @@ def validate_tmc_virtual_endstops(sections):
                 for token in re.split(r"[,\s]+", value.strip()):
                     if token and aliases.resolve(token) in active:
                         raise GenerationError(f"[{name}] {field}: pin conflicts with active DIAG of {active[aliases.resolve(token)]}.")
+        sensorless_rails = {rail for rail in refs.values() if rail.startswith("stepper_")}
+        sensorless_drivers = {drivers[chip][0] for chip, rail in refs.items() if rail in sensorless_rails}
+        for rail in sorted(sensorless_rails):
+            # Klipper's PrinterRail reads this from the primary section, also
+            # when the active virtual endstop belongs to an additional stepper.
+            retract = sections.get(rail, {}).get("homing_retract_dist", "5")
+            try:
+                distance = float(retract)
+            except (TypeError, ValueError):
+                distance = math.nan
+            if not math.isfinite(distance) or distance != 0:
+                raise GenerationError(
+                    f"[{rail}] homing_retract_dist: sensorless homing requires 0 "
+                    f"(Klipper defaults to 5 when omitted); review the configured value {retract!r}."
+                )
+        participating_rails = set(sensorless_rails)
+        if (sections.get("printer", {}).get("kinematics", "").strip().lower() == "corexy"
+                and sensorless_rails.intersection(("stepper_x", "stepper_y"))):
+            participating_rails.update(("stepper_x", "stepper_y"))
+        for name, options in sections.items():
+            parts = name.split(maxsplit=1)
+            if (len(parts) == 2 and parts[0] in _MODELS
+                    and (name in sensorless_drivers or (
+                        parts[1].startswith("stepper_")
+                        and re.sub(r"\d+$", "", parts[1]) in participating_rails))
+                    and "hold_current" in options):
+                raise GenerationError(
+                    f"[{name}] hold_current: omit this setting for motors participating "
+                    "in sensorless homing; CoreXY X/Y homing involves both rails."
+                )
     except PinAliasError as exc:
         raise GenerationError(f"TMC DIAG: {exc}") from exc

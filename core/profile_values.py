@@ -222,7 +222,9 @@ def validate_tmc_spi_options(sections: Mapping[str, object]) -> None:
         return value
 
     for name, options in sections.items():
-        model, separator, _ = str(name).partition(" ")
+        parts = str(name).split(maxsplit=1)
+        model = parts[0] if parts else ""
+        separator = len(parts) == 2
         if not separator or model not in ("tmc2130", "tmc2240", "tmc2660", "tmc5160") or not isinstance(options, Mapping):
             continue
         if model == "tmc2240":
@@ -255,7 +257,9 @@ def validate_tmc_register_values(sections: Mapping[str, object]) -> None:
     """
     from configparser import ConfigParser
     for name, options in sections.items():
-        model, separator, _ = str(name).partition(" ")
+        parts = str(name).split(maxsplit=1)
+        model = parts[0] if parts else ""
+        separator = len(parts) == 2
         if not separator or model not in _TMC_REGISTERS or not isinstance(options, Mapping):
             continue
         for key, value in options.items():
@@ -283,7 +287,31 @@ def validate_tmc_current_settings(sections: Mapping[str, object]) -> None:
     without inventing optional settings or claiming physical motor suitability.
     """
     for name, options in sections.items():
-        model, separator, _ = str(name).partition(" ")
+        parts = str(name).split(maxsplit=1)
+        model = parts[0] if parts else ""
+        separator = len(parts) == 2
+        if separator and model == "tmc2240" and isinstance(options, Mapping):
+            try:
+                rref = float(options.get("rref", "12000"))
+            except (TypeError, ValueError, OverflowError):
+                rref = math.nan
+            if not math.isfinite(rref) or not 12000. <= rref <= 60000.:
+                raise GenerationError(f"{name}: rref must be finite and between 12000 and 60000 ohms.")
+            # TMC2240CurrentHelper uses Rref, not the generic TMC Rsense limit.
+            # Preserve its arithmetic at the exact upper boundary.
+            maximum = (36000. / rref) / math.sqrt(2.)
+            for option in ("run_current", "hold_current"):
+                if option == "hold_current" and option not in options:
+                    continue
+                try:
+                    current = float(options.get(option))
+                except (TypeError, ValueError, OverflowError):
+                    current = math.nan
+                if not math.isfinite(current) or not 0 < current <= maximum:
+                    raise GenerationError(
+                        f"{name}: {option} must be finite, positive and <= {maximum} A RMS for the configured rref."
+                    )
+            continue
         if separator and model == "tmc2660" and isinstance(options, Mapping):
             try:
                 current = float(options.get("run_current"))
@@ -321,7 +349,9 @@ def validate_tmc_auxiliary_options(sections: Mapping[str, object]) -> None:
         "high_velocity_threshold": ("tmc2130", "tmc5160"),
     }
     for name, options in sections.items():
-        model, separator, _ = str(name).partition(" ")
+        parts = str(name).split(maxsplit=1)
+        model = parts[0] if parts else ""
+        separator = len(parts) == 2
         if not separator or model not in _TMC_REGISTERS or not isinstance(options, Mapping):
             continue
         if "interpolate" in options:
@@ -348,7 +378,9 @@ def validate_tmc_sense_resistors(sections: Mapping[str, object]) -> None:
     lower bound), not evidence that a declared resistance matches hardware.
     """
     for name, options in sections.items():
-        model, separator, _ = str(name).partition(" ")
+        parts = str(name).split(maxsplit=1)
+        model = parts[0] if parts else ""
+        separator = len(parts) == 2
         if not separator or model not in (*_TMC_REGISTERS, "tmc2660"):
             continue
         if not isinstance(options, Mapping):
@@ -397,10 +429,15 @@ def resolve_tmc_sections(parsed: Mapping[str, object], user: Mapping[str, object
     sections = {}
     for target in targets:
         name = f"{model} {target}"
-        source = parsed.get(name)
+        matches = [(key, value) for key, value in parsed.items()
+                   if str(key).split() == [model, target]]
+        if len(matches) > 1:
+            raise GenerationError(f"{name}: ambiguous source driver sections.")
+        source = matches[0][1] if matches else None
         if source is None:
             foreign = [str(key) for key in parsed
-                       if str(key).startswith("tmc") and str(key).endswith(" " + target)]
+                       if len(parts := str(key).split()) == 2
+                       and parts[0].startswith("tmc") and parts[1] == target]
             if foreign:
                 raise GenerationError(f"{name}: incompatible source driver ({', '.join(foreign)}).")
             continue
@@ -416,7 +453,9 @@ def resolve_tmc_sections(parsed: Mapping[str, object], user: Mapping[str, object
         validate_tmc_auxiliary_options({name: options})
         validate_tmc_sense_resistors({name: options})
         required_pin = "uart_pin" if mode == "UART" else "cs_pin"
-        if not options.get(required_pin) or any(not value for value in options.values()):
+        if not options.get(required_pin) or any(
+                not value for key, value in options.items()
+                if not (mode == "UART" and key == "select_pins")):
             raise GenerationError(f"{name}: missing {required_pin} or empty TMC option.")
         if mode == "UART":
             try:
@@ -448,10 +487,14 @@ def _profile_value(parsed: Mapping[str, object], field: ProfileField) -> Optiona
 def _tmc_section(parsed: Mapping[str, object], target: str, model: Optional[str] = None) -> Mapping[str, object]:
     suffix = "extruder" if target == "e" else f"stepper_{target}"
     if model is not None:
-        values = parsed.get(f"{model} {suffix}", {})
+        matches = [values for name, values in parsed.items() if str(name).split() == [model, suffix]]
+        if len(matches) > 1:
+            raise GenerationError(f"{model} {suffix}: ambiguous source driver sections.")
+        values = matches[0] if matches else {}
         return values if isinstance(values, Mapping) else {}
     for name, values in parsed.items():
-        if str(name).split(" ", 1)[0].startswith("tmc") and str(name).endswith(f" {suffix}"):
+        parts = str(name).split()
+        if len(parts) == 2 and parts[0].startswith("tmc") and parts[1] == suffix:
             if isinstance(values, Mapping):
                 return values
     return {}
@@ -779,7 +822,7 @@ def resolve_generation_values(
         # not authorize a current choice and must not block unrelated motors.
         for target in _TMC_TARGETS:
             section = "extruder" if target == "e" else f"stepper_{target}"
-            if f"{model} {section}" not in parsed_data:
+            if not any(str(name).split() == [model, section] for name in parsed_data):
                 keys.discard(f"run_current_{target}")
     for index in range(1, 4):
         if index >= z_count:

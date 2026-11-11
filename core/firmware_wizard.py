@@ -1,4 +1,7 @@
 import os
+import shutil
+import textwrap
+from wcwidth import wcswidth
 
 from core.menu import simple_input, yes_no, numbered_select
 from core.validators import (
@@ -7,7 +10,7 @@ from core.validators import (
     questionary_processor_validator,
 )
 from core.translations import t
-from core.terminal import BOLD, INFO, RESET, WARNING
+from core.terminal import BOLD, INFO, RESET, SECTION, WARNING
 from core.exceptions import DerivationAmbiguityError, WizardExit
 from core.workflow_outcome import (
     WorkflowOutcome,
@@ -29,7 +32,7 @@ from firmware.configuration import (
 )
 from firmware.builder import build_firmware_orchestrator, BuildContext
 from firmware.artifacts import BuildArtifact
-from firmware.boards.catalog import load_default_catalog
+from firmware.boards.catalog import load_default_catalog, normalize_exact_alias
 from firmware.boards.runtime import (
     BoardContractRuntimeBundle,
     FirmwareAuthority,
@@ -104,7 +107,34 @@ def _board_contract_filename_preview(artifact_policy) -> str:
     return artifact_policy.native_filename
 
 
-def _print_board_contract_firmware_review(decision) -> None:
+def _firmware_width():
+    return min(102, max(22, shutil.get_terminal_size((80, 24)).columns - 2))
+
+
+def _firmware_text(text, *, color=RESET):
+    width = _firmware_width()
+    for line in textwrap.wrap(str(text), width=width - 2, break_on_hyphens=False) or [""]:
+        print(f"  {color}{line}{RESET}")
+
+
+def _firmware_row(label, value, *, column=None):
+    width = _firmware_width()
+    label = str(label).rstrip(":")
+    column = min(column if column is not None else wcswidth(label), width - 18)
+    padding = " " * max(0, column - wcswidth(label))
+    prefix = f"  {label}{padding}: "
+    rendered = textwrap.fill(str(value), width=width, initial_indent=prefix,
+                             subsequent_indent=" " * (column + 4), break_on_hyphens=False)
+    # Apply colour after wrapping so ANSI bytes cannot shift the columns.
+    for line in rendered.splitlines():
+        if line.startswith(prefix):
+            print(f"{RESET}{prefix}{WARNING}{line[len(prefix):]}{RESET}")
+        else:
+            indent = line[:len(line) - len(line.lstrip())]
+            print(f"{RESET}{indent}{WARNING}{line.lstrip()}{RESET}")
+
+
+def _print_board_contract_firmware_review(decision, *, detected_mcu=None, details=False) -> None:
     """Render the immutable BoardContract target before starting a slow build."""
     catalog = load_default_catalog()
     contract = catalog.by_id(decision.board_id)
@@ -113,34 +143,48 @@ def _print_board_contract_firmware_review(decision) -> None:
     if contract is None or variant is None or target is None:
         raise RuntimeError("selected BoardContract target is no longer available")
 
-    separator = "═" * 55
-
+    separator = "─" * (_firmware_width() - 2)
+    labels = ["builder.contract_board", "builder.hardware_variant", "builder.processor",
+              "builder.comm_interface", "builder.artifact_filename", "builder.flash_method"]
+    if details:
+        labels.extend(["builder.build_target", "builder.architecture", "builder.bootloader", "builder.clock"])
+    column = max(wcswidth(t(key).rstrip(":")) for key in labels)
     def row(label, value):
-        padding = " " * max(0, 30 - len(label))
-        print(f"  {BOLD}{INFO}{label}{RESET}{padding}: {WARNING}{value}{RESET}")
-
+        _firmware_row(label, value, column=column)
     print(f"\n  {INFO}{separator}{RESET}")
-    print(f"  {BOLD}{INFO}  {t('builder.summary_title')}{RESET}")
-    print(f"  {INFO}{separator}{RESET}")
+    _firmware_text(t('builder.summary_title'), color=SECTION)
     row(t("builder.contract_board"), contract.board_id)
     row(t("builder.hardware_variant"), variant.id)
-    row(t("builder.build_target"), target.id)
-    row(t("builder.architecture"), variant.processor.architecture.upper())
     row(t("builder.processor"), variant.processor.resolved_mcu.upper())
-    row(t("builder.bootloader"), variant.bootloader.label)
-    row(t("builder.clock"), variant.clock.label)
     row(t("builder.comm_interface"), target.transport.kind.value)
     row(t("builder.artifact_filename"), _board_contract_filename_preview(target.artifact))
     row(t("builder.flash_method"), target.flash.strategy.value)
-    print(f"\n  {BOLD}{INFO}{t('builder.kconfig_selections')}{RESET}")
-    for symbol, value in sorted(target.requested_kconfig.items()):
-        rendered = "y" if value is True else "n" if value is False else value
-        print(f"    {symbol}={rendered}")
-    if contract.warnings:
-        print(f"\n  {BOLD}{WARNING}{t('builder.contract_warnings')}{RESET}")
-        for warning in contract.warnings:
-            print(f"    - [{warning.severity.value}] {warning.text}")
-    print(f"\n  {WARNING}{t('builder.contract_locked')}{RESET}")
+    if details:
+        row(t("builder.build_target"), target.id)
+        row(t("builder.architecture"), variant.processor.architecture.upper())
+        row(t("builder.bootloader"), variant.bootloader.label)
+        row(t("builder.clock"), variant.clock.label)
+        print()
+        _firmware_text(t('builder.kconfig_selections'), color=SECTION)
+        for symbol, value in sorted(target.requested_kconfig.items()):
+            rendered = "y" if value is True else "n" if value is False else value
+            _firmware_text(f"{symbol}={rendered}")
+    exact_mcu = normalize_exact_alias(detected_mcu) in {
+        normalize_exact_alias(variant.processor.model), normalize_exact_alias(variant.processor.resolved_mcu),
+    }
+    print()
+    for warning in contract.warnings:
+        if warning.id == "exact-mcu-variant-required":
+            if exact_mcu and not details:
+                continue
+            text = t("firmware.review.exact_mcu")
+        elif warning.id == "firmware-filename-case-sensitive":
+            text = t("firmware.review.filename")
+        else:
+            text = warning.text
+        _firmware_text(text, color=WARNING)
+    _firmware_text(t('builder.contract_locked'))
+    _firmware_text(t('firmware.review.next'))
     print(f"  {INFO}{separator}{RESET}\n")
 
 
@@ -222,19 +266,31 @@ def _run_board_contract_firmware(user_data, decision):
     """Build verified evidence only; never invoke legacy deployment/flashing."""
     prompt_mcu = f"{decision.board_id} / {decision.hardware_variant_id}"
     try:
-        _print_board_contract_firmware_review(decision)
+        _print_board_contract_firmware_review(decision, detected_mcu=user_data.get("mcu_type"))
+        while True:
+            action = numbered_select(t("kace.compile_prompt", mcu=prompt_mcu), choices=[
+                {"name": t("builder.compile_now"), "value": "compile"},
+                {"name": t("firmware.review.details"), "value": "details"},
+                {"name": t("firmware.review.skip"), "value": "skip"},
+            ], default=2)
+            if action != "details":
+                break
+            _print_board_contract_firmware_review(decision, detected_mcu=user_data.get("mcu_type"), details=True)
+    except WizardExit:
+        raise
     except Exception as exc:
         message = f"BoardContract firmware review blocked: {exc}"
         print(f"\n\033[91mERROR:\033[0m {message}")
         return failed(WorkflowOutcome.FIRMWARE_FAILED, message)
-    if not yes_no(t("kace.compile_prompt", mcu=prompt_mcu)):
+    if action != "compile":
         print(f"\n\033[93m{t('kace.skip_firmware')}\033[0m")
         user_data["firmware_compilation_skipped"] = True
         return pending_activation(
             "Firmware compilation is required before configuration deployment."
         )
 
-    print(f"\n\033[92m[*]\033[0m {t('kace.compiling')}", flush=True)
+    # The BoardContract builder reports its preparation and compile phases.
+    # Do not announce compilation before preparation or repeat that phase here.
     try:
         bundle = build_board_contract_runtime(decision, user_data)
         if not isinstance(bundle, BoardContractRuntimeBundle):
@@ -456,26 +512,28 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
         if serial_ports:
             comm = f"UART {user_data['firmware_serial_port']} ({SERIAL_PINS[user_data['firmware_serial_port']]})"
 
-        _SEP = "═" * 47
-        def _fw_row(label, value):
-            pad = " " * max(0, 30 - len(label))
-            return f"  {_B}{_C}{label}{_R}{pad}: {_Y}{value}{_R}"
-
+        _SEP = "─" * (_firmware_width() - 2)
+        row_column = max(wcswidth(t(key).rstrip(":")) for key in (
+            "builder.contract_board", "builder.architecture", "builder.processor",
+            "builder.bootloader", "builder.comm_interface", "builder.clock", "builder.usb_path"))
+        def row(label, value):
+            _firmware_row(label, value, column=row_column)
         print(f"\n  {_C}{_SEP}{_R}")
-        print(f"  {_B}{_M}  {t('builder.summary_title')}{_R}")
-        print(f"  {_C}{_SEP}{_R}")
-        print(_fw_row(t("builder.architecture"),           arch.upper()))
-        print(_fw_row(t("builder.processor"),              model.upper()))
-        print(_fw_row(t("builder.bootloader"),             format_flash(flash)))
-        print(_fw_row(t("builder.comm_interface"),         comm))
+        _firmware_text(t('builder.summary_title'), color=SECTION)
+        if user_data.get("board"):
+            row(t("builder.contract_board"), user_data["board"])
+        row(t("builder.architecture"), arch.upper())
+        row(t("builder.processor"), model.upper())
+        row(t("builder.bootloader"), format_flash(flash))
+        row(t("builder.comm_interface"), comm)
 
         clock_key = "CONFIG_CLOCK_REF_FREQ" if arch == "stm32" else "CONFIG_CLOCK_FREQ"
         clock = config_dict.get(clock_key)
         if clock:
-            print(_fw_row(t("builder.clock"), "Internal" if clock == "1" else f"{int(clock)//1000000} MHz"))
+            row(t("builder.clock"), "Internal" if clock == "1" else f"{int(clock)//1000000} MHz")
 
         mcu_path = user_data.get('mcu_path')
-        print(_fw_row(t("builder.usb_path"),    mcu_path if mcu_path else t("builder.not_detected")))
+        row(t("builder.usb_path"), mcu_path if mcu_path else t("builder.not_detected"))
         print(f"  {_C}{_SEP}{_R}\n")
 
         choices = [
@@ -488,6 +546,7 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
         choices.append(t("builder.edit_comm"))
         if clock and not required_clock:
             choices.append(t("builder.edit_clock"))
+        choices.append(t("firmware.review.details"))
         choices.append(t("builder.abort"))
 
         ans_summary = numbered_select(t("builder.config_correct"), choices=choices)
@@ -499,10 +558,13 @@ def run_firmware_wizard(user_data: dict) -> WorkflowResult:
             except ValueError as exc:
                 print(f"\n\033[91mERROR:\033[0m {exc}")
                 continue
-            diff = render_config_diff(initial_config, config_dict)
-            print("\n\033[96m[*]\033[0m Firmware configuration diff:")
-            print(diff or "(no changes from derived configuration)")
             break
+        elif ans_summary == t("firmware.review.details"):
+            _firmware_text(t("builder.kconfig_selections"), color=SECTION)
+            for symbol, value in sorted(config_dict.items()):
+                _firmware_text(f"{symbol}={value}")
+            _firmware_text(t("firmware.review.diff"))
+            print(render_config_diff(initial_config, config_dict) or t("firmware.review.no_changes"))
         elif ans_summary == t("builder.abort") or ans_summary is None:
             _cancel_firmware_configuration()
         elif ans_summary == t("builder.edit_arch"):

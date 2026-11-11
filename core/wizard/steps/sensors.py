@@ -1,8 +1,13 @@
+import copy
 import re
 import os
-from core.menu import autocomplete_select, simple_input, yes_no, numbered_select
+import shutil
+import textwrap
+from collections.abc import Mapping
+from core.menu import autocomplete_select, simple_input, yes_no, numbered_select, _wrapped_prompt_lines
 from core.translations import t, get_lang
 from core.exceptions import GenerationError, WizardExit
+from core.terminal import RESET, SECTION, WARNING
 from core.validators import questionary_pin_validator, questionary_thermistor_validator
 from core.probe_offset_visualizer import run_probe_offset_step
 from core.profile_values import mark_user_override
@@ -78,7 +83,7 @@ def _probe_allocation_sections(user_data):
 
 
 def _get_probe_input_candidates(user_data):
-    """Offer declared inputs only; a reused endstop does not define probe polarity."""
+    """Offer declared or explicitly reviewed connectors, with allocation checks."""
     try:
         sections = _probe_allocation_sections(user_data)
         aliases = PinAliases({name: options for name, options in sections.items()
@@ -109,6 +114,40 @@ def _get_probe_input_candidates(user_data):
         candidates.append({"name": t(label), "pin": base_pin, "pullup": pullup,
                            "inverted": inverted, "source": source})
         seen.add((chip, physical))
+    # Klipper's example may omit a physical connector. Supplement it only with
+    # separately attributed manufacturer evidence for the exact board and MCU;
+    # never turn MCU-family GPIO availability into a connector recommendation.
+    from core.loader import load_boards_yaml
+    from core.board_identity import canonical_mcu
+    from core.bus_pins import hardware_bus_requests
+    metadata = load_boards_yaml().get("probe_connector_mappings", {}).get(user_data.get("board"), {})
+    if canonical_mcu(user_data.get("mcu_type")) not in metadata.get("mcu_models", []):
+        return candidates
+    try:
+        buses = hardware_bus_requests({name: options for name, options in sections.items()
+                                      if isinstance(options, dict) and not name.startswith("_")})
+    except PinAliasError:
+        return candidates
+    for connector in metadata.get("connectors", []):
+        pin = connector["pin"]
+        if any(tuple(bus) in buses.get("mcu", []) for bus in connector["conflicts_with_buses"]):
+            candidates = [item for item in candidates if aliases.resolve(item["pin"]) != ("mcu", pin)]
+            continue
+        if check(pin) is not True:
+            continue
+        try:
+            identity = aliases.resolve(pin)
+        except PinAliasError:
+            continue
+        # A same-spelled user alias cannot redirect a physical connector map.
+        if identity != ("mcu", pin) or identity in seen:
+            continue
+        candidate = {"name": t("wizard.probe_signal.manufacturer_connector").format(connector=connector["name"]),
+                     "pin": pin, "pullup": False, "inverted": False,
+                     "source": "manufacturer", "source_url": connector["manufacturer_source"]}
+        index = next((i for i, item in enumerate(candidates) if item["source"] == "z_endstop"), len(candidates))
+        candidates.insert(index, candidate)
+        seen.add(identity)
     return candidates
 
 
@@ -136,6 +175,8 @@ def _step_probe(user_data):
         raise WizardExit()
     if ans == _BACK:
         return _BACK
+    if ans != default_kind:
+        user_data.pop("custom_probe_polarity_unverified", None)
     display_names = {
         PROBE_KIND_NONE: "None",
         PROBE_KIND_BLTOUCH: "BLTouch",
@@ -190,6 +231,8 @@ def _guided_probe_validator(kind: str):
 
 def _step_guided_custom_probe_value(user_data, key: str):
     """Ask one reusable common-probe question; strategy-specific flows can extend this list."""
+    if key == "custom_probe_z_offset" and os.environ.get("KACE_AUTO") != "1":
+        return _step_probe_z_decision(user_data)
     question = next(item for item in GUIDED_CUSTOM_PROBE_QUESTIONS if item[0] == key)
     _, prompt_key, default, validator_kind = question
     value = simple_input(
@@ -204,6 +247,62 @@ def _step_guided_custom_probe_value(user_data, key: str):
         return _BACK
     user_data[key] = str(value).strip()
     return "done"
+
+
+def _step_probe_z_decision(user_data):
+    """Separate a supplied measurement from a deliberate deferred calibration."""
+    for line in _wrapped_prompt_lines(t("wizard.probe_z.definition")):
+        print("  " + line)
+    while True:
+        answer = numbered_select(t("wizard.probe_z.decision"), choices=[
+            {"name": t("wizard.probe_z.known"), "value": "known"},
+            {"name": t("wizard.probe_z.later"), "value": "later"},
+            _back_choice(), _quit_choice(),
+        ], require_explicit=True)
+        if answer is None or answer == _QUIT:
+            raise WizardExit()
+        if answer == _BACK:
+            return _BACK
+        if answer == "later":
+            # Resolve the provisional offset's travel here, while the user is
+            # making this decision. Future sampling questions still own their
+            # values, so the temporary probe block must never be published.
+            staged = copy.deepcopy(user_data)
+            staged["custom_probe_z_offset"] = ""
+            existing_probe = staged.get("custom_probe")
+            if isinstance(existing_probe, CustomProbeConfig) and existing_probe.z_offset is not None:
+                staged["custom_probe"] = existing_probe.with_z_offset("0")
+                staged["custom_probe_settings"] = {"z_offset": None}
+            elif _step_custom_probe(staged) != "done":
+                return _BACK
+            from core.wizard.steps.probe_homing import review_probe_homing_geometry
+            try:
+                accepted = review_probe_homing_geometry(staged, back_label=t("wizard.probe_z.back_offset"))
+            except GenerationError:
+                for line in _wrapped_prompt_lines(t("wizard.probe_z.range_unresolved")):
+                    print("  " + line)
+                return _BACK
+            if not accepted:
+                continue
+            old_minimum = (user_data.get("z_position_min"),
+                           (user_data.get("_value_provenance") or {}).get("z_position_min"))
+            new_minimum = (staged.get("z_position_min"),
+                           (staged.get("_value_provenance") or {}).get("z_position_min"))
+            if new_minimum != old_minimum:
+                user_data["z_position_min"] = staged["z_position_min"]
+                mark_user_override(user_data, "z_position_min")
+            user_data["custom_probe_z_offset"] = ""
+            for line in _wrapped_prompt_lines(t("wizard.probe_z.calibration_later")):
+                print("  " + line)
+            return "done"
+        if answer == "known":
+            value = simple_input(t("wizard.probe_z.known_input"),
+                                 default=user_data.get("custom_probe_z_offset") or None,
+                                 validate=_guided_probe_validator("number"), back_value=_BACK)
+            if value is None or value == _BACK:
+                continue
+            user_data["custom_probe_z_offset"] = str(value).strip()
+            return "done"
 
 
 def _step_guided_custom_probe_offsets(user_data):
@@ -249,7 +348,13 @@ def _step_custom_probe_pin(user_data):
                 {"name": t("wizard.custom_probe_pin_manual"), "value": "__manual__"},
                 _back_choice(), _quit_choice(),
             ])
-            print(t("wizard.custom_probe_connector_hint"))
+            hints = [t("wizard.custom_probe_connector_hint")]
+            if any(candidate["source"] == "manufacturer" for candidate in candidates):
+                hints.append(t("wizard.probe_signal.manufacturer_source"))
+            if candidates and all(item["source"] == "z_endstop" for item in candidates):
+                hints.append(t("wizard.probe_signal.only_z_input"))
+            for hint in hints:
+                print("\n".join(_wrapped_prompt_lines(hint)))
             answer = autocomplete_select(t("wizard.custom_probe_pin"), choices=choices, default=0)
             if answer == _QUIT or answer is None:
                 raise WizardExit()
@@ -310,6 +415,7 @@ def _step_custom_probe_pin(user_data):
         else:
             user_data["custom_probe_pullup"] = pullup
             user_data["custom_probe_inverted"] = inverted
+            user_data.pop("custom_probe_polarity_unverified", None)
         return "done"
 
 
@@ -339,12 +445,36 @@ def _get_dedicated_probe_pin(user_data) -> tuple[str, bool, bool] | None:
 
 
 def _step_custom_probe_signal_option(user_data, option: str):
-    prompts = {
-        "pullup": "wizard.custom_probe_pullup",
-        "inverted": "wizard.custom_probe_inverted",
-    }
-    default = bool(user_data.get(f"custom_probe_{option}", False))
-    user_data[f"custom_probe_{option}"] = yes_no(t(prompts[option]), default=default)
+    if option == "inverted":
+        print()
+        for line in _wrapped_prompt_lines(t("wizard.probe_signal.guide")):
+            print("  " + line)
+        answer = numbered_select(t("wizard.probe_signal.prompt"), choices=[
+            {"name": t("wizard.probe_signal.normal"), "value": "normal"},
+            {"name": t("wizard.probe_signal.inverted"), "value": "inverted"},
+            {"name": t("wizard.probe_signal.unknown"), "value": "unknown"},
+            _back_choice(), _quit_choice(),
+        ], default=(2 if user_data.get("custom_probe_polarity_unverified") else
+                    1 if user_data.get("custom_probe_inverted") else 0), require_explicit=True)
+        if answer == _QUIT or answer is None:
+            raise WizardExit()
+        if answer == _BACK:
+            return _BACK
+        user_data["custom_probe_inverted"] = answer == "inverted"
+        user_data["custom_probe_polarity_unverified"] = answer == "unknown"
+        if answer == "unknown":
+            print(t("wizard.probe_signal.pending"))
+        return "done"
+    answer = numbered_select(t("wizard.custom_probe_pullup"), choices=[
+        {"name": t("wizard.probe_signal.pullup_on"), "value": True},
+        {"name": t("wizard.probe_signal.pullup_off"), "value": False},
+        _back_choice(), _quit_choice(),
+    ], default=0 if user_data.get("custom_probe_pullup") else 1, require_explicit=True)
+    if answer is None or answer == _QUIT:
+        raise WizardExit()
+    if answer == _BACK:
+        return _BACK
+    user_data["custom_probe_pullup"] = answer
     return "done"
 
 
@@ -372,7 +502,7 @@ def _step_custom_probe(user_data):
     missing = [key for key in required if user_data.get(key) in (None, "")]
     if missing:
         print(f"\n[!] {t('wizard.custom_probe_missing_fields')}\n")
-        return "__retry__"
+        return _BACK
     try:
         z_text = user_data.get("custom_probe_z_offset", "")
         pin_prefix = ("^" if user_data.get("custom_probe_pullup") else "") + (
@@ -391,23 +521,189 @@ def _step_custom_probe(user_data):
             sample_retract_dist=float(user_data.get("custom_probe_sample_retract_dist", GUIDED_PROBE_DEFAULTS["sample_retract_dist"])),
         )
         user_data["custom_probe_settings"] = settings
-        user_data["custom_probe"] = settings.to_config()
+        user_data["custom_probe"] = settings.to_config(
+            language=get_lang(),
+            polarity_unverified=bool(user_data.get("custom_probe_polarity_unverified")),
+        )
     except (ValueError, CustomProbeValidationError) as exc:
         print(f"\n[!] {t('wizard.custom_probe_invalid')}: {exc}\n")
-        return "__retry__"
+        return _BACK
 
     user_data["probe_x_offset"] = f"{settings.x_offset:g}"
     user_data["probe_y_offset"] = f"{settings.y_offset:g}"
     return "done"
 
 
-def _step_custom_probe_review(user_data):
-    """Show the exact KACE-generated section before continuing the wizard."""
-    custom_probe = user_data.get("custom_probe")
+def _stage_known_custom_probe_offset(user_data, value):
+    """Prepare an explicit offset edit without altering the caller's draft."""
+    staged = copy.deepcopy(user_data)
+    custom_probe = staged.get("custom_probe")
     if not isinstance(custom_probe, CustomProbeConfig):
-        return "__retry__"
-    print(f"\n{t('wizard.custom_probe_review')}\n\n{custom_probe.config_text}\n")
-    return "done"
+        raise CustomProbeValidationError("Custom probe data is missing.")
+    # Validate through the raw model even when guided settings are available.
+    edited = custom_probe.with_z_offset(value)
+    staged["custom_probe_z_offset"] = str(value).strip()
+    if isinstance(staged.get("custom_probe_settings"), GuidedCustomProbeSettings):
+        if _step_custom_probe(staged) != "done":
+            raise CustomProbeValidationError("The guided probe offset could not be rebuilt.")
+    else:
+        staged["custom_probe"] = edited
+        # Checkpoints preserve guided settings as a plain mapping while the raw
+        # block stays authoritative. Keep the saved draft consistent as well.
+        if isinstance(staged.get("custom_probe_settings"), dict):
+            staged["custom_probe_settings"]["z_offset"] = edited.z_offset
+    return staged
+
+
+def _step_custom_probe_review(user_data):
+    """Review or edit guided values without losing the other probe answers."""
+    while True:
+        custom_probe = user_data.get("custom_probe")
+        if not isinstance(custom_probe, CustomProbeConfig):
+            return _BACK
+        settings = user_data.get("custom_probe_settings")
+        # A checkpoint keeps guided settings as a mapping. Reconstruct only for
+        # presentation; the validated raw block remains authoritative.
+        if isinstance(settings, Mapping):
+            try:
+                settings = GuidedCustomProbeSettings(**dict(settings))
+            except (TypeError, ValueError):
+                settings = None
+        rows = [(t("wizard.review_probe.title", section=custom_probe.primary_section), None)]
+        columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+        if isinstance(settings, GuidedCustomProbeSettings):
+            values = [
+                ("pin", settings.pin, ""),
+                ("x_offset", str(custom_probe.x_offset).removesuffix(".0"), "mm"),
+                ("y_offset", str(custom_probe.y_offset).removesuffix(".0"), "mm"),
+                ("z_offset", str(custom_probe.z_offset).removesuffix(".0"), "mm"),
+                ("samples", settings.samples, ""),
+                ("samples_result", settings.samples_result, ""),
+                ("samples_tolerance", f"{settings.samples_tolerance:g}", "mm"),
+                ("samples_tolerance_retries", settings.samples_tolerance_retries, ""),
+                ("speed", f"{settings.speed:g}", "mm/s"),
+                ("sample_retract_dist", f"{settings.sample_retract_dist:g}", "mm"),
+            ]
+            value_width = max(len(f"{value} {unit}".rstrip()) for _, value, unit in values)
+            for name, value, unit in values:
+                if name in ("pin", "x_offset", "samples"):
+                    group = {"pin": "connection", "x_offset": "offsets", "samples": "measurements"}[name]
+                    rows.append((t("wizard.probe_review.group_" + group), None))
+                right = f"{value} {unit}".rstrip()
+                if columns >= 80:
+                    right = f"{right:<{value_width}}"
+                explanation = t("wizard.probe_parameter." + name)
+                rows.append((name + ":", right + (" — " + explanation if columns >= 80 else "")))
+                if columns < 80:
+                    rows.append((None, explanation))
+            state = t("wizard.review_probe.provisional" if settings.z_offset is None and custom_probe.z_offset == 0
+                      else "wizard.review_probe.supplied")
+            label, _, value = state.partition(": ")
+            rows.append((label + ":", value))
+        else:
+            rows.extend([
+                (None, t("wizard.review_probe.offsets", x=custom_probe.x_offset,
+                         y=custom_probe.y_offset, z=custom_probe.z_offset)),
+                (None, t("wizard.review_probe.imported")),
+            ])
+        if user_data.get("custom_probe_polarity_unverified"):
+            rows.append((None, t("wizard.review_probe.signal_pending")))
+        name_width = max((len(label) for label, value in rows if label and value is not None), default=0)
+        print()
+        parameter_names = {name for name, _, _ in values} if isinstance(settings, GuidedCustomProbeSettings) else set()
+        explanation_texts = {t("wizard.probe_parameter." + name) for name in parameter_names}
+        description_color = "\033[97m"
+        for label, value in rows:
+            if value is None or label is None:
+                role, text = (SECTION, label) if value is None else (description_color if value in explanation_texts else WARNING, value)
+                for line in _wrapped_prompt_lines(text):
+                    print(f"  {role}{line}{RESET}")
+                continue
+            prefix = f"{label:<{name_width}}  "
+            if len(prefix) + len(value.split()[0]) > max(20, columns - 2):
+                # Keep long values and calibration words intact in narrow terminals.
+                for line in _wrapped_prompt_lines(label):
+                    print(f"  {SECTION}{line}{RESET}")
+                for line in _wrapped_prompt_lines(value):
+                    print(f"  {WARNING}{line}{RESET}")
+                continue
+            rendered = textwrap.fill(value, width=max(20, columns - 2), initial_indent=prefix,
+                                     subsequent_indent=" " * len(prefix) if columns >= 80 else "  ",
+                                     break_long_words=False, break_on_hyphens=False)
+            in_explanation = False
+            for index, line in enumerate(rendered.splitlines()):
+                content = line[len(prefix):] if index == 0 else line
+                if label.removesuffix(":") in parameter_names:
+                    if " — " in content:
+                        before, after = content.split(" — ", 1)
+                        content = f"{WARNING}{before}{RESET}{description_color} — {after}{RESET}"
+                        in_explanation = True
+                    else:
+                        content = f"{description_color if in_explanation else WARNING}{content}{RESET}"
+                else:
+                    content = f"{WARNING}{content}{RESET}"
+                if index == 0:
+                    print(f"  {SECTION}{line[:len(prefix)]}{RESET}{content}")
+                else:
+                    print(f"  {content}")
+        if os.environ.get("KACE_AUTO") == "1":
+            return "done"
+        choices = [{"name": t("choice.continue"), "value": "continue"}]
+        if isinstance(settings, GuidedCustomProbeSettings):
+            choices.extend([
+                {"name": t("wizard.probe_review.edit_offset"), "value": "offset"},
+                {"name": t("wizard.probe_review.edit_signal"), "value": "signal"},
+            ])
+        choices.extend([
+            {"name": t("wizard.review_probe.details"), "value": "details"},
+        ])
+        if not isinstance(settings, GuidedCustomProbeSettings) and custom_probe.z_offset is not None:
+            choices.append({"name": t("wizard.probe_z.edit_known"), "value": "known_offset"})
+        choices.extend([_back_choice(), _quit_choice()])
+        action = numbered_select(t("wizard.profile_review_prompt"), choices=choices,
+                                 require_explicit=True)
+        if action is None or action == _QUIT:
+            raise WizardExit()
+        if action == _BACK:
+            return _BACK
+        if action == "continue":
+            return "done"
+        if action == "details":
+            print("\n" + custom_probe.config_text + "\n")
+            numbered_select(t("wizard.review_probe.detail_return"), choices=[
+                {"name": t("wizard.review_probe.back_summary"), "value": "summary"},
+            ], require_explicit=True)
+            continue
+        staged = copy.deepcopy(user_data)
+        if action == "offset":
+            result = _step_guided_custom_probe_value(staged, "custom_probe_z_offset")
+        elif action == "known_offset":
+            value = simple_input(t("wizard.probe_z.known_input"), validate=_custom_offset_validator,
+                                 back_value=_BACK)
+            if value is None or value == _BACK:
+                continue
+            staged = _stage_known_custom_probe_offset(user_data, value)
+            user_data.clear()
+            user_data.update(staged)
+            continue
+        elif action == "signal":
+            result = _step_custom_probe_signal_option(staged, "inverted")
+        else:
+            continue
+        if result == _BACK:
+            continue
+        if isinstance(user_data.get("custom_probe_settings"), Mapping) and action == "offset":
+            value = staged["custom_probe_z_offset"]
+            staged = _stage_known_custom_probe_offset(staged, value or "0")
+            if not value:
+                staged["custom_probe_z_offset"] = ""
+                staged["custom_probe_settings"]["z_offset"] = None
+            user_data.clear()
+            user_data.update(staged)
+            continue
+        if _step_custom_probe(staged) == "done":
+            user_data.clear()
+            user_data.update(staged)
 
 
 def _custom_offset_validator(value: str):
@@ -733,7 +1029,10 @@ def _step_bltouch_pins(user_data):
                 suggested_str = ", ".join([f"{u[0]}" for u in unused[:6]])
                 msg += f"    Declared aliases with no detected configuration use: {suggested_str}\n"
                 msg += "    Check the connector, wiring and firmware reservations before choosing.\n"
-        print(msg)
+        for paragraph in msg.splitlines():
+            indent = "    " if paragraph.startswith("    ") else ""
+            for line in _wrapped_prompt_lines(paragraph.strip(), indent=indent):
+                print(indent + line)
 
     prompts = []
     if missing_sensor:

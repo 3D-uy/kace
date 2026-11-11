@@ -81,7 +81,7 @@ def validate_heater_fan_options(content):
     # The simple review option map omits continuation lines. Reuse the existing
     # multiline reader so every heater in a list is checked, including includes.
     sections = _section_options(content)
-    if any(name.startswith("heater_fan ") for name in sections):
+    if any(len(parts := name.split()) >= 2 and parts[0] == "heater_fan" for name in sections):
         try:
             aliases = PinAliases(sections)
             allocated = {}
@@ -99,10 +99,12 @@ def validate_heater_fan_options(content):
     available = set()
     for match in re.finditer(r"(?m)^\s*\[([^\]\r\n]+)\]\s*(?:[#;].*)?$", content):
         name = match.group(1).strip()
-        if re.fullmatch(r"extruder\d*|heater_bed", name) or name.startswith("heater_generic "):
+        parts = name.split()
+        if re.fullmatch(r"extruder\d*|heater_bed", name) or (len(parts) >= 2 and parts[0] == "heater_generic"):
             available.add(name.split()[-1])
     for name, options in sections.items():
-        if not name.startswith("heater_fan "):
+        parts = name.split()
+        if len(parts) < 2 or parts[0] != "heater_fan":
             continue
         try:
             validate_part_fan_options({"fan": options})
@@ -119,6 +121,8 @@ def validate_heater_fan_options(content):
                 raise GenerationError(f"{name}: invalid {option}; use a finite number" + (" between 0 and 1." if option == "fan_speed" else "."))
         heater_text = "\n".join(line.split("#", 1)[0].split(";", 1)[0]
                                 for line in str(options.get("heater", "extruder")).splitlines())
-        heaters = [n.strip() for n in heater_text.split(",")]
+        # Klipper getlist treats an explicitly empty value as no heaters, not
+        # the omitted default (extruder). Empty tokens in nonempty lists fail.
+        heaters = [n.strip() for n in heater_text.split(",")] if heater_text.strip() else []
         if not all(heaters) or any(n not in available for n in heaters):
             raise GenerationError(f"{name}: heater references must name available heaters: {', '.join(heaters)}.")

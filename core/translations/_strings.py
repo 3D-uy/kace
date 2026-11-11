@@ -3,6 +3,58 @@
 # Each entry maps language name -> display string.
 
 UI_STRINGS: dict = {
+    "wizard.probe_signal.only_z_input": {
+        "English": "Only the Z endstop input is available among the verified probe candidates from the selected configuration. No dedicated probe input is available here; KACE will not guess a pin. Use another connector only with verified wiring information.",
+        "Español": "Solo está disponible la entrada de final de carrera Z entre las candidatas de sonda verificadas de la configuración seleccionada. No hay una entrada dedicada disponible aquí; KACE no adivina un pin. Usá otro conector solo con información de cableado verificada.",
+        "Português": "Somente a entrada do fim de curso Z está disponível entre as candidatas de sonda verificadas da configuração selecionada. Não há uma entrada dedicada disponível aqui; o KACE não adivinha um pino. Use outro conector apenas com informações de ligação verificadas.",
+    },
+    "wizard.probe_signal.pullup_on": {"English": "Enable pull-up (^)", "Español": "Activar pull-up (^)", "Português": "Ativar pull-up (^)"},
+    "wizard.probe_signal.pullup_off": {"English": "Without pull-up", "Español": "Sin pull-up", "Português": "Sem pull-up"},
+    "wizard.probe_signal.guide": {
+        "English": "Without !, QUERY_PROBE should show open at rest and TRIGGERED when activated. Choose Inverted if those states are reversed, or 'I do not know yet' if untested.",
+        "Español": "Sin !, QUERY_PROBE debe indicar open en reposo y TRIGGERED al activar la sonda. Si da lo contrario, elegí Invertida; si no lo probaste, «Todavía no lo sé».",
+        "Português": "Sem !, QUERY_PROBE deve indicar open em repouso e TRIGGERED ao acionar a sonda. Se mostrar o contrário, escolha Invertida; se ainda não testou, «Ainda não sei».",
+    },
+    "wizard.probe_signal.prompt": {
+        "English": "Choose the probe signal polarity:",
+        "Español": "Seleccioná la polaridad de la señal de la sonda:",
+        "Português": "Selecione a polaridade do sinal da sonda:",
+    },
+    "wizard.probe_signal.normal": {"English": "Normal (without !)", "Español": "Normal (sin !)", "Português": "Normal (sem !)"},
+    "wizard.probe_signal.inverted": {"English": "Inverted (with !)", "Español": "Invertida (con !)", "Português": "Invertida (com !)"},
+    "wizard.probe_signal.unknown": {"English": "I do not know yet — verify before movement", "Español": "Todavía no lo sé — verificar antes de mover", "Português": "Ainda não sei — verificar antes de mover"},
+    "wizard.probe_signal.pending": {
+        "English": "Polarity is unverified. A provisional value without ! is used. Once the configuration loads, check QUERY_PROBE in both states before any homing/probing; loading successfully does not verify the signal.",
+        "Español": "Polaridad sin verificar. Se usa provisionalmente un valor sin !. Cuando cargue la configuración, comprobá QUERY_PROBE en ambos estados antes de cualquier homing/sondeo; que cargue correctamente no verifica la señal.",
+        "Português": "Polaridade não verificada. É usado provisoriamente um valor sem !. Quando a configuração carregar, confira QUERY_PROBE nos dois estados antes de qualquer homing/sondagem; carregar corretamente não verifica o sinal.",
+    },
+    "wizard.probe_review.edit_offset": {"English": "Edit known probe Z offset", "Español": "Editar offset Z conocido de la sonda", "Português": "Editar offset Z conhecido da sonda"},
+    "wizard.probe_review.edit_signal": {"English": "Review probe signal polarity", "Español": "Revisar polaridad de la sonda", "Português": "Revisar polaridade da sonda"},
+    "wizard.probe_homing.range": {
+        "English": "Required range: {minimum} <= probe offset {offset} <= {maximum} mm. Edit the mechanical Z minimum or go back to the probe review; these are different settings.",
+        "Español": "Rango requerido: {minimum} <= offset de sonda {offset} <= {maximum} mm. Editá el mínimo mecánico Z o volvé a revisar la sonda; son ajustes diferentes.",
+        "Português": "Intervalo exigido: {minimum} <= offset da sonda {offset} <= {maximum} mm. Edite o mínimo mecânico Z ou volte para revisar a sonda; são ajustes diferentes.",
+    },
+    "wizard.probe_homing.minimum_input": {
+        "English": "Mechanical Z minimum (position_min), mm — this does not edit the probe z_offset:",
+        "Español": "Mínimo mecánico Z (position_min), mm — esto no modifica el z_offset de la sonda:",
+        "Português": "Mínimo mecânico Z (position_min), mm — isto não altera o z_offset da sonda:",
+    },
+    "wizard.probe_comment.pin": {
+        "English": "Probe signal input: ^ enables pull-up; ! inverts polarity. Verify open/TRIGGERED with QUERY_PROBE before movement.",
+        "Español": "Entrada de señal: ^ activa pull-up; ! invierte la polaridad. Verificar open/TRIGGERED con QUERY_PROBE antes de mover.",
+        "Português": "Entrada do sinal: ^ ativa pull-up; ! inverte a polaridade. Verifique open/TRIGGERED com QUERY_PROBE antes de mover.",
+    },
+    "wizard.probe_comment.x_offset": {"English": "Probe X position relative to the nozzle, mm.", "Español": "Posición X de la sonda respecto a la boquilla, mm.", "Português": "Posição X da sonda em relação ao bico, mm."},
+    "wizard.probe_comment.y_offset": {"English": "Probe Y position relative to the nozzle, mm.", "Español": "Posición Y de la sonda respecto a la boquilla, mm.", "Português": "Posição Y da sonda em relação ao bico, mm."},
+    "wizard.probe_comment.z_offset": {"English": "Nozzle-to-bed distance when the probe triggers, mm. Verify using PROBE_CALIBRATE; an entered value is not calibration proof.", "Español": "Distancia entre boquilla y cama al activarse la sonda, mm. Verificar con PROBE_CALIBRATE; ingresar un valor no acredita calibración.", "Português": "Distância entre bico e mesa quando a sonda aciona, mm. Verifique com PROBE_CALIBRATE; inserir um valor não comprova calibração."},
+    "wizard.probe_comment.uncalibrated": {"English": "UNCALIBRATED placeholder: calibrate with PROBE_CALIBRATE after checking the signal. This zero is not a measured offset.", "Español": "Valor provisional SIN CALIBRAR: usar PROBE_CALIBRATE después de verificar la señal. Este cero no es un offset medido.", "Português": "Valor provisório NÃO CALIBRADO: use PROBE_CALIBRATE após verificar o sinal. Este zero não é um offset medido."},
+    "wizard.probe_comment.samples": {"English": "Number of probe measurements at each point.", "Español": "Cantidad de mediciones de sonda en cada punto.", "Português": "Número de medições da sonda em cada ponto."},
+    "wizard.probe_comment.samples_tolerance": {"English": "Maximum permitted difference between measurements, mm.", "Español": "Diferencia máxima permitida entre mediciones, mm.", "Português": "Diferença máxima permitida entre medições, mm."},
+    "wizard.probe_comment.samples_tolerance_retries": {"English": "Retries when measurements exceed the tolerance.", "Español": "Reintentos cuando las mediciones superan la tolerancia.", "Português": "Novas tentativas quando as medições excedem a tolerância."},
+    "wizard.probe_comment.speed": {"English": "Z probing speed, mm/s. Check the probe specifications.", "Español": "Velocidad Z de sondeo, mm/s. Revisar las especificaciones de la sonda.", "Português": "Velocidade Z de sondagem, mm/s. Confira as especificações da sonda."},
+    "wizard.probe_comment.samples_result": {"English": "Combine measurements using median or average.", "Español": "Combinar mediciones usando mediana (median) o promedio (average).", "Português": "Combinar medições usando mediana (median) ou média (average)."},
+    "wizard.probe_comment.sample_retract_dist": {"English": "Z retraction between measurements, mm.", "Español": "Retracción Z entre mediciones, mm.", "Português": "Retração Z entre medições, mm."},
     "menu.secret_input_unavailable": {
         "English": "Cannot disable terminal echo. Secret input cancelled; retry in an interactive terminal.",
         "Español": "No se puede ocultar la entrada en este terminal. Entrada secreta cancelada; vuelva a intentarlo en un terminal interactivo.",
@@ -771,6 +823,45 @@ UI_STRINGS: dict = {
         "Español":   "Seleccione un campo para editar, o guarde:",
         "Português": "Selecione um campo para editar ou salvar:",
     },
+    "profile.printable_bounds": {
+        "English": "Printable XY bounds",
+        "Español": "Límites imprimibles XY",
+        "Português": "Limites imprimíveis XY",
+    },
+    "profile.comment_printable_bounds": {
+        "English": "bed edges where printing is possible; may differ from the axis travel limits",
+        "Español": "bordes de la cama donde se puede imprimir; pueden diferir de los límites de movimiento",
+        "Português": "bordas da mesa onde é possível imprimir; podem diferir dos limites de movimento",
+    },
+    "profile.bounds_undefined": {
+        "English": "Not defined", "Español": "Sin definir", "Português": "Não definido",
+    },
+    "profile.printable_bounds_help": {
+        "English": "Enter the coordinates of the bed edges where you can print. For a 220 x 220 mm bed with its origin at a corner, the usual bounds are X: 0 to 220 and Y: 0 to 220. These are coordinates, not just dimensions: the nozzle may travel beyond the bed. They do not change position_min, position_max or the endstop position. If the bed origin is shifted, enter its actual edge coordinates.",
+        "Español": "Indicá las coordenadas de los bordes de la cama donde podés imprimir. En una cama de 220 x 220 mm con el origen en una esquina, los límites habituales son X: 0 a 220 e Y: 0 a 220. Son coordenadas, no solo dimensiones: la boquilla puede desplazarse fuera de la cama. No modifican position_min, position_max ni la posición del endstop. Si el origen de la cama está desplazado, ingresá las coordenadas reales de sus bordes.",
+        "Português": "Informe as coordenadas das bordas da mesa onde é possível imprimir. Em uma mesa de 220 x 220 mm com a origem em um canto, os limites habituais são X: 0 a 220 e Y: 0 a 220. São coordenadas, não apenas dimensões: o bico pode se deslocar além da mesa. Não alteram position_min, position_max nem a posição do endstop. Se a origem da mesa estiver deslocada, informe as coordenadas reais das bordas.",
+    },
+    "profile.printable_min": {
+        "English": "{axis} minimum printable coordinate", "Español": "coordenada imprimible mínima en {axis}", "Português": "coordenada imprimível mínima em {axis}",
+    },
+    "profile.printable_max": {
+        "English": "{axis} maximum printable coordinate", "Español": "coordenada imprimible máxima en {axis}", "Português": "coordenada imprimível máxima em {axis}",
+    },
+    "profile.editor.printable_bounds": {
+        "English": "printable bed edges",
+        "Español": "bordes imprimibles de cama",
+        "Português": "bordas imprimíveis da mesa",
+    },
+    "profile.printable_bound_prompt": {
+        "English": "Enter {field} (mm):",
+        "Español": "Ingresá {field} (mm):",
+        "Português": "Informe {field} (mm):",
+    },
+    "profile.printable_bounds_invalid": {
+        "English": "Invalid printable bounds; previous values were preserved.",
+        "Español": "Límites imprimibles inválidos; se conservaron los valores anteriores.",
+        "Português": "Limites imprimíveis inválidos; os valores anteriores foram preservados.",
+    },
     "choice.save_continue": {
         "English":   "✓  Save & Continue",
         "Español":   "✓  Guardar y Continuar",
@@ -856,6 +947,31 @@ UI_STRINGS: dict = {
         "English":   "Not found",
         "Español":   "No encontrado",
         "Português": "Não encontrado",
+    },
+    "dashboard.files_detected": {
+        "English":   "Files detected; service not confirmed",
+        "Español":   "Archivos detectados; servicio sin confirmar",
+        "Português": "Arquivos detectados; serviço não confirmado",
+    },
+    "dashboard.service_active": {
+        "English":   "Service active",
+        "Español":   "Servicio activo",
+        "Português": "Serviço ativo",
+    },
+    "dashboard.service_inactive": {
+        "English":   "Service installed · inactive",
+        "Español":   "Servicio instalado · inactivo",
+        "Português": "Serviço instalado · inativo",
+    },
+    "dashboard.service_failed": {
+        "English":   "Service failed",
+        "Español":   "Servicio con fallo",
+        "Português": "Serviço com falha",
+    },
+    "dashboard.status_unknown": {
+        "English":   "Status unavailable",
+        "Español":   "Estado no disponible",
+        "Português": "Estado indisponível",
     },
     "dashboard.found": {
         "English":   "Found",
@@ -1279,14 +1395,14 @@ UI_STRINGS: dict = {
         "Português": "Deseja gerar uma configuração de macros iniciais (macros.cfg)?",
     },
     "kace.deploy_none": {
-        "English":   "None (Done)",
-        "Español":   "Ninguno (Listo)",
-        "Português": "Nenhum (Concluído)",
+        "English":   "Do not install now (keep generated files)",
+        "Español":   "No instalar ahora (conservar archivos generados)",
+        "Português": "Não instalar agora (manter arquivos gerados)",
     },
     "kace.deploy_local": {
-        "English":   "Local Folder (device running KACE)",
-        "Español":   "Carpeta local (equipo que ejecuta KACE)",
-        "Português": "Pasta local (dispositivo executando KACE)",
+        "English":   "Export to a folder on this host (without activation)",
+        "Español":   "Exportar a una carpeta de este equipo (sin activar)",
+        "Português": "Exportar para uma pasta neste computador (sem ativar)",
     },
     "kace.deploy_usb": {
         "English":   "USB / SD Card",
@@ -2039,9 +2155,9 @@ UI_STRINGS: dict = {
         "Português": "posição de ativação do homing em Z",
     },
     "profile.comment_build_volume": {
-        "English":   "printable bed travel envelope",
-        "Español":   "volumen de recorrido de la cama imprimible",
-        "Português": "volume de curso da mesa de impressão",
+        "English":   "print dimensions: width (X), depth (Y) and height (Z), in mm",
+        "Español":   "dimensiones de impresión: ancho (X), fondo (Y) y altura (Z), en mm",
+        "Português": "dimensões de impressão: largura (X), profundidade (Y) e altura (Z), em mm",
     },
     "profile.comment_probe_type": {
         "English":   "probe sensor hardware type",
@@ -2483,49 +2599,49 @@ UI_STRINGS: dict = {
         "Português": "Especifique os limites físicos de curso do eixo Z (position_min, position_max) e a coordenada do sensor de fim de curso.",
     },
     "wizard.x_position_min": {
-        "English":   "Enter X position_min (mm) [type '<' to go back]:",
-        "Español":   "Ingrese X position_min (mm) [escriba '<' para volver]:",
-        "Português": "Digite X position_min (mm) [digite '<' para voltar]:",
+        "English":   "Enter X position_min (mm):",
+        "Español":   "Ingrese X position_min (mm):",
+        "Português": "Digite X position_min (mm):",
     },
     "wizard.x_position_max": {
-        "English":   "Enter X position_max (mm) [type '<' to go back]:",
-        "Español":   "Ingrese X position_max (mm) [escriba '<' para volver]:",
-        "Português": "Digite X position_max (mm) [digite '<' para voltar]:",
+        "English":   "Enter X position_max (mm):",
+        "Español":   "Ingrese X position_max (mm):",
+        "Português": "Digite X position_max (mm):",
     },
     "wizard.x_position_endstop": {
-        "English":   "Enter X position_endstop (mm) [type '<' to go back]:",
-        "Español":   "Ingrese X position_endstop (mm) [escriba '<' para volver]:",
-        "Português": "Digite X position_endstop (mm) [digite '<' para voltar]:",
+        "English":   "Enter X position_endstop (mm):",
+        "Español":   "Ingrese X position_endstop (mm):",
+        "Português": "Digite X position_endstop (mm):",
     },
     "wizard.y_position_min": {
-        "English":   "Enter Y position_min (mm) [type '<' to go back]:",
-        "Español":   "Ingrese Y position_min (mm) [escriba '<' para volver]:",
-        "Português": "Digite Y position_min (mm) [digite '<' para voltar]:",
+        "English":   "Enter Y position_min (mm):",
+        "Español":   "Ingrese Y position_min (mm):",
+        "Português": "Digite Y position_min (mm):",
     },
     "wizard.y_position_max": {
-        "English":   "Enter Y position_max (mm) [type '<' to go back]:",
-        "Español":   "Ingrese Y position_max (mm) [escriba '<' para volver]:",
-        "Português": "Digite Y position_max (mm) [digite '<' para voltar]:",
+        "English":   "Enter Y position_max (mm):",
+        "Español":   "Ingrese Y position_max (mm):",
+        "Português": "Digite Y position_max (mm):",
     },
     "wizard.y_position_endstop": {
-        "English":   "Enter Y position_endstop (mm) [type '<' to go back]:",
-        "Español":   "Ingrese Y position_endstop (mm) [escriba '<' para volver]:",
-        "Português": "Digite Y position_endstop (mm) [digite '<' para voltar]:",
+        "English":   "Enter Y position_endstop (mm):",
+        "Español":   "Ingrese Y position_endstop (mm):",
+        "Português": "Digite Y position_endstop (mm):",
     },
     "wizard.z_position_min": {
-        "English":   "Enter Z position_min (mm) [type '<' to go back]:",
-        "Español":   "Ingrese Z position_min (mm) [escriba '<' para volver]:",
-        "Português": "Digite Z position_min (mm) [digite '<' para voltar]:",
+        "English":   "Enter Z position_min (mm):",
+        "Español":   "Ingrese Z position_min (mm):",
+        "Português": "Digite Z position_min (mm):",
     },
     "wizard.z_position_max": {
-        "English":   "Enter Z position_max (mm) [type '<' to go back]:",
-        "Español":   "Ingrese Z position_max (mm) [escriba '<' para volver]:",
-        "Português": "Digite Z position_max (mm) [digite '<' para voltar]:",
+        "English":   "Enter Z position_max (mm):",
+        "Español":   "Ingrese Z position_max (mm):",
+        "Português": "Digite Z position_max (mm):",
     },
     "wizard.z_position_endstop": {
-        "English":   "Enter Z position_endstop (mm) [type '<' to go back]:",
-        "Español":   "Ingrese Z position_endstop (mm) [escriba '<' para volver]:",
-        "Português": "Digite Z position_endstop (mm) [digite '<' para voltar]:",
+        "English":   "Enter Z position_endstop (mm):",
+        "Español":   "Ingrese Z position_endstop (mm):",
+        "Português": "Digite Z position_endstop (mm):",
     },
     "profile.custom_header": {
         "English":   "Custom printer profile:",
@@ -2695,3 +2811,31 @@ UI_STRINGS.update({
 })
 
 UI_STRINGS["deploy.already_installed"] = {"English": "The configuration was already installed. Active configuration and Klipper verified without restarting.", "Español": "La configuración ya estaba instalada. Se verificaron la configuración activa y Klipper sin reiniciar.", "Português": "A configuração já estava instalada. A configuração ativa e o Klipper foram verificados sem reiniciar."}
+
+# Visible catalog navigation and reviewed manufacturer connector evidence.
+UI_STRINGS.update({'menu.catalog_controls': {'English': 'n Next page | p Previous page | / Clear search | Type text to filter',
+                           'Español': 'n Página siguiente | p Página anterior | / Quitar filtro | Escribí '
+                                      'para buscar',
+                           'Português': 'n Próxima página | p Página anterior | / Limpar busca | Digite para '
+                                        'buscar'},
+ 'menu.catalog_page': {'English': 'Page {page}/{pages} · {count} options',
+                       'Español': 'Página {page}/{pages} · {count} opciones',
+                       'Português': 'Página {page}/{pages} · {count} opções'},
+ 'menu.catalog_prompt': {'English': 'Choose a displayed number, search text or navigation command:',
+                         'Español': 'Elegí un número visible, texto de búsqueda o una acción:',
+                         'Português': 'Escolha um número visível, texto de busca ou uma ação:'},
+ 'menu.catalog_visible_number': {'English': 'Choose a number shown on this page, or change page.',
+                                 'Español': 'Elegí un número que aparezca en esta página o cambiá de página.',
+                                 'Português': 'Escolha um número mostrado nesta página ou mude de página.'},
+ 'wizard.select_printer_model': {'English': 'Select your printer model:',
+                                 'Español': 'Seleccioná el modelo de impresora:',
+                                 'Português': 'Selecione o modelo da impressora:'},
+ 'wizard.select_board_manual': {'English': 'Select your board:',
+                                'Español': 'Seleccioná tu placa:',
+                                'Português': 'Selecione sua placa:'},
+ 'wizard.probe_signal.manufacturer_connector': {'English': '{connector} connector (manufacturer)',
+                                                'Español': 'Conector {connector} (fabricante)',
+                                                'Português': 'Conector {connector} (fabricante)'},
+ 'wizard.probe_signal.manufacturer_source': {'English': 'PROBE mapping: BIGTREETECH information supplementing the Klipper example.',
+                                             'Español': 'Conector PROBE: información de BIGTREETECH complementaria al ejemplo de Klipper.',
+                                             'Português': 'Conector PROBE: informação da BIGTREETECH complementar ao exemplo do Klipper.'}})

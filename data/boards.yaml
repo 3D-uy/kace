@@ -60,8 +60,25 @@ display_exp_mappings:
 # Exact MCU candidates reviewed against official Klipper fe4eb865 headers.
 # Identity only: no connector, platform, build or flashing qualification.
 # Multiple candidates require a selected/detected model; order is not evidence.
+# Supplementary manufacturer connector evidence, not a Klipper example or a
+# claim about sensor voltage, polarity, pull-up, wiring or calibration. Only an
+# exact selected filename and identified MCU may use these wizard suggestions.
+probe_connector_mappings:
+  generic-bigtreetech-skr-v1.4.cfg:
+    mcu_models: [lpc1768, lpc1769]
+    connectors:
+      - name: PROBE
+        pin: P0.10
+        conflicts_with_buses: [[i2c_bus, i2c2]]
+        manufacturer_source: https://github.com/bigtreetech/BIGTREETECH-SKR-V1.3/blob/b238aa402753e81d551b7d34a181a262a138ae9e/BTT%20SKR%20V1.4/Firmware/Marlin-2.0.x-SKR-V1.4-Turbo/Marlin/src/pins/lpc1768/pins_BTT_SKR_V1_4.h#L76-L86
+        turbo_source: https://github.com/bigtreetech/BIGTREETECH-SKR-V1.3/blob/b238aa402753e81d551b7d34a181a262a138ae9e/BTT%20SKR%20V1.4/Firmware/Marlin-2.0.x-SKR-V1.4-Turbo/Marlin/src/pins/lpc1769/pins_BTT_SKR_V1_4_Turbo.h
+        schematic_source: https://github.com/bigtreetech/BIGTREETECH-SKR-V1.3/blob/b238aa402753e81d551b7d34a181a262a138ae9e/BTT%20SKR%20V1.4/Hardware/BTT%20SKR%20V1.4-SCH.pdf
+        bus_source: https://github.com/Klipper3d/klipper/blob/fe4eb8650bd7de4c2100a14eaf09b0965c430e29/src/lpc176x/i2c.c#L26
+
 board_mcu_models:
   generic-bigtreetech-skr-v1.4.cfg: [lpc1768, lpc1769]
+  # config/generic-bigtreetech-skr-e3-turbo.cfg:1-3 at the validated commit.
+  generic-bigtreetech-skr-e3-turbo.cfg: [lpc1769]
   generic-bigtreetech-skr-v1.3.cfg: [lpc1768]
   generic-mks-sgenl.cfg: [lpc1768]
   generic-creality-v4.2.7.cfg: [stm32f103]
@@ -90,6 +107,18 @@ board_mcu_models:
   generic-duet2.cfg: [sam4e8e]
   generic-duet2-duex.cfg: [sam4e8e]
   generic-duet3-mini.cfg: [same54p20]
+
+# Presentation only, keyed by the exact profile and reviewed processor identity.
+# SKR V1.4 shares a source file between its non-Turbo and Turbo variants.
+# The pinned MKS SGEN_L profile names LPC1768; it is not an SGEN_L V2 profile.
+board_model_labels:
+  generic-bigtreetech-skr-v1.4.cfg:
+    lpc1768: BIGTREETECH SKR 1.4
+    lpc1769: BIGTREETECH SKR 1.4 Turbo
+  generic-bigtreetech-skr-e3-turbo.cfg:
+    lpc1769: BIGTREETECH SKR E3 Turbo
+  generic-mks-sgenl.cfg:
+    lpc1768: MKS SGEN_L
 
 # Resolved MCU strings from src/stm32/Kconfig and src/atsamd/Kconfig at fe4eb865.
 board_mcu_aliases:

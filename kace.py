@@ -122,7 +122,7 @@ from core.deployer import (
 from core.banner import print_kace_banner
 from core.translations import t
 from core.display_checker import check_display_compatibility
-from core.summary import print_summary
+from core.summary import print_summary, print_installation_complete
 from core.display_warning import print_display_warning
 from core.workflow_outcome import (
     WorkflowOutcome,
@@ -154,9 +154,11 @@ from core.firmware_workflow import (
 
 
 
-def _finish(result: WorkflowResult) -> None:
+def _finish(result: WorkflowResult, *, installation_complete: bool = False) -> None:
     """Render the terminal outcome and preserve its stable exit-code contract."""
     print_workflow_result(result)
+    if installation_complete and result.ok:
+        print_installation_complete()
     raise SystemExit(result.exit_code)
 
 
@@ -270,20 +272,59 @@ def _show_prepared_firmware(checkpoint, *, view_only=False):
         finally:
             if os.path.exists(temporary):
                 os.remove(temporary)
+    import shutil
+    import textwrap
+    from core.terminal import RESET, SECTION, WARNING
+    from wcwidth import wcswidth
+
+    width = min(102, max(22, shutil.get_terminal_size((80, 24)).columns - 2))
+
+    def print_guidance(text, prefix="    "):
+        for paragraph in str(text).splitlines():
+            print(textwrap.fill(
+                paragraph, width=width, initial_indent=prefix,
+                subsequent_indent=" " * len(prefix), break_long_words=False,
+                break_on_hyphens=False,
+            ))
+
+    print(f"\n{SECTION}{t('firmware.manual.prepared_title')}{RESET}")
     if not view_only:
-        print(f"\n\033[93m[!] {t('firmware.manual.required')}\033[0m")
-    print(f"    {t('firmware.manual.artifact', path=path or t('firmware.manual.unavailable'))}")
-    print(
-        f"    {t('firmware.manual.final_filename', filename=artifact.get('final_filename') or t('firmware.manual.board_specific'))}"
-    )
+        print(WARNING, end="")
+        print_guidance(t('firmware.manual.required'))
+        print(RESET, end="")
+    labels = [t('firmware.manual.filename_label').rstrip(":"), t('firmware.manual.artifact_label').rstrip(":")]
+    column = max(wcswidth(label) for label in labels)
+    print()
+    filename = name or t('firmware.manual.board_specific')
+    print_guidance(f"{labels[0]}{' ' * (column - wcswidth(labels[0]))}: {filename}")
+    print()
+    print(f"    {SECTION}{labels[1]}:{RESET}")
+    # Paths and filenames are copyable identifiers, never prose to reflow.
+    print(f"    {WARNING}{path or t('firmware.manual.unavailable')}{RESET}")
     from core.translations import get_mode
-    for index, instruction in enumerate((artifact.get("instructions") or ())
-            if get_mode() == "Advanced" or artifact.get('transformation') is not None else (), 1):
+    instructions = (artifact.get("instructions") or ()) if (
+        not view_only or get_mode() == "Advanced" or artifact.get('transformation') is not None
+    ) else ()
+    if instructions or not view_only:
+        print()
+        print(SECTION, end="")
+        print_guidance(t('firmware.manual.instructions_label'))
+        print(RESET, end="")
+    index = 0
+    for instruction in instructions:
         text = instruction.get("text") if isinstance(instruction, dict) else str(instruction)
         if text:
-            print(f"    {index}. {text}")
+            index += 1
+            print_guidance(text, prefix=f"    {index}. ")
     if not view_only:
-        print(f"    {t('firmware.manual.next_steps')}")
+        follow_up = ['firmware.manual.power_step']
+        if index == 0:
+            follow_up.insert(0, 'firmware.manual.copy_step')
+        for key in follow_up:
+            index += 1
+            print_guidance(t(key), prefix=f"    {index}. ")
+        print()
+        print_guidance(t('firmware.manual.keep_open'))
 
 
 def _confirm_workflow_mcu_identity(assessment):
@@ -372,9 +413,51 @@ def _wait_for_manual_flash(checkpoint, user_data, *, verify_immediately=False):
         return checkpoint
 
 
+def _select_configuration_deployment():
+    """Present available routes before any transport-specific credential input."""
+    from core.config_transaction import local_moonraker_available
+    from core.deployer import ssh_deployment_available
+    from core.menu import _wrapped_prompt_lines
+
+    def explain(key):
+        print()
+        for line in _wrapped_prompt_lines(t(key)):
+            print("  " + line)
+
+    while True:
+        local_install = local_moonraker_available()
+        ssh_available = ssh_deployment_available()
+        if local_install:
+            explain("deploy.local_help")
+        if not ssh_available:
+            explain("deploy.ssh_unavailable")
+        choices = [
+            {"name": f"✅  {t('kace.deploy_none')}", "value": "none"},
+            {"name": f"📁  {t('kace.deploy_local')}", "value": "local"},
+            {"name": f"💾  {t('kace.deploy_usb')}", "value": "usb"},
+        ]
+        if ssh_available:
+            choices.append({"name": f"🔗  {t('kace.deploy_ssh')}", "value": "ssh"})
+        if local_install:
+            choices.append({"name": f"🌙  {t('deploy.local_active')}", "value": "moonraker"})
+        try:
+            selected = numbered_select(f"\n{t('kace.deploy_cfg_prompt')}", choices=choices)
+        except WizardExit:
+            return None
+        # Also guard explicit test/automatic answers and a disappearing dependency.
+        if selected == "ssh" and not ssh_deployment_available():
+            if os.environ.get("KACE_AUTO") == "1":
+                return None
+            continue
+        return selected
+
+
 def main():
     initial_checkpoint_revision = checkpoint_revision()
-    workflow_checkpoint, resume_action = _resume_firmware_workflow()
+    try:
+        workflow_checkpoint, resume_action = _resume_firmware_workflow()
+    except (WizardExit, KeyboardInterrupt, EOFError):
+        _finish(cancelled("Installation recovery cancelled."))
     if workflow_checkpoint and workflow_checkpoint.get("_discarded"):
         initial_checkpoint_revision = (initial_checkpoint_revision[0], None)
     # ── Dashboard (bypassed in CI / auto / dev modes) ─────────
@@ -536,8 +619,8 @@ def main():
     print(f"\033[92m[*]\033[0m {t('kace.fetching_cfg_done', board=user_data['board'])}")
 
     # Review printer geometry before compiling firmware or regenerating config.
-    # A saved MCU verification remains authoritative while only the selected
-    # Z minimum changes; cancellation must not publish a checkpoint revision.
+    # A saved MCU verification remains authoritative after accepted Z geometry
+    # or known custom-offset edits; cancellation must not publish a revision.
     from core.wizard.steps.probe_homing import (
         review_probe_homing_geometry, validate_wizard_probe_homing_geometry,
     )
@@ -760,9 +843,11 @@ def main():
         FirmwareWorkflowState.CONFIG_GENERATED,
         FirmwareWorkflowState.READY_TO_DEPLOY,
         FirmwareWorkflowState.DEPLOYING,
-    }:
+    } or isinstance(user_data.get("macros_generated"), bool):
         generate_macros = bool(user_data.get("macros_generated"))
     else:
+        # Compatibility for pre-generation checkpoints saved before this choice
+        # became part of the wizard. Never re-ask a recorded Yes or No.
         generate_macros = yes_no(
             f"\n{t('kace.generate_macros_prompt')}",
             default=True
@@ -801,7 +886,7 @@ def main():
     from core.board_auxiliary import selected_board_electrical_source, validate_board_electrical_artifact
     try:
         from core.deployer import _generated_config_bytes
-        _, hardware, _ = _generated_config_bytes()
+        _, hardware, _ = _generated_config_bytes(user_data)
         validate_board_electrical_artifact(selected_board_electrical_source(user_data), hardware)
     except (GenerationError, OSError) as exc:
         _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc)))
@@ -842,19 +927,7 @@ def main():
     # ==========================================
     # PHASE 4: CONFIGURATION DEPLOYMENT
     # ==========================================
-    from core.config_transaction import local_moonraker_available
-    if not local_moonraker_available():
-        print(t("deploy.remote_unsupported"))
-    deploy_cfg = numbered_select(
-        f"\n{t('kace.deploy_cfg_prompt')}",
-        choices=[
-            {"name": f"✅  {t('kace.deploy_none')}",       "value": "none"},
-            {"name": f"📁  {t('kace.deploy_local')}",       "value": "local"},
-            {"name": f"💾  {t('kace.deploy_usb')}",         "value": "usb"},
-            {"name": f"🔗  {t('kace.deploy_ssh')}",         "value": "ssh"},
-            *([{"name": f"🌙  {t('deploy.local_active')}", "value": "moonraker"}] if local_moonraker_available() else []),
-        ]
-    )
+    deploy_cfg = _select_configuration_deployment()
 
     if deploy_cfg is None:
         _finish(cancelled("Configuration deployment selection cancelled."))
@@ -921,6 +994,7 @@ def main():
             WorkflowOutcome.DEPLOYMENT_FAILED,
             "Deployment returned no terminal result.",
         ))
+    installation_complete = False
     if live_deployment and workflow_checkpoint is not None:
         if deployment_result.ok:
             workflow_checkpoint = transition_checkpoint(
@@ -934,8 +1008,8 @@ def main():
             )
         _persist_workflow(workflow_checkpoint, user_data)
         if deployment_result.ok:
-            print("\n" + t("installation.complete"))
-    _finish(deployment_result)
+            installation_complete = True
+    _finish(deployment_result, installation_complete=installation_complete)
 
 if __name__ == "__main__":
     main()

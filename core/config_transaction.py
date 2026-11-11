@@ -24,6 +24,7 @@ from core.managed_config import (
     MACROS_REMOTE,
     MOONRAKER_REMOTE,
     ROOT_REMOTE,
+    ROOT_MACROS_REMOTE,
     ManagedConfigPlan,
     build_managed_config_plan,
     config_includes,
@@ -77,7 +78,13 @@ def read_config_state(transport, generated_hardware: bytes = b"", generated_macr
         if content is not None and not isinstance(content, bytes):
             raise TypeError(f"configuration read did not return bytes for {name}")
         state[name] = content
-    pending = [(ROOT_REMOTE, generated_hardware), (MACROS_REMOTE, generated_macros), (ROOT_REMOTE, state[ROOT_REMOTE])]
+    pending = [(ROOT_REMOTE, generated_hardware), (ROOT_REMOTE, state[ROOT_REMOTE])]
+    if generated_macros is not None:
+        # Follow relative macro includes from the destination the pure planner
+        # actually selected (root-v1 or preserved-user layout), not a fixed path.
+        proposal = build_managed_config_plan(generated_hardware, generated_macros, state)
+        pending.extend((item.remote_name, item.content) for item in proposal.artifacts
+                       if item.remote_name in {MACROS_REMOTE, ROOT_MACROS_REMOTE})
     visited = set()
     total = 0
     while pending:
@@ -206,6 +213,8 @@ class ConfigDeploymentTransaction:
         verify_firmware: Optional[Callable[[], None]] = None,
         firmware_reservation_reader: Optional[Callable[[str], dict]] = None,
         selected_board: Optional[dict] = None,
+        resolve_preserved_homing: Optional[Callable] = None,
+        geometry_context=None,
     ):
         if activation not in {"firmware", "service", "none"}:
             raise ValueError(f"Unsupported activation mode: {activation}")
@@ -233,6 +242,8 @@ class ConfigDeploymentTransaction:
         self.firmware_reservation_reader = firmware_reservation_reader
         import copy
         self.selected_board = copy.deepcopy(selected_board)
+        self.resolve_preserved_homing = resolve_preserved_homing
+        self.geometry_context = geometry_context
 
     def _emit(self, state: str, detail: str) -> None:
         if self.state_sink is None:
@@ -261,6 +272,7 @@ class ConfigDeploymentTransaction:
         ready_samples = 0
         while time.monotonic() < deadline:
             if not self.transport.moonraker_online():
+                last = "disconnected"
                 ready_samples = 0
                 time.sleep(self.poll_interval)
                 continue
@@ -272,10 +284,23 @@ class ConfigDeploymentTransaction:
                 time.sleep(self.poll_interval)
                 continue
             ready_samples = 0
-            if last in {"shutdown", "error"}:
-                return False, last
+            # RESTART is acknowledged before Klipper necessarily leaves its old
+            # error state (for example, missing printer.cfg on a first install).
+            # Give every non-ready state the same bounded activation window.
             time.sleep(self.poll_interval)
         return False, last
+
+    def _readiness_failure(self, state: str) -> RuntimeError:
+        message = f"Klipper did not become Ready (state={state})"
+        diagnostic = getattr(self.transport, "klipper_failure_detail", None)
+        if callable(diagnostic):
+            try:
+                detail = diagnostic()
+                if detail:
+                    message += f": {detail}"
+            except Exception:
+                pass  # Keep the observed timeout even if diagnostics fail.
+        return RuntimeError(message)
 
     def _wait_moonraker(self) -> bool:
         deadline = time.monotonic() + self.timeout
@@ -449,8 +474,19 @@ class ConfigDeploymentTransaction:
             validate_board_electrical_artifact(self.selected_board, self.generated_hardware)
             self.transport.validate_activation_target()
             remote = read_config_state(self.transport, self.generated_hardware, self.generated_macros)
+            from core.managed_config import preserved_homing_conflicts
+            replacements = frozenset()
+            conflicts = preserved_homing_conflicts(self.generated_hardware, remote)
+            if conflicts and self.resolve_preserved_homing is not None:
+                replacements = self.resolve_preserved_homing(conflicts)
+                if replacements is None:
+                    return ConfigTransactionResult(
+                        ConfigTransactionState.CANCELLED, "homing/calibration review cancelled; no files written", self.transaction_id,
+                    )
             self.plan = build_managed_config_plan(
-                self.generated_hardware, self.generated_macros, remote
+                self.generated_hardware, self.generated_macros, remote,
+                geometry_context=self.geometry_context,
+                **({"replace_preserved": frozenset(replacements)} if replacements else {}),
             )
             self._expected_config_state = {
                 **remote, **{item.remote_name: item.content for item in self.plan.artifacts},
@@ -463,6 +499,23 @@ class ConfigDeploymentTransaction:
                 self.plan, firmware_reservation_reader=self.firmware_reservation_reader,
                 selected_board=self.selected_board,
             )
+            from core.klipper_preflight import plan_digest, validate_plan
+            preflight = validate_plan(self.plan)
+            if preflight.status != "valid":
+                return ConfigTransactionResult(
+                    ConfigTransactionState.PRECONDITION_FAILED,
+                    f"Klipper preflight {preflight.status}: {preflight.detail}",
+                    self.transaction_id,
+                )
+            validated_digest = preflight.tree_digest
+            def check_preflight_plan():
+                try:
+                    current_digest = plan_digest(self.plan)
+                except Exception as exc:
+                    raise ConfigConflictError(f"Klipper preflight plan could not be revalidated: {exc}") from exc
+                if not validated_digest or current_digest != validated_digest:
+                    raise ConfigConflictError("configuration plan changed after Klipper preflight")
+            check_preflight_plan()
             require_conditional_writes(self.transport, self.plan, persist_root=self.snapshot_root)
             if self.review is None:
                 self.output(diff or "No configuration changes are required.")
@@ -494,6 +547,7 @@ class ConfigDeploymentTransaction:
                     "deployment cancelled after dry-run diff",
                     self.transaction_id,
                 )
+            check_preflight_plan()
             # Only a verified no-op retry can skip the restart decision. Files
             # may already match while their activation is still pending.
             if self.activation_selector is not None and (
@@ -543,6 +597,7 @@ class ConfigDeploymentTransaction:
         try:
             # Snapshot persistence can take time. Check again immediately before
             # the first write; external editors do not participate in our lock.
+            check_preflight_plan()
             revalidate_config_state(self.transport, current)
             # Confirmation/snapshotting can take time. Do not publish using
             # reservation evidence from firmware bytes that have since changed.
@@ -577,7 +632,7 @@ class ConfigDeploymentTransaction:
             if not self.plan.changed_artifacts and self.verify_existing_ready:
                 ready, state = self._wait_ready()
                 if not ready:
-                    raise RuntimeError(f"Klipper did not become Ready (state={state})")
+                    raise self._readiness_failure(state)
                 self._verify_firmware()
                 self._verify_active_configuration()
                 self._verify_plan()
@@ -606,7 +661,7 @@ class ConfigDeploymentTransaction:
             self._emit("VERIFYING_CONFIG", "waiting for Klipper Ready after restart")
             ready, state = self._wait_ready()
             if not ready:
-                raise RuntimeError(f"Klipper did not become Ready (state={state})")
+                raise self._readiness_failure(state)
             self._verify_firmware()
             self._verify_active_configuration()
             self._verify_plan()
@@ -814,6 +869,11 @@ class MoonrakerConfigTransport:
     def klipper_state(self) -> str:
         from core.moonraker import get_klipper_state
         return get_klipper_state(self.host, self.port, api_key=self.api_key)
+
+    def klipper_failure_detail(self) -> str:
+        from core.moonraker import check_klipper_ready
+        ready, detail = check_klipper_ready(self.host, self.port, api_key=self.api_key)
+        return "" if ready else detail
 
 
 class SftpConfigTransport(MoonrakerConfigTransport):
@@ -1074,7 +1134,10 @@ class LocalMoonrakerConfigTransport(LocalConfigTransport, MoonrakerConfigTranspo
 
 
 def local_moonraker_available():
-    return os.name == "posix" and os.path.isfile(os.path.expanduser("~/printer_data/config/printer.cfg"))
+    # This is a menu candidate, not activation authority. A first installation
+    # has a config directory but may not have printer.cfg yet. The transaction
+    # still validates Moonraker's active path and config root before any write.
+    return os.name == "posix" and os.path.isdir(os.path.expanduser("~/printer_data/config"))
 
 
 def configuration_transport(host, port=7125, api_key=None):

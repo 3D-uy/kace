@@ -5,10 +5,122 @@ Active source homing overrides need a reviewed equivalent before generation or
 source-bound publication can claim the selected hardware is available.
 """
 from core.exceptions import GenerationError
+import math
 
 
 SOURCE = '_homing_override_active'
 ADDITIONAL_Z_ENDSTOPS = '_additional_z_endstop_source'
+SAFE_Z_HOP_SOURCE = '_safe_z_hop_source'
+
+
+def _z_hop_number(value):
+    try:
+        hop = float(value)
+        if not math.isfinite(hop) or hop < 0:
+            raise ValueError()
+        return hop
+    except (TypeError, ValueError) as exc:
+        raise GenerationError('[safe_z_home] z_hop must be a finite, non-negative value.') from exc
+
+
+def validate_safe_z_hop(sections):
+    """Validate the absolute lift target used by Klipper before/after Z homing.
+
+    With an unhomed Z, Klipper first assigns coordinate zero and moves to
+    z_hop. With a homed Z below the target it moves to that same coordinate.
+    This checks configured limits, not clearance from an unknown physical start.
+    """
+    if 'safe_z_home' not in sections:
+        return
+    # The pinned SafeZHoming constructor reads both speeds even with z_hop=0.
+    # Omitted options retain Klipper's defaults; finiteness is KACE preflight.
+    for option in ('speed', 'z_hop_speed'):
+        if option not in sections['safe_z_home']:
+            continue
+        try:
+            value = float(str(sections['safe_z_home'][option]).strip())
+        except (TypeError, ValueError):
+            raise GenerationError(f'[safe_z_home] {option} must be finite and greater than zero.') from None
+        if not math.isfinite(value) or value <= 0:
+            raise GenerationError(f'[safe_z_home] {option} must be finite and greater than zero.')
+    hop = _z_hop_number(sections['safe_z_home'].get('z_hop', 0))
+    if hop == 0:
+        return  # Explicitly disabled; no lift target is commanded.
+    rail = sections.get('stepper_z', {})
+    try:
+        minimum, maximum = float(rail.get('position_min', 0)), float(rail['position_max'])
+        if not (math.isfinite(minimum) and math.isfinite(maximum)
+                and minimum < maximum and minimum <= hop <= maximum):
+            raise ValueError()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GenerationError(
+            f'[safe_z_home] z_hop ({hop:g}) must be within the finite [stepper_z] '
+            f'position_min/position_max range [{rail.get("position_min", 0)}, '
+            f'{rail.get("position_max", "missing")}]. Review the Z limits or explicitly select a valid hop.'
+        ) from exc
+
+
+def _safe_z_hop_options(parsed):
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict) or not isinstance(parsed.get('safe_z_home', {}), dict):
+        raise GenerationError('[safe_z_home] z_hop source is malformed; reload it.')
+    options = parsed.get('safe_z_home', {})
+    if SAFE_Z_HOP_SOURCE in parsed:
+        captured = parsed[SAFE_Z_HOP_SOURCE]
+        if not isinstance(captured, dict) or set(captured) - {'z_hop'}:
+            raise GenerationError('[safe_z_home] z_hop activity evidence is malformed; reload it.')
+        if any(key not in options or _z_hop_number(options[key]) != _z_hop_number(value)
+               for key, value in captured.items()):
+            raise GenerationError('[safe_z_home] z_hop changed after activity capture; reload it.')
+        options = captured
+    return {key: options[key] for key in ('z_hop',) if key in options}
+
+
+def _selected_safe_z_hop_options(parsed, raw, label):
+    if isinstance(raw, str) and raw.strip():
+        from core.scraper import parse_config
+        active = _safe_z_hop_options(parse_config(raw))
+        if isinstance(parsed, dict):
+            if SAFE_Z_HOP_SOURCE in parsed:
+                captured = _safe_z_hop_options(parsed)
+                mismatch = ({key: _z_hop_number(value) for key, value in captured.items()}
+                            != {key: _z_hop_number(value) for key, value in active.items()})
+            else:
+                # Old discovery maps included comments. Only active raw values
+                # require agreement; commented examples never become policy.
+                options = parsed.get('safe_z_home', {})
+                mismatch = not isinstance(options, dict) or any(
+                    key not in options or _z_hop_number(options[key]) != _z_hop_number(value)
+                    for key, value in active.items())
+            if mismatch:
+                raise GenerationError(f'[safe_z_home] z_hop {label} differs from its saved text; reload it.')
+        elif parsed is not None:
+            raise GenerationError(f'[safe_z_home] z_hop {label} is malformed; reload it.')
+        return active
+    return _safe_z_hop_options(parsed)
+
+
+def resolve_safe_z_hop(parsed, user):
+    """Preserve active source/selected hop; keep KACE's historical 10mm default."""
+    sources = []
+    for config, raw, label in ((parsed, user.get('board_raw_config'), 'board'),
+                              (user.get('_profile_parsed'), user.get('raw_config'), 'profile')):
+        options = _selected_safe_z_hop_options(config, raw, label)
+        if 'z_hop' in options:
+            sources.append(_z_hop_number(options['z_hop']))
+    if 'safe_z_home_z_hop' in user:
+        hop = _z_hop_number(user['safe_z_home_z_hop'])
+    else:
+        if len(set(sources)) > 1:
+            raise GenerationError('[safe_z_home] z_hop differs between board and profile; select an explicit value.')
+        hop = sources[0] if sources else 10.0
+    validate_safe_z_hop({
+        'safe_z_home': {'z_hop': hop},
+        'stepper_z': {'position_min': user.get('z_position_min', 0),
+                      'position_max': user.get('z_position_max', user.get('z_size'))},
+    })
+    return f'{hop:g}'
 
 
 def additional_z_endstops(parsed):

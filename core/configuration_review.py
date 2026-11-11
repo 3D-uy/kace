@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import os
+import ast
 import math
 import re
+import shutil
 import sys
+import textwrap
 from configparser import ConfigParser
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from core.managed_config import HARDWARE_REMOTE, MACROS_REMOTE, ManagedConfigPlan, effective_hardware_text
+from core.managed_config import HARDWARE_REMOTE, MACROS_REMOTE, ROOT_MACROS_REMOTE, ManagedConfigPlan, effective_hardware_text
 from core.profile_values import infer_homing_positive_dir
 from core.probe_configuration import is_probe_virtual_endstop, validate_probe_homing_geometry
 from core.config_sections import section_identity
@@ -84,9 +87,25 @@ def validate_configuration_plan(
 ) -> SemanticValidation:
     hardware = effective_hardware_text(plan)
     generated_guidance = _artifact_text(plan, HARDWARE_REMOTE) or _artifact_text(plan, "printer.cfg")
-    macros = _artifact_text(plan, MACROS_REMOTE)
+    macros = "\n".join(_artifact_text(plan, name) for name in (MACROS_REMOTE, ROOT_MACROS_REMOTE))
     sections = _sections(hardware)
     errors: list[ReviewMessage] = []
+    from core.config_geometry import validate_effective_xy_geometry
+    try:
+        validate_effective_xy_geometry(hardware, plan.geometry_context)
+    except ValueError as exc:
+        errors.append(ReviewMessage("effective-xy-geometry", str(exc)))
+    from core.managed_config import _autosave_text
+    saved = _sections(_autosave_text(_artifact_text(plan, "printer.cfg")))
+    for provider, field in (("probe", "pin"), ("bltouch", "sensor_pin")):
+        if ("z_offset" in saved.get(provider, {}) and provider in sections
+                and not sections[provider].get(field)):
+            errors.append(ReviewMessage(
+                "saved-probe-calibration",
+                f"printer.cfg: SAVE_CONFIG [{provider}] z_offset={saved[provider]['z_offset']}\n"
+                "The preserved probe calibration has no active probe pin. Resolve this calibration "
+                "before removing the probe; SAVE_CONFIG was not deleted.",
+            ))
     from core.tmc_sensorless import validate_tmc_virtual_endstops
     from core.exceptions import GenerationError
     from core.heater_verification import validate_verify_heater
@@ -114,11 +133,24 @@ def validate_configuration_plan(
         validate_board_electrical_artifact(selected_board, hardware)
     except GenerationError as exc:
         errors.append(ReviewMessage("board-electrical-dependency", str(exc)))
-    from core.bed_mesh import validate_mesh_clearance, validate_mesh_interpolation
+    from core.bed_mesh import validate_mesh_clearance, validate_mesh_interpolation, validate_mesh_options
+    try:
+        validate_mesh_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("mesh-options", str(exc)))
     try:
         validate_mesh_clearance(sections)
     except GenerationError as exc:
         errors.append(ReviewMessage("mesh-clearance", str(exc)))
+    from core.leveling import validate_leveling_clearance, validate_leveling_adjustment_options
+    try:
+        validate_leveling_clearance(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("leveling-clearance", str(exc)))
+    try:
+        validate_leveling_adjustment_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("leveling-adjustment-options", str(exc)))
     try:
         validate_mesh_interpolation(sections)
     except GenerationError as exc:
@@ -160,11 +192,15 @@ def validate_configuration_plan(
         validate_primary_extruder_options(sections)
     except GenerationError as exc:
         errors.append(ReviewMessage("extruder-options", str(exc)))
-    from core.homing_source import validate_homing_composition
+    from core.homing_source import validate_homing_composition, validate_safe_z_hop
     try:
         validate_homing_composition(sections)
     except GenerationError as exc:
         errors.append(ReviewMessage("homing-composition", str(exc)))
+    try:
+        validate_safe_z_hop(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage("safe-z-hop", str(exc)))
     try:
         validate_sensor_resistors(sections)
     except GenerationError as exc:
@@ -182,12 +218,47 @@ def validate_configuration_plan(
         validate_adc_pin_dependencies(_read_pin_config(hardware)[0])
     except (GenerationError, PinAliasError) as exc:
         errors.append(ReviewMessage("adc-pin-dependency", str(exc)))
-    from core.primary_mcu import validate_primary_restart
+    from core.primary_mcu import validate_primary_restart, validate_mcu_connection_options
     try:
         generated_mcu = _read_pin_config(generated_guidance)[0].get('mcu', {})
         validate_primary_restart(_read_pin_config(hardware)[0], expected=generated_mcu.get('restart_method'))
     except GenerationError as exc:
         errors.append(ReviewMessage('mcu-restart', str(exc)))
+    try:
+        validate_mcu_connection_options(sections)
+    except GenerationError as exc:
+        errors.append(ReviewMessage('mcu-connection', str(exc)))
+    from core.heater_options import validate_heater_options
+    try:
+        # Sensor factory names are case-sensitive, including custom curves.
+        validate_heater_options(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage('heater-options', str(exc)))
+    from core.pwm_output import validate_pwm_outputs
+    try:
+        validate_pwm_outputs(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage('pwm-output', str(exc)))
+    from core.sx1509_pwm import validate_sx1509_pwm
+    try:
+        validate_sx1509_pwm(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage('sx1509-pwm', str(exc)))
+    from core.fan_consumers import validate_fan_consumers
+    try:
+        validate_fan_consumers(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage('fan-consumers', str(exc)))
+    from core.fan_auxiliary import validate_fan_auxiliary
+    try:
+        validate_fan_auxiliary(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage('fan-auxiliary', str(exc)))
+    from core.controller_fan_references import validate_controller_fan_references
+    try:
+        validate_controller_fan_references(_read_pin_config(hardware)[0])
+    except (GenerationError, PinAliasError) as exc:
+        errors.append(ReviewMessage('controller-fan-references', str(exc)))
     from core.host_mcu import validate_host_adc_mcus
     try:
         generated_sections = _read_pin_config(generated_guidance)[0]
@@ -328,7 +399,11 @@ def validate_configuration_plan(
     try:
         validate_probe_homing_geometry(sections)
     except GenerationError as exc:
-        errors.append(ReviewMessage("homing-z-geometry", str(exc)))
+        probe_options = sections.get("probe", sections.get("bltouch", {}))
+        values = (f"[stepper_z] position_min={z_options.get('position_min', '0')}, "
+                  f"position_max={z_options.get('position_max', '?')}; "
+                  f"probe.z_offset={probe_options.get('z_offset', '?')}")
+        errors.append(ReviewMessage("homing-z-geometry", str(exc) + " " + values))
 
     for axis in ("x", "y", "z"):
         if axis == "z" and virtual_z:
@@ -345,7 +420,8 @@ def validate_configuration_plan(
         if not {"position_max", "position_endstop"} <= set(options):
             errors.append(ReviewMessage(
                 f"homing-{axis}-geometry",
-                f"Homing geometry for {axis.upper()} is incomplete; position_max and position_endstop are required (position_min defaults to zero).",
+                f"Homing geometry for {axis.upper()} is incomplete; position_max and position_endstop are required (position_min defaults to zero). "
+                f"[stepper_{axis}] position_min={options.get('position_min', '0')}, position_max={options.get('position_max', '?')}, position_endstop={options.get('position_endstop', '?')}",
             ))
             continue
         # Apply the Klipper rail default only while reading; preserve omission
@@ -360,7 +436,8 @@ def validate_configuration_plan(
         except (ValueError, TypeError):
             errors.append(ReviewMessage(
                 f"homing-{axis}-geometry",
-                f"Homing geometry for {axis.upper()} requires finite limits with position_min < position_max and an endstop within that range.",
+                f"Homing geometry for {axis.upper()} requires finite limits with position_min < position_max and an endstop within that range. "
+                f"[stepper_{axis}] position_min={options.get('position_min', '0')}, position_max={options.get('position_max', '?')}, position_endstop={options.get('position_endstop', '?')}",
             ))
             continue
         inferred = infer_homing_positive_dir(
@@ -471,7 +548,7 @@ def build_configuration_review(
         changes.append("printer.cfg will load the files managed by KACE while preserving unmanaged sections.")
     if HARDWARE_REMOTE in changed:
         changes.append("KACE will publish the generated hardware configuration.")
-    if MACROS_REMOTE in changed:
+    if MACROS_REMOTE in changed or ROOT_MACROS_REMOTE in changed:
         changes.append("KACE will publish starter macros compatible with the selected hardware.")
     return ConfigurationReview(validation, tuple(summary), changed, tuple(changes), plan.dry_run_diff())
 
@@ -479,23 +556,150 @@ def build_configuration_review(
 _TEXT = {
     "English": {
         "title": "Configuration summary", "files": "Files to be modified",
-        "changes": "Important changes", "warnings": "Warnings", "errors": "Blocking errors",
+        "changes": "Changes to apply", "warnings": "Warnings", "errors": "Blocking errors",
         "validation_ok": "Semantic validation passed", "validation_bad": "Semantic validation failed",
-        "footer": "{files} file(s) will change | {warnings} warning(s) | {validation}",
+        "footer": "{files} file(s) will change | {changes} setting change(s) | {warnings} warning(s) | {validation}",
     },
     "Español": {
         "title": "Resumen de configuración", "files": "Archivos que se modificarán",
-        "changes": "Cambios importantes", "warnings": "Advertencias", "errors": "Errores que bloquean la aplicación",
+        "changes": "Cambios que se aplicarán", "warnings": "Advertencias", "errors": "Errores que bloquean la aplicación",
         "validation_ok": "Validación semántica correcta", "validation_bad": "La validación semántica falló",
-        "footer": "{files} archivo(s) se modificarán | {warnings} advertencia(s) | {validation}",
+        "footer": "{files} archivo(s) se modificarán | {changes} cambio(s) de ajustes | {warnings} advertencia(s) | {validation}",
     },
     "Português": {
         "title": "Resumo da configuração", "files": "Arquivos que serão modificados",
-        "changes": "Alterações importantes", "warnings": "Avisos", "errors": "Erros que bloqueiam a aplicação",
+        "changes": "Alterações que serão aplicadas", "warnings": "Avisos", "errors": "Erros que bloqueiam a aplicação",
         "validation_ok": "Validação semântica aprovada", "validation_bad": "A validação semântica falhou",
-        "footer": "{files} arquivo(s) serão alterados | {warnings} aviso(s) | {validation}",
+        "footer": "{files} arquivo(s) serão alterados | {changes} alteração(ões) de ajustes | {warnings} aviso(s) | {validation}",
     },
 }
+
+
+_CHANGE_TEXT = {
+    "English": {
+        "axis": "Axis {axis}", "range": "Travel", "position_min": "Minimum",
+        "position_max": "Maximum", "position_endstop": "Endstop position",
+        "endstop_pin": "Endstop pin", "z_offset": "Probe Z offset",
+        "homing_positive_dir": "Homing direction", "minimum": "toward minimum", "maximum": "toward maximum",
+        "probe": "Probe", "bltouch": "BLTouch", "safe_z_home": "Safe Z homing",
+        "bed_mesh": "Bed mesh", "remove": "Remove {section} settings · changes: {count}",
+        "details": "Technical details of configuration changes",
+    },
+    "Español": {
+        "axis": "Eje {axis}", "range": "Recorrido", "position_min": "Mínimo",
+        "position_max": "Máximo", "position_endstop": "Posición del final de carrera",
+        "endstop_pin": "Pin del final de carrera", "z_offset": "Offset Z de sonda",
+        "homing_positive_dir": "Dirección de homing", "minimum": "hacia el mínimo", "maximum": "hacia el máximo",
+        "probe": "Sonda", "bltouch": "BLTouch", "safe_z_home": "Homing Z seguro",
+        "bed_mesh": "Malla de cama", "remove": "Retirar ajustes de {section} · cambios: {count}",
+        "details": "Detalles técnicos de los cambios de configuración",
+    },
+    "Português": {
+        "axis": "Eixo {axis}", "range": "Curso", "position_min": "Mínimo",
+        "position_max": "Máximo", "position_endstop": "Posição do fim de curso",
+        "endstop_pin": "Pino do fim de curso", "z_offset": "Offset Z da sonda",
+        "homing_positive_dir": "Direção do homing", "minimum": "em direção ao mínimo", "maximum": "em direção ao máximo",
+        "probe": "Sonda", "bltouch": "BLTouch", "safe_z_home": "Homing Z seguro",
+        "bed_mesh": "Malha da mesa", "remove": "Remover ajustes de {section} · alterações: {count}",
+        "details": "Detalhes técnicos das alterações de configuração",
+    },
+}
+
+
+def _setting_change(item):
+    """Recognize only the planner's exact change messages; unknown warnings stay visible."""
+    if item.code != "managed-plan":
+        return None
+    match = re.fullmatch(r"(.+): \[([^\]]+)\](?: ([^ =]+) = (.+))? will be (removed|replaced with (.+))\.", item.message)
+    if match is None:
+        return None
+    source, section, option, old, action, new = match.groups()
+    try:
+        old = ast.literal_eval(old) if old is not None else None
+        new = ast.literal_eval(new) if action != "removed" else None
+    except (ValueError, SyntaxError):
+        return None
+    if (old is not None and not isinstance(old, str)) or (new is not None and not isinstance(new, str)):
+        return None
+    return source, section, option, old, new
+
+
+def _change_width():
+    return min(100, max(22, shutil.get_terminal_size((80, 24)).columns - 2))
+
+
+def _localize_setting_change(text, language):
+    replacements = {
+        "Español": {" will be replaced with ": " se reemplazará por ", " will be removed.": " se eliminará."},
+        "Português": {" will be replaced with ": " será substituído por ", " will be removed.": " será removido."},
+    }.get(language, {})
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
+def _setting_change_summary(items, language, color):
+    labels = _CHANGE_TEXT.get(language, _CHANGE_TEXT["English"])
+    groups = {}
+    for item in items:
+        source, section, option, old, new = _setting_change(item)
+        groups.setdefault((source, section), []).append((option, old, new))
+    lines = []
+    reset, cyan, yellow = ("\033[0m", "\033[96m", "\033[93m") if color else ("", "", "")
+    for (source, section), changes in groups.items():
+        name = (labels["axis"].format(axis=section[-1].upper())
+                if section in {"stepper_x", "stepper_y", "stepper_z"} else labels.get(section, section))
+        heading = f"  {name} · {source}"
+        lines.append("")
+        lines.extend(f"{cyan}{line}{reset}" for line in textwrap.wrap(heading, width=_change_width(), subsequent_indent="  "))
+        if all(new is None for _, _, new in changes):
+            text = labels["remove"].format(section=f"[{section}]", count=len(changes))
+            lines.extend(textwrap.wrap(text, width=_change_width(), initial_indent="    ", subsequent_indent="    "))
+            continue
+        by_option = {option: (old, new) for option, old, new in changes}
+        range_changed = section in {"stepper_x", "stepper_y", "stepper_z"} and all(
+            key in by_option and by_option[key][1] is not None for key in ("position_min", "position_max"))
+        rows = []
+        if range_changed:
+            low, high = by_option["position_min"], by_option["position_max"]
+            rows.append((labels["range"], f"{low[0]}…{high[0]} → {low[1]}…{high[1]} mm"))
+        for option, old, new in changes:
+            if range_changed and option in {"position_min", "position_max"}:
+                continue
+            if new is None:
+                rows.append((option or section, labels["remove"].format(section=f"[{section}] {option or ''}".strip(), count=1)))
+            else:
+                unit = " mm" if option in {"position_min", "position_max", "position_endstop", "z_offset"} else ""
+                if option == "homing_positive_dir":
+                    directions = {"false": labels["minimum"], "true": labels["maximum"]}
+                    old, new = directions.get(old.casefold(), old), directions.get(new.casefold(), new)
+                rows.append((labels.get(option, option), f"{old} → {new}{unit}"))
+        for label, value in rows:
+            prefix = f"    {label}: "
+            # Narrow terminals put long field labels on their own line.
+            longest_word = max((len(word) for word in value.split()), default=0)
+            if len(prefix) > _change_width() - max(12, longest_word):
+                lines.extend(textwrap.wrap(prefix.strip(), width=_change_width(), initial_indent="    ", subsequent_indent="    "))
+                prefix = "      "
+            wrapped = textwrap.fill(value, width=_change_width(), initial_indent=prefix,
+                                    subsequent_indent=" " * len(prefix), break_on_hyphens=False)
+            for line in wrapped.splitlines():
+                lines.append(f"{line[:len(prefix)]}{yellow}{line[len(prefix):]}{reset}")
+    return lines
+
+
+def render_configuration_change_details(review, *, language="English", color=None):
+    """Keep every planner change accessible in both wizard modes before consent."""
+    labels = _CHANGE_TEXT.get(language, _CHANGE_TEXT["English"])
+    if color is None:
+        color = terminal_supports_color()
+    lines = [f"\033[96m{line}\033[0m" if color else line
+             for line in textwrap.wrap(labels["details"], width=_change_width())]
+    for item in review.validation.warnings:
+        if item.code == "managed-plan":
+            lines.extend(textwrap.wrap(_localize_setting_change(item.message, language), width=_change_width(),
+                                       initial_indent="  - ", subsequent_indent="    ", break_on_hyphens=False))
+    return "\n".join(lines)
 
 
 def terminal_supports_color(stream=None) -> bool:
@@ -522,7 +726,7 @@ def render_configuration_review(
     reset = "\033[0m" if color else ""
 
     def section_heading(kind: str, text: str, status: str = "info") -> str:
-        prefix = "\033[1m" + colors[status] if color else ""
+        prefix = colors[status] if color else ""
         return f"{prefix}{icons.get(kind, icons[status])}  {text}{reset}"
 
     def paint(status: str, text: str) -> str:
@@ -581,9 +785,58 @@ def render_configuration_review(
     def message(item):
         if language == "English" or advanced:
             return item.message
+        if item.code == "managed-plan":
+            return _localize_setting_change(item.message, language)
+        if item.code in {"probe-pin-conflict", "bltouch-pin-conflict"}:
+            replacements = {
+                "Español": {
+                    "Probe pin validation failed: ": "Error en el pin de la sonda: ",
+                    "BLTouch pin validation failed: ": "Error en los pines de BLTouch: ",
+                    "Probe pin conflicts with ": "El pin de la sonda entra en conflicto con ",
+                    " conflicts with ": " entra en conflicto con ",
+                    " has an invalid pin: ": " tiene un pin inválido: ",
+                    " is reserved by firmware for ": " está reservado por el firmware para ",
+                    " shares the GPIO of ": " comparte el GPIO de ",
+                },
+                "Português": {
+                    "Probe pin validation failed: ": "Erro no pino da sonda: ",
+                    "BLTouch pin validation failed: ": "Erro nos pinos do BLTouch: ",
+                    "Probe pin conflicts with ": "O pino da sonda entra em conflito com ",
+                    " conflicts with ": " entra em conflito com ",
+                    " has an invalid pin: ": " tem um pino inválido: ",
+                    " is reserved by firmware for ": " está reservado pelo firmware para ",
+                    " shares the GPIO of ": " compartilha o GPIO de ",
+                },
+            }[language]
+            rendered = item.message
+            for old, new in replacements.items():
+                rendered = rendered.replace(old, new)
+            return rendered
+        if item.code == "saved-probe-calibration":
+            return _REVIEW_MESSAGES[item.code][0 if language == "Español" else 1] + " " + item.message.splitlines()[0]
+        if item.code == "effective-xy-geometry":
+            prefix = {
+                "Español": "Revisá la geometría XY efectiva y la procedencia de los límites de cama antes de publicar.",
+                "Português": "Revise a geometria XY efetiva e a procedência dos limites da mesa antes de publicar.",
+            }[language]
+            # Keep the section, offending value and range visible in normal mode.
+            return prefix + " " + item.message
+        if item.code == "safe-z-hop":
+            prefix = {
+                "Español": "Revisá el salto Z de homing y los límites del eje antes de publicar.",
+                "Português": "Revise a elevação Z do homing e os limites do eixo antes de publicar.",
+            }[language]
+            return prefix + " " + item.message
         code = re.sub(r"homing-[xyz]-", "homing-", item.code)
         code = re.sub(r"^(extruder|heater_bed)-", "heater-", code)
-        return _REVIEW_MESSAGES.get(code, _REVIEW_MESSAGES["managed-plan"])[0 if language == "Español" else 1]
+        if code == "homing-geometry":
+            details = re.search(r"\[stepper_[xyz]\] position_min=.*$", item.message)
+            if details:
+                return _REVIEW_MESSAGES[code][0 if language == "Español" else 1] + " " + details.group(0)
+        localized = _REVIEW_MESSAGES.get(code)
+        # An unmapped validation error must retain its cause in normal review;
+        # a generic settings-change warning cannot stand in for a blocking error.
+        return localized[0 if language == "Español" else 1] if localized else f"[{item.code}] {item.message}"
 
     lines = [section_heading("title", labels["title"]), ""]
     lines.extend(f"  {paint(item.status, localize(item.text))}" for item in review.summary)
@@ -594,12 +847,14 @@ def render_configuration_review(
     else:
         lines.append("  - " + {"Español": "Sin cambios", "Português": "Sem alterações"}.get(language, "No changes"))
     lines.extend(["", section_heading("changes", labels["changes"])])
+    setting_changes = [item for item in review.validation.warnings if _setting_change(item) is not None]
     if review.important_changes:
         lines.extend(f"  - {localize(change)}" for change in review.important_changes)
-    else:
+    elif not setting_changes:
         lines.append("  - " + {"Español": "Sin cambios", "Português": "Sem alterações"}.get(language, "No changes"))
+    lines.extend(_setting_change_summary(setting_changes, language, color))
     commissioning = [item for item in review.validation.warnings if "inferred" in item.code]
-    warnings = [item for item in review.validation.warnings if item not in commissioning]
+    warnings = [item for item in review.validation.warnings if item not in commissioning and item not in setting_changes]
     if warnings:
         lines.extend(["", section_heading("warning", labels["warnings"], "warning")])
         lines.extend(f"  - {message(item)}" for item in warnings)
@@ -612,12 +867,13 @@ def render_configuration_review(
         lines.extend(f"  - {message(item)}" for item in review.validation.errors)
     validation = labels["validation_ok"] if review.validation.valid else labels["validation_bad"]
     lines.extend(["", labels["footer"].format(
-        files=len(review.changed_files), warnings=len(review.validation.warnings), validation=validation
+        files=len(review.changed_files), changes=len(setting_changes), warnings=len(warnings), validation=validation
     )])
     return "\n".join(lines)
 
 
 _REVIEW_MESSAGES = {
+    "saved-probe-calibration": ("Hay una calibración de sonda guardada sin una sonda activa completa. Revisá esa calibración antes de retirar la sonda; SAVE_CONFIG se conservó.", "Há uma calibração de sonda salva sem uma sonda ativa completa. Revise essa calibração antes de remover a sonda; SAVE_CONFIG foi preservado."),
     "display-config": ("La configuración de pantalla contiene un controlador o campos obligatorios inválidos. Revisá los detalles en modo avanzado.", "A configuração do display contém um controlador ou campos obrigatórios inválidos. Consulte os detalhes no modo avançado."),
     "display-hardware-unverified": ("Conservar o publicar la configuración de pantalla no verifica su cableado ni su compatibilidad eléctrica. Verificá la placa y pantalla concretas antes de conectarlas.", "Preservar ou publicar a configuração do display não verifica sua fiação nem sua compatibilidade elétrica. Verifique a placa e o display específicos antes de conectá-los."),
     "managed-plan": ("Se modificarán opciones existentes. Revisá los detalles en modo avanzado antes de confirmar.", "Opções existentes serão alteradas. Revise os detalhes no modo avançado antes de confirmar."),

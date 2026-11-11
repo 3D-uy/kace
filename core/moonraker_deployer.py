@@ -127,9 +127,19 @@ class DeploymentTimeouts:
 class ConfigArtifact:
     local_path: str
     remote_name: str
+    expected_content: Optional[bytes] = None
+
+    def read_content(self) -> bytes:
+        with open(self.local_path, "rb") as source:
+            content = source.read()
+        if self.expected_content is not None and content != self.expected_content:
+            raise ValueError(f"staged configuration changed: {self.remote_name}")
+        return content
 
     @property
     def sha256(self) -> str:
+        if self.expected_content is not None:
+            return hashlib.sha256(self.expected_content).hexdigest()
         digest = hashlib.sha256()
         with open(self.local_path, "rb") as source:
             for chunk in iter(lambda: source.read(1024 * 1024), b""):
@@ -425,7 +435,11 @@ class Deployer:
         names = tuple(self._attempted_config_writes)
         verify_snapshot_restored(self.snapshot, self.client.read_config_files(names), names)
 
-    def _rollback(self) -> tuple[bool, str]:
+    def _rollback(self) -> tuple[Optional[bool], str]:
+        # A failed verification or pre-write read can occur with no upload
+        # attempt. Restarting then could activate an external, unreviewed edit.
+        if not self._attempted_config_writes:
+            return None, "no configuration files were written"
         if self.snapshot is None:
             return False, "no pre-deployment snapshot is available"
         self._transition(DeployState.ROLLING_BACK, "restoring previous configuration")
@@ -725,7 +739,20 @@ class Deployer:
                         f"{exc}; no configuration files were written",
                         versions,
                     )
-            for artifact in sorted(self.manifest.artifacts(), key=lambda item: (item.remote_name == "printer.cfg", item.remote_name)):
+            # Read and validate the very bytes that will be passed to the
+            # transport. Checking the staging paths alone leaves a race between
+            # the check and the later read. Read all files before any upload.
+            try:
+                staged = [(item, item.read_content()) for item in sorted(
+                    self.manifest.artifacts(),
+                    key=lambda item: (item.remote_name == "printer.cfg", item.remote_name),
+                )]
+            except (OSError, ValueError) as exc:
+                return self._result(
+                    DeployState.FAILED_PRECONDITION,
+                    f"{exc}; no configuration files were written", versions,
+                )
+            for artifact, content in staged:
                 name = artifact.remote_name
                 if self.snapshot is None or name not in (
                     set(self.snapshot.config_files) | set(self.snapshot.missing_files)
@@ -736,8 +763,7 @@ class Deployer:
                     raise RuntimeError(f"Concurrent configuration modification detected: {name}")
                 # An interrupted upload may have written before returning.
                 config_write_started = True
-                with open(artifact.local_path, "rb") as source:
-                    self._attempted_config_writes[artifact.remote_name] = source.read()
+                self._attempted_config_writes[artifact.remote_name] = content
                 self.client.upload_config_if_unchanged(
                     self._attempted_config_writes[name], name, self.snapshot.config_files.get(name))
 
