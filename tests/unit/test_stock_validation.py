@@ -1,3 +1,4 @@
+"""Live filename suggestions plus historical matching examples, not a stock-MCU gate."""
 import unittest
 from unittest.mock import patch, MagicMock
 import sys
@@ -29,7 +30,7 @@ class TestStockValidation(unittest.TestCase):
         self.assertEqual(suggested_board_configs(names, 'lpc176x_custom'), [])
 
     def test_generic_stock_validation(self):
-        """Test validation behavior with exact/family matching and missing expectations."""
+        """Historical literal-data example; current board authority is board_identity."""
         printer_prof = "printer-creality-cr6se-2020.cfg"
         db = [
             {"search_terms": ["cr6se", "cr-6"], "expected_mcu": ["stm32f103"]}
@@ -56,7 +57,7 @@ class TestStockValidation(unittest.TestCase):
         self.assertTrue(match_found_ok)
 
     def test_missing_expected_mcu(self):
-        """Test behavior when no OEM expectation is defined."""
+        """Historical literal-data example, not enforcement against the current catalog."""
         printer_prof = "printer-unknown-model.cfg"
         db = [
             {"search_terms": ["cr6se", "cr-6"], "expected_mcu": ["stm32f103"]}

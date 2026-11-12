@@ -39,18 +39,23 @@ def test_numeric_back_never_becomes_data(token, question):
 ])
 def test_invalid_values_still_retry(question, bad, good):
     state = {}
-    with patch("builtins.input", side_effect=[bad, good]) as terminal:
+    answers = (["known"] if question == "custom_probe_z_offset" else []) + [bad, good]
+    with patch("builtins.input", side_effect=answers) as terminal:
         assert sensors._step_guided_custom_probe_value(state, question) == "done"
     assert state[question] == good
-    assert terminal.call_count == 2
+    assert terminal.call_count == len(answers)
 
 
 def test_optional_absence_and_default_preserved():
-    state = {}
-    with patch("builtins.input", return_value=""):
-        sensors._step_guided_custom_probe_value(state, "custom_probe_z_offset")
-        sensors._step_guided_custom_probe_value(state, "custom_probe_samples")
-    assert state == {"custom_probe_z_offset": "", "custom_probe_samples": "2"}
+    from tests.unit.test_probe_homing_contract import wizard_probe_data
+    state = wizard_probe_data(minimum="0")
+    state.pop("custom_probe")
+    state.update(custom_probe_pin="PB8", custom_probe_x_offset="0", custom_probe_y_offset="0")
+    before = copy.deepcopy(state)
+    with patch("builtins.input", side_effect=["later", ""]):
+        assert sensors._step_guided_custom_probe_value(state, "custom_probe_z_offset") == "done"
+        assert sensors._step_guided_custom_probe_value(state, "custom_probe_samples") == "done"
+    assert state == {**before, "custom_probe_z_offset": "", "custom_probe_samples": "2"}
 
 
 @pytest.mark.parametrize("error", [EOFError, KeyboardInterrupt])
@@ -135,6 +140,65 @@ def test_runner_back_retry_branch_and_receipt_rollback():
     assert "custom_probe_speed" not in runner.snapshots
 
 
+@pytest.mark.parametrize("automatic_step", ["tmc_currents", "probe_homing", "hotend_therm", "custom_probe"])
+def test_back_skips_automatic_steps_and_invalidates_abandoned_branch(automatic_step):
+    """Use real prompts: a silent step must never bounce Back forwards again."""
+    visits = []
+
+    def choose(state):
+        visits.append(copy.deepcopy(state))
+        choice = menu.numbered_select("Choose", [("custom", "custom"), ("none", "none")])
+        state["choice"] = choice
+        return choice
+
+    def automatic(state):
+        state["derived"] = "old branch"
+        return "done"
+
+    config = {
+        "board": {"prompt": choose, "next": lambda answer, state: automatic_step if answer == "custom" else None},
+        automatic_step: {"prompt": automatic, "next": "display"},
+        "display": {"prompt": lambda state: menu.numbered_select("Next", [("Back", _BACK)])},
+    }
+    for step in config.values():
+        step["track_interaction"] = True
+    runner = WizardRunner(config, list(config), {"preserved": {"pin": "PA1"}})
+    with patch("builtins.input", side_effect=["1", "1", "2"]), patch("core.wizard.ui._print_step_header"):
+        result = runner.run("board")
+    assert visits == [{"preserved": {"pin": "PA1"}}, {"preserved": {"pin": "PA1"}}]
+    assert result == {"preserved": {"pin": "PA1"}, "choice": "none"}
+    assert runner.history_stack == ["board"]
+    assert runner.back_targets == {"board"}
+    assert automatic_step not in runner.snapshots
+
+
+def test_back_at_first_question_exits_instead_of_looping():
+    state = {"original": {"pin": "PA1"}}
+    config = {"board": {"prompt": lambda data: menu.numbered_select("Choose", [("Back", _BACK)]),
+                        "track_interaction": True}}
+    with patch("builtins.input", return_value="1") as terminal, \
+            patch("core.wizard.ui._print_step_header"), pytest.raises(WizardExit):
+        WizardRunner(config, list(config), state).run("board")
+    assert terminal.call_count == 1
+    assert state == {"original": {"pin": "PA1"}}
+
+
+def test_runner_honors_quit_returned_by_nested_step():
+    config = {"fan_assignment": {"prompt": lambda data: "__quit__"},
+              "z_motors": {"prompt": lambda data: pytest.fail("Quit advanced the questionnaire")}}
+    with patch("core.wizard.ui._print_step_header"), pytest.raises(WizardExit):
+        WizardRunner(config, list(config), {}).run("fan_assignment")
+
+
+@pytest.mark.parametrize("token", ["<", "volver", "__back__"])
+def test_manual_display_search_can_return_without_compatibility_analysis(token):
+    from core import display_wizard
+    with patch("builtins.input", return_value=token), \
+            patch.object(display_wizard, "run_manual_selection_analysis") as analyze:
+        assert display_wizard._run_manual_search("", "", {}) == (None, None)
+    analyze.assert_not_called()
+
+
 def test_retry_does_not_increase_step_number_or_keep_draft():
     count = 0
     def prompt(state):
@@ -214,13 +278,13 @@ def test_search_localized_without_changing_selection(ui_language, capsys):
     with patch("builtins.input", side_effect=["missing", "PB", "missing", t("choice.back")]) as terminal:
         assert menu.autocomplete_select("Pin", choices) == _BACK
     output = capsys.readouterr().out
-    assert t("menu.search_help", count=21) in output
+    assert " ".join(t("menu.list_filter_help").split()) in " ".join(output.split())
     assert t("menu.search_no_matches", query="missing") in output
     assert t("menu.search_matches", query="PB") in output
-    assert t("menu.search_retry", query="missing") in output
+    assert "< " + t("choice.back") in output
     prompts = [call.args[0] for call in terminal.call_args_list]
     assert t("menu.search_prompt", value="PB0") in prompts[0]
-    assert t("menu.search_select", count=20) in prompts[2]
+    assert t("menu.list_filter_prompt") in prompts[2]
     with patch("builtins.input", side_effect=["PB", "3"]):
         assert menu.autocomplete_select("Pin", choices) == 2
     with patch("builtins.input", return_value=""):

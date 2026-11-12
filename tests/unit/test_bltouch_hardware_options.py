@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 from core.exceptions import GenerationError
 from core.generator import generate_config
+from core.config_geometry import load_geometry_context
 from core.pin_validator import _read_pin_config
 from core.scraper import parse_config
 from core.board_auxiliary import validate_board_electrical_artifact
@@ -71,13 +72,15 @@ def test_invalid_preserved_include_blocks_before_writes(tmp_path, option, value,
     from core.config_transaction import ConfigDeploymentTransaction, ConfigTransactionState
     from tests.unit.test_config_transaction import FakeTransport
     generated = generate(tmp_path, {})["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
     remote = {"printer.cfg": generated + b"\n[include user.cfg]\n", "user.cfg": b"[include nested.cfg]\n",
               "nested.cfg": f"[bltouch]\n{option}: {value}\n".encode()}
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(generated, None, remote).artifacts})
-        assert not build_managed_config_plan(generated, None, remote).changed_artifacts
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(generated, None, remote, geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(generated, None, remote, geometry_context=geometry).changed_artifacts
     transport, confirm = FakeTransport(remote), Mock(return_value=True)
     result = ConfigDeploymentTransaction(transport, generated, None, activation="none", confirm=confirm,
+        geometry_context=geometry,
         output=lambda _: None, snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED
     assert option in result.detail
@@ -144,13 +147,15 @@ def test_valid_but_changed_include_cannot_override_selected_hardware(tmp_path, o
     from tests.unit.test_config_transaction import FakeTransport
     source = board(set_output_mode="5V", pin_move_time="0.4")
     generated = generate(tmp_path, {"set_output_mode": "5V", "pin_move_time": "0.4"})["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
     remote = {"printer.cfg": generated + b"\n[include user.cfg]\n", "user.cfg": b"[include nested.cfg]\n",
               "nested.cfg": f"[bltouch]\n{option}: {value}\n".encode()}
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(generated, None, remote).artifacts})
-        assert not build_managed_config_plan(generated, None, remote).changed_artifacts
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(generated, None, remote, geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(generated, None, remote, geometry_context=geometry).changed_artifacts
     transport, confirm = FakeTransport(remote), Mock(return_value=True)
     result = ConfigDeploymentTransaction(transport, generated, None, selected_board=source,
+        geometry_context=geometry,
         activation="none", confirm=confirm, output=lambda _: None,
         snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED

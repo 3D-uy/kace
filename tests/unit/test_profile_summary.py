@@ -83,7 +83,9 @@ cs_pin: PB5
         
         self.assertIn("Build volume:", output)
         self.assertIn("300 x 300 x 350", output)
-        self.assertIn("printable bed travel envelope", output)
+        self.assertIn("print dimensions: width (X),", output)
+        self.assertIn("Printable XY bounds:", output)
+        self.assertIn("X Not defined / Y Not defined", output)
         
         self.assertIn("Hotend thermistor:", output)
         self.assertIn("Generic 3950", output)

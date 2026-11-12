@@ -110,6 +110,9 @@ class TransactionIdentityTests(unittest.TestCase):
                 stack.enter_context(patch.object(deployer._MoonrakerClient, "get_mcu_versions", return_value={"mcu": "old-firmware"}))
                 stack.enter_context(patch("core.config_transaction.time.sleep"))
                 if route == "moonraker":
+                    # Exercise the remote adapter even on a provisioned Pi.
+                    # The operator's config directory must not choose this fixture's route.
+                    stack.enter_context(patch("core.config_transaction.local_moonraker_available", return_value=False))
                     stack.enter_context(patch("core.menu.simple_input", side_effect=["pi.local", "7125"]))
                     stack.enter_context(patch("core.menu.password_input", return_value=""))
                     stack.enter_context(patch("core.moonraker.check_moonraker", return_value=(True, "ok")))

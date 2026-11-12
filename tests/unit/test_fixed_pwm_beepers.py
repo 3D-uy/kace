@@ -9,6 +9,7 @@ from core.board_pwm import (SOURCE_FIXED_PWM, reviewed_beepers, selected_fixed_p
     fixed_pwm_settings, validate_fixed_pwm_outputs)
 from core.board_auxiliary import (SOURCE_ACTIVITY, SOURCE_OPTIONS, unresolved_pwm_outputs,
     selected_board_electrical_source, validate_board_electrical_artifact)
+from core.config_geometry import load_geometry_context
 from core.config_transaction import ConfigDeploymentTransaction, ConfigTransactionState
 from core.configuration_review import validate_configuration_plan
 from core.custom_probe import parse_custom_probe_config
@@ -52,6 +53,7 @@ def test_real_generation_provenance_and_repeat_publication(tmp_path, case):
     assert unresolved_pwm_outputs(board) == []
     result = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"), include_macros=True, verbose=False)
     generated = result["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
     assert _read_pin_config(result["content"])[0][entry["section"]] == entry["options"]
     proof = json.loads((tmp_path / "printer.cfg.provenance.json").read_text())
     assert proof["sources"]["fixed_pwm_beepers"] == {entry["section"]: entry["options"]}
@@ -60,7 +62,7 @@ def test_real_generation_provenance_and_repeat_publication(tmp_path, case):
     validate_board_electrical_artifact(source, generated)
     dest = FakeTransport()
     for _ in range(2):
-        outcome = ConfigDeploymentTransaction(dest, generated, None, selected_board=source,
+        outcome = ConfigDeploymentTransaction(dest, generated, None, selected_board=source, geometry_context=geometry,
             activation="none", snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
         assert outcome.state == ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION, outcome.detail
     assert entry["section"].encode() in dest.files["printer.cfg"]
@@ -97,13 +99,14 @@ def test_modified_source_or_added_consumer_stays_blocked(case):
 def test_effective_override_fails_before_writes_even_for_noop(tmp_path, override, noop):
     _, board, choices = board_case("printer-biqu-bx-2021.cfg")
     generated = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path / "printer.cfg", generated)
     remote = {"printer.cfg": generated+b"\n[include user.cfg]\n",
               "user.cfg": ("[output_pin beeper]\n"+override+"\n").encode()}
     if noop:
-        remote.update({a.remote_name: a.content for a in build_managed_config_plan(generated, None, remote).artifacts})
-        assert not build_managed_config_plan(generated, None, remote).changed_artifacts
+        remote.update({a.remote_name: a.content for a in build_managed_config_plan(generated, None, remote, geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(generated, None, remote, geometry_context=geometry).changed_artifacts
     dest, confirm = FakeTransport(remote), Mock(return_value=True)
-    result = ConfigDeploymentTransaction(dest, generated, None, selected_board=board, confirm=confirm,
+    result = ConfigDeploymentTransaction(dest, generated, None, selected_board=board, confirm=confirm, geometry_context=geometry,
         activation="firmware", snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED
     assert "beeper" in result.detail
@@ -135,7 +138,8 @@ def test_generation_and_review_enforce_reserved_gpio(tmp_path, case):
     assert not (tmp_path / "printer.cfg").exists()
     text = generate_config(board, choices, output_path=str(tmp_path / "printer.cfg"), verbose=False)["content"]
     reader = Mock(return_value=reserved)
-    review = validate_configuration_plan(build_managed_config_plan(text.encode(), None, {}),
+    geometry = load_geometry_context(tmp_path / "printer.cfg", text.encode())
+    review = validate_configuration_plan(build_managed_config_plan(text.encode(), None, {}, geometry_context=geometry),
         selected_board=board, firmware_reservation_reader=reader)
     reader.assert_called_once()
     assert any(e.code == "fixed-pwm-output" and "reserved for USB" in e.message for e in review.errors)

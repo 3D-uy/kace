@@ -9,6 +9,7 @@ from core.exceptions import GenerationError
 from core.generator import generate_config
 from core.managed_config import build_managed_config_plan, effective_hardware_text
 from core.configuration_review import validate_configuration_plan
+from core.config_geometry import load_geometry_context
 from core.motion_model import PrinterMotionSpace
 from core.pin_validator import _read_pin_config
 from tests.unit.test_generator import _parsed, _user
@@ -98,7 +99,8 @@ def test_existing_interpolation_survives_and_second_plan_is_noop(tmp_path, sourc
     else:
         remote = {"printer.cfg": text + b"\n[include user.cfg]\n",
                   "user.cfg": b"[bed_mesh]\nprobe_count: 6, 3\nalgorithm: lagrange\n"}
-    plan = build_managed_config_plan(text, None, remote)
+    plan = build_managed_config_plan(text, None, remote,
+        geometry_context=load_geometry_context(tmp_path / "printer.cfg", text))
     section = _read_pin_config(effective_hardware_text(plan))[0]["bed_mesh"]
     assert section["probe_count"] == "6, 3" and section["algorithm"] == "lagrange"
     assert validate_configuration_plan(plan).valid
@@ -122,6 +124,7 @@ def test_invalid_nested_include_blocks_before_confirmation(tmp_path, noop, optio
     transport, confirm = FakeTransport(remote), Mock(return_value=True)
     before = dict(transport.files)
     result = ConfigDeploymentTransaction(transport, text, None, activation="none", confirm=confirm,
+        geometry_context=load_geometry_context(tmp_path / "printer.cfg", text),
         output=lambda _: None, snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED and "bed_mesh" in result.detail
     confirm.assert_not_called()

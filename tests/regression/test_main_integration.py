@@ -198,6 +198,10 @@ def _write_mock_generated_config(parsed_data, user_data, **kwargs):
     # This module's SKR 1.4/LPC fixture uses command restart, including resumes.
     content = f'[mcu]\nserial: {serial}\nrestart_method: command\n\n' + _RAW_BOARD_CFG
     target.write_text(content, encoding='utf-8')
+    if kwargs.get("include_macros") or user_data.get("macros_generated"):
+        target.with_name("macros.cfg").write_text(
+            "[gcode_macro KACE_TEST]\ngcode: M117 fixture\n", encoding="utf-8",
+        )
     return {'content': content}
 
 
@@ -251,8 +255,16 @@ class _HeadlessMixin:
             return_value=MagicMock(),
         )
         self._pt_patch.start()
+        # These checkpoints describe synthetic MCUs. Never let an attached
+        # printer reject the fixture and silently divert a resume into a new
+        # wizard. Tests of observed hardware override this patch explicitly.
+        self._hardware_patch = patch(
+            'firmware.detector.discover_mcu_hardware', return_value={},
+        )
+        self._hardware_patch.start()
 
     def tearDown(self):
+        self._hardware_patch.stop()
         self._pt_patch.stop()
         self._home_patch.stop()
         os.environ.pop("KACE_AUTO", None)
@@ -595,6 +607,28 @@ class TestMainCLIDataPropagation(_HeadlessMixin, unittest.TestCase):
                       "include_macros kwarg must be passed to generate_config")
         self.assertFalse(captured_kwargs["include_macros"],
                          "include_macros must be False when user declined macros generation")
+
+    def test_recorded_wizard_macros_choice_is_reused_without_late_prompt(self):
+        from copy import deepcopy
+        import kace
+
+        for selected in (False, True):
+            with self.subTest(selected=selected):
+                user = deepcopy(_WIZARD_USER_DATA_WITH_PARSED)
+                user["macros_generated"] = selected
+                with patch("kace._resume_firmware_workflow", return_value=(None, "new")), \
+                        patch("kace.run_wizard", return_value=user), \
+                        patch("kace.print_kace_banner"), \
+                        patch("kace.check_display_compatibility", return_value=[]), \
+                        patch("kace.generate_config", side_effect=_write_mock_generated_config) as generate, \
+                        patch("core.wizard.steps.thermal.review_thermal_policy"), \
+                        patch("kace.print_summary"), patch("kace.time.sleep"), \
+                        patch("builtins.print"), patch("kace.numbered_select", return_value="none"), \
+                        patch("kace.yes_no", side_effect=AssertionError("Wizard already answered macros")):
+                    with self.assertRaises(SystemExit) as result:
+                        kace.main()
+                self.assertEqual(result.exception.code, 0)
+                self.assertIs(generate.call_args.kwargs["include_macros"], selected)
 
 
 # ── Deployment path selection tests ──────────────────────────────────────────

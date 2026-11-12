@@ -1,5 +1,8 @@
 import io
 import unittest
+import subprocess
+import re
+from wcwidth import wcswidth
 from unittest.mock import patch, MagicMock
 from core.dashboard import (
     _select_language,
@@ -7,11 +10,34 @@ from core.dashboard import (
     detect_system_state,
     get_suggestions,
     run_dashboard,
+    _detect_crowsnest_status,
+    _render_status_panel,
 )
 from core.exceptions import WizardExit
 from core.translations import get_lang, set_lang
 
 class TestDashboard(unittest.TestCase):
+
+    def test_all_status_icons_and_text_start_in_the_same_terminal_columns(self):
+        state = {"klipper": True, "moonraker": False, "mainsail": True,
+                 "fluidd": False, "printer_cfg": True}
+        for language in ("English", "Español", "Português"):
+            set_lang(language)
+            for status in ("files_detected", "service_active", "service_inactive",
+                           "service_failed", "not_found", "status_unknown"):
+                with self.subTest(language=language, status=status):
+                    state["crowsnest_status"] = status
+                    with patch("sys.stdout", new_callable=io.StringIO) as output:
+                        _render_status_panel(state)
+                    columns = []
+                    for line in output.getvalue().splitlines():
+                        line = re.sub(r"\x1b\[[0-9;]*m", "", line)
+                        match = re.search(r"[✅❌●]\s+\S", line)
+                        if match:
+                            columns.append((wcswidth(line[:match.start()]),
+                                            wcswidth(line[:match.end() - 1])))
+                    self.assertEqual(len(columns), 6)
+                    self.assertEqual(len(set(columns)), 1)
 
     @patch("builtins.input", side_effect=KeyboardInterrupt)
     def test_language_selection_cancellation_raises_wizard_exit(self, mock_input):
@@ -33,7 +59,8 @@ class TestDashboard(unittest.TestCase):
     @patch("core.dashboard._service_active")
     @patch("os.path.isdir")
     @patch("os.path.isfile")
-    def test_detect_system_state(self, mock_isfile, mock_isdir, mock_service_active, mock_mcu):
+    @patch("core.dashboard._detect_crowsnest_status", return_value="files_detected")
+    def test_detect_system_state(self, mock_crowsnest, mock_isfile, mock_isdir, mock_service_active, mock_mcu):
         """Verify detect_system_state correctly probes files and services."""
         mock_isdir.side_effect = lambda p: True if "klipper" in p or "moonraker" in p else False
         mock_isfile.side_effect = lambda p: True if "printer.cfg" in p else False
@@ -46,6 +73,67 @@ class TestDashboard(unittest.TestCase):
         self.assertFalse(state["mainsail"])
         self.assertTrue(state["printer_cfg"])
         self.assertEqual(state["mcu"], "stm32f103")
+        self.assertEqual(state["crowsnest_status"], "files_detected")
+
+    @patch("core.dashboard.subprocess.run")
+    @patch("core.dashboard.os.path.isdir")
+    def test_crowsnest_distinguishes_service_state_from_downloaded_files(self, isdir, run):
+        cases = [
+            (True, "not-found", "inactive", "files_detected"),
+            (False, "not-found", "inactive", "not_found"),
+            (False, "loaded", "active", "service_active"),
+            (True, "loaded", "inactive", "service_inactive"),
+            (True, "loaded", "failed", "service_failed"),
+            (False, "loaded", "activating", "status_unknown"),
+            (False, "masked", "inactive", "status_unknown"),
+        ]
+        for files, load, active, expected in cases:
+            with self.subTest(files=files, load=load, active=active):
+                isdir.return_value = files
+                run.return_value = subprocess.CompletedProcess(
+                    [], 0, f"ActiveState={active}\nLoadState={load}\n"
+                )
+                self.assertEqual(_detect_crowsnest_status(), expected)
+        self.assertEqual(run.call_args.kwargs["timeout"], 3)
+        self.assertEqual(run.call_args.args[0][1], "show")
+
+    @patch("core.dashboard.subprocess.run")
+    @patch("core.dashboard.os.path.isdir")
+    def test_crowsnest_failed_or_unavailable_probe_does_not_claim_installation(self, isdir, run):
+        for files in (True, False):
+            expected = "files_detected" if files else "status_unknown"
+            isdir.return_value = files
+            for error in (FileNotFoundError(), subprocess.TimeoutExpired("systemctl", 3)):
+                with self.subTest(files=files, error=error):
+                    run.side_effect = error
+                    self.assertEqual(_detect_crowsnest_status(), expected)
+            run.side_effect = None
+            for result in (subprocess.CompletedProcess([], 1, ""),
+                           subprocess.CompletedProcess([], 0, "unexpected")):
+                run.return_value = result
+                self.assertEqual(_detect_crowsnest_status(), expected)
+
+    def test_crowsnest_status_is_rendered_in_each_language(self):
+        labels = {
+            "English": ("Files detected", "Service active", "Service installed · inactive", "Service failed"),
+            "Español": ("Archivos detectados", "Servicio activo", "Servicio instalado · inactivo", "Servicio con fallo"),
+            "Português": ("Arquivos detectados", "Serviço ativo", "Serviço instalado · inativo", "Serviço com falha"),
+        }
+        statuses = ("files_detected", "service_active", "service_inactive", "service_failed")
+        state = {"klipper": False, "moonraker": False, "mainsail": False,
+                 "fluidd": False, "printer_cfg": False}
+        for language, translations in labels.items():
+            set_lang(language)
+            for status, expected in zip(statuses, translations):
+                with self.subTest(language=language, status=status):
+                    state["crowsnest_status"] = status
+                    with patch("sys.stdout", new_callable=io.StringIO) as output:
+                        _render_status_panel(state)
+                    row = next(line for line in output.getvalue().splitlines() if "Crowsnest" in line)
+                    self.assertIn(expected, row)
+                    if status == "files_detected":
+                        self.assertNotIn("Installed", row)
+                        self.assertNotIn("Instalado", row)
 
     @patch("os.path.isdir")
     @patch("os.path.isfile")

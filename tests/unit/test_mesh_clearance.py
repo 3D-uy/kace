@@ -7,6 +7,7 @@ import pytest
 
 from core.bed_mesh import generate_bed_mesh_config
 from core.configuration_review import validate_configuration_plan
+from core.config_geometry import load_geometry_context
 from core.exceptions import GenerationError
 from core.generator import generate_config
 from core.managed_config import build_managed_config_plan, effective_hardware_text
@@ -50,7 +51,8 @@ def test_invalid_explicit_values_fail_without_replacing_output(tmp_path, value):
 @pytest.mark.parametrize("value", VALID)
 def test_generated_and_reconciled_height_is_preserved(tmp_path, value):
     content = generate(tmp_path, value)
-    plan = build_managed_config_plan(content.encode(), None, {"printer.cfg": None})
+    plan = build_managed_config_plan(content.encode(), None, {"printer.cfg": None},
+        geometry_context=load_geometry_context(tmp_path / "printer.cfg", content.encode()))
     assert _read_pin_config(content)[0]["bed_mesh"]["horizontal_move_z"] == str(value)
     assert _read_pin_config(effective_hardware_text(plan))[0]["bed_mesh"]["horizontal_move_z"] == str(value)
     assert validate_configuration_plan(plan).valid
@@ -127,6 +129,7 @@ def test_invalid_effective_include_blocks_transaction(tmp_path, noop, override):
     transport = FakeTransport(remote)
     before, confirm = dict(transport.files), Mock(return_value=True)
     result = ConfigDeploymentTransaction(transport, content, None, activation="none", confirm=confirm,
+        geometry_context=load_geometry_context(tmp_path / "printer.cfg", content),
         output=lambda _: None, snapshot_root=str(tmp_path / "snapshots"), poll_interval=0).run()
     assert result.state == ConfigTransactionState.PRECONDITION_FAILED
     assert "horizontal_move_z" in result.detail

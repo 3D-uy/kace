@@ -43,6 +43,27 @@ Its terminal wizard prepares MCU firmware where supported and takes you through 
 
 The terminal wizard offers **English, Spanish and Portuguese**, with **Beginner** and **Advanced** modes.
 
+The profile editor lets you **keep or invert each motor's rotation** relative to
+its board/socket `dir_pin`, including independent Z motors and the extruder. The
+no-profile route offers the same choice. It changes only the leading `!`, keeps
+homing and geometry separate, and still requires physical direction checks.
+
+Editor options occupy one terminal line, with short hints and full explanations
+when opened. Motor directions are selected individually. The brief probe-polarity
+guide keeps the existing menu; an unknown signal stays provisional for later checks.
+
+Initial installations place the selected `macros.cfg` beside `printer.cfg`, with
+its include near the top after Mainsail. Guided probe comments align beside their
+parameters. Deferred Z calibration keeps a brief travel review and explicit physical
+confirmation when needed. Activation failures show their observed cause; restart
+verification allows the previous Klipper error to clear within the existing timeout.
+
+In the current source, selection numbers and inline recommendations use light yellow and turquoise questions use normal weight. Catalogs show a numbered preview sized to the terminal, a visible result count, optional filtering over the complete catalog and Back/Quit; printer selection requires an explicit choice. Menus retain their continuous layout, boxed explanations and probe diagram, with text wrapping to the terminal width. Profile and probe reviews explain the displayed parameters. Homing choices reviewed in the profile are reused unless the automatic direction remains ambiguous. Back returns to an interactive step. The generated-configuration summary identifies application and installation verification as pending. Crowsnest reports observed service state in aligned columns; presence alone does not establish who installed it.
+
+Board selection starts with exact-MCU candidates; searching other boards is explicit. Printer search asks for a name first, then numbers visible matches from one. Existing homing endpoints and probe offsets are preserved unless the operator explicitly resolves their differences with the questionnaire. The complete effective proposal remains subject to semantic validation; SAVE_CONFIG calibration is not automatically replaced.
+
+When changing a KACE-managed probe installation to physical Z homing without a probe, the old managed probe branch is removed in the reviewed proposal. External user sections and saved calibration remain protected; any remaining conflict blocks application with its actual cause visible. Firmware and generated summaries keep aligned white values, normal turquoise headings and spacing between groups.
+
 > **Hardware selection** → **Guided configuration** → **Check geometry**<br>
 > → **Firmware steps** → **Generate Klipper config** → **Review** → **Apply** → **Verify**
 
@@ -51,7 +72,11 @@ Firmware steps depend on the selected supported target and workflow.
 With probe-based Z homing, KACE checks that the probe's trigger offset lies inside
 the Z travel limits before preparing firmware. An incompatible imported minimum
 requires an explicit review; KACE does not silently change it or invent a measured
-offset. If firmware is already verified in an unfinished installation, run `kace`
+offset. The same review can accept a known custom-probe Z offset without changing
+travel limits, after validation and confirmation. A conflicting provisional zero
+offers preparation of a compatible minimum of zero after explicit physical-clearance
+confirmation. Unknown calibration remains pending; cancelling preserves accepted values.
+If firmware is already verified in an unfinished installation, run `kace`
 and choose **Review Z minimum** to correct the saved minimum while preserving the
 firmware evidence. Continue the configuration and verification steps afterward;
 this edit does not complete the installation. See [recovery details](docs/DEVELOPMENT.md).
@@ -212,3 +237,5 @@ Source corrections: Moonraker redirects are rejected. See [development contracts
 ## Restart diagnostics
 
 New bootstrap runs configure a persistent Linux journal with a 64 MiB budget, seven-day retention and 30-second synchronization. After an interrupted boot, use `journalctl -b -1`; records not flushed before a hard lock or power loss can still be missing. This does not diagnose or fix the cause of a host freeze.
+
+Source update: on the printer host, choose Moonraker to install and verify the configuration, including a first installation without an active printer.cfg. Folder export does not activate Klipper. Optional SSH is offered only when its dependency is available; KACE never installs it at runtime.

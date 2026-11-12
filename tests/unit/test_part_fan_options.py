@@ -17,7 +17,7 @@ from tests.unit.test_tmc_uart_review import remote_files
 
 
 OPTIONS = {"max_power": "0.6", "kick_start_time": "1.0", "off_below": "0.15",
-           "cycle_time": "0.02", "hardware_pwm": "False", "shutdown_speed": "0.4"}
+           "cycle_time": "0.02", "hardware_pwm": "True", "shutdown_speed": "0.4"}
 
 
 def render(tmp_path, board, **choices):

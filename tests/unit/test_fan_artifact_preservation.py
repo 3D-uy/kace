@@ -19,11 +19,11 @@ CASES = [
     ("fan", "off_below: 0.2", "off_below: 0"),
     ("fan", "cycle_time: 0.02", "cycle_time: 0.01"),
     ("fan", "hardware_pwm: True", "hardware_pwm: False"),
-    ("fan", "shutdown_speed: 0.4", "shutdown_speed: 0"),
+    ("fan", "shutdown_speed: 1", "shutdown_speed: 0"),
     ("heater_fan HeatBreak", "heater: heater_bed", "heater: extruder"),
     ("heater_fan HeatBreak", "heater_temp: 40", "heater_temp: 50"),
     ("heater_fan HeatBreak", "fan_speed: 0.8", "fan_speed: 1"),
-    ("heater_fan HeatBreak", "max_power: 0.6", "max_power: 1"),
+    ("heater_fan HeatBreak", "max_power: 0.6\nhardware_pwm: True", "max_power: 1"),
 ]
 
 
@@ -124,8 +124,9 @@ def test_metadata_free_generic_api_keeps_existing_boundary():
 
 @pytest.mark.parametrize("name", ["fan", "heater_fan HeatBreak"])
 def test_valid_generation_publishes_and_retries_idempotently(tmp_path, name):
-    selected = source(name, "max_power: 0.6")
-    content = generated(tmp_path, name, "max_power: 0.6").encode()
+    options = "max_power: 0.6" + ("\nhardware_pwm: True" if name != "fan" else "")
+    selected = source(name, options)
+    content = generated(tmp_path, name, options).encode()
     transport = FakeTransport({"printer.cfg": content})
     for _ in range(2):
         result = ConfigDeploymentTransaction(transport, content, None, selected_board=selected, activation="none",

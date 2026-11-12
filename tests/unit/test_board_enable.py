@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from core.board_auxiliary import selected_board_digital_outputs, selected_board_electrical_source
+from core.config_geometry import load_geometry_context
 from core.config_transaction import ConfigDeploymentTransaction, ConfigTransactionState
 from core.configuration_review import validate_configuration_plan
 from core.custom_probe import parse_custom_probe_config
@@ -34,13 +35,14 @@ def board_case():
 def test_real_generation_recovery_provenance_and_repeat_publication(tmp_path):
     raw, board, choices = board_case()
     text = generate_config(board, choices, output_path=str(tmp_path/"printer.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path/"printer.cfg", text)
     assert _read_pin_config(text.decode())[0][SECTION] == {"pin": "PB6", "value": "1"}
     proof = json.loads((tmp_path/"printer.cfg.provenance.json").read_text())
     assert proof["sources"]["auxiliary_digital_outputs"][SECTION] == {"pin":"PB6", "value":"1"}
     recovered = selected_board_electrical_source({"board":PROFILE, "board_raw_config":raw})
     dest = FakeTransport()
     for _ in range(2):
-        outcome = ConfigDeploymentTransaction(dest, text, None, selected_board=recovered,
+        outcome = ConfigDeploymentTransaction(dest, text, None, selected_board=recovered, geometry_context=geometry,
             activation="none", snapshot_root=str(tmp_path/"snapshots"), poll_interval=0).run()
         assert outcome.state == ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION, outcome.detail
 
@@ -65,12 +67,13 @@ def test_invalid_enable_never_overwrites_artifacts(tmp_path, mutation):
 def test_late_override_rejected_before_changes(tmp_path, override, noop):
     _, board, choices = board_case()
     text = generate_config(board, choices, output_path=str(tmp_path/"printer.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path/"printer.cfg", text)
     remote = {"printer.cfg":text+b"\n[include user.cfg]\n", "user.cfg":("["+SECTION+"]\n"+override+"\n").encode()}
     if noop:
-        remote.update({a.remote_name:a.content for a in build_managed_config_plan(text,None,remote).artifacts})
-        assert not build_managed_config_plan(text,None,remote).changed_artifacts
+        remote.update({a.remote_name:a.content for a in build_managed_config_plan(text,None,remote,geometry_context=geometry).artifacts})
+        assert not build_managed_config_plan(text,None,remote,geometry_context=geometry).changed_artifacts
     dest, confirm = FakeTransport(remote), Mock(return_value=True)
-    outcome = ConfigDeploymentTransaction(dest,text,None,selected_board=board,confirm=confirm,
+    outcome = ConfigDeploymentTransaction(dest,text,None,selected_board=board,confirm=confirm,geometry_context=geometry,
         activation="firmware",snapshot_root=str(tmp_path/"snapshots")).run()
     assert outcome.state == ConfigTransactionState.PRECONDITION_FAILED
     assert all(c[0]=="read" for c in dest.calls) and dest.files==remote
@@ -80,10 +83,11 @@ def test_late_override_rejected_before_changes(tmp_path, override, noop):
 def test_enable_reservations_collisions_and_missing_artifact(tmp_path):
     _, board, choices = board_case()
     text = generate_config(board, choices, output_path=str(tmp_path/"good.cfg"), verbose=False)["content"].encode()
+    geometry = load_geometry_context(tmp_path/"good.cfg", text)
     with patch("core.firmware_workflow.generation_pin_reservations",return_value={"mcu":{"PB6":"reserved bus"}}):
         with pytest.raises(GenerationError, match="reserved bus"):
             generate_config(board, choices,output_path=str(tmp_path/"bad.cfg"),verbose=False)
-    review = validate_configuration_plan(build_managed_config_plan(text,None,{}),selected_board=board,
+    review = validate_configuration_plan(build_managed_config_plan(text,None,{},geometry_context=geometry),selected_board=board,
         firmware_reservation_reader=lambda _: {"mcu":{"PB6":"reserved bus"}})
     assert not review.valid and any("reserved bus" in e.message for e in review.errors)
     board[SECTION]["pin"] = board["fan"]["pin"]

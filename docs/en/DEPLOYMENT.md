@@ -6,6 +6,21 @@ This document explains in detail how KACE deploys generated configuration files 
 
 ## 🛡️ Transaction safety and MCU identity
 
+Before configuration publication or combined firmware deployment, KACE requires
+a bounded Klipper preflight in Docker. When launched through Studio, the Docker
+CLI and daemon run on the Studio PC; Studio prepares the image and connects KACE
+to its validator. For standalone KACE, install Docker on the KACE host and run
+`python -m core.klipper_preflight --provision` from the KACE directory.
+Provisioning requires network access to build the image; validation itself runs
+without network. If the selected validator, its image or receipt is unavailable,
+KACE reports the result as unverified and stops before publication. Reprovision
+after the Klipper pin, preflight recipe or worker changes.
+
+This preflight checks the reviewed include tree and fan references against the
+pinned Klipper image. It does not verify the destination's extensions, all
+runtime events, MCU connectivity or physical safety. Standalone Docker on
+Raspberry Pi/ARM has not yet been verified for this workflow.
+
 Firmware checkpoint deployments verify the running build fingerprint inside the
 configuration transaction, after activation and Klipper `Ready`, before emitting
 `DONE` or returning `COMMITTED`. A mismatched or unavailable fingerprint triggers

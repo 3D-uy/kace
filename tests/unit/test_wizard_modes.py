@@ -36,10 +36,18 @@ class TestWizardModes(unittest.TestCase):
         set_mode("Beginner")
         # Temporarily clear environment flags that silence output
         with patch.dict(os.environ, {"KACE_AUTO": "0", "KACE_QUIET": "0", "KACE_TESTING": "0"}):
-            _print_step_header("board", {})
-            output = mock_stdout.getvalue()
-            self.assertIn("┌", output)
-            self.assertIn("Phase", output)
+            for columns, rows in [(80, 24), (114, 29), (100, 40)]:
+                with self.subTest(columns=columns, rows=rows), patch(
+                        "core.wizard.ui.shutil.get_terminal_size", return_value=os.terminal_size((columns, rows))):
+                    mock_stdout.seek(0)
+                    mock_stdout.truncate(0)
+                    _print_step_header("board", {})
+                    output = mock_stdout.getvalue()
+                    self.assertIn("┌", output)
+                    self.assertIn("└", output)
+                    self.assertIn(t("wizard.phase_label"), output)
+                    self.assertIn(t("wizard.step.board.header"), output)
+                    self.assertNotIn("\033[1;96m", output)
 
     @patch("sys.stdout", new_callable=lambda: __import__("io").StringIO())
     @patch("core.wizard.ui._SUPPRESS_HEADERS", False)

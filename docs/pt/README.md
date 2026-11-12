@@ -43,6 +43,29 @@ Seu assistente de terminal prepara firmware MCU quando suportado e acompanha a a
 
 O assistente de terminal oferece **português, inglês e espanhol**, com modos **Iniciante** e **Avançado**.
 
+O editor de perfil permite **manter ou inverter a rotação de cada motor** em relação
+ao `dir_pin` da placa/socket, incluindo os Z independentes e o extrusor. A rota sem
+perfil oferece a mesma escolha. Só altera o `!` inicial, mantém homing e geometria
+separados e exige verificar o sentido físico.
+
+Cada opção do editor ocupa uma linha, com dicas curtas e explicações completas ao
+abrir o campo. O sentido é escolhido por motor. A orientação breve de polaridade
+preserva o menu existente; um sinal desconhecido segue provisório para conferir depois.
+
+Instalações iniciais colocam o `macros.cfg` escolhido ao lado de `printer.cfg`, com
+seu include no início, após o Mainsail. Os comentários da sonda ficam alinhados ao
+lado dos parâmetros. Calibrar Z depois mantém uma revisão breve do curso e a
+confirmação física quando necessária. Falhas de ativação mostram a causa observada;
+o reinício permite que o erro anterior do Klipper desapareça dentro do prazo existente.
+
+No código atual, os números e recomendações usam amarelo claro e as perguntas turquesa têm peso normal. Os catálogos mostram resultados numerados conforme o espaço disponível, sua quantidade visível, busca opcional em todo o catálogo e Voltar/Sair; a impressora exige uma escolha explícita. Os menus preservam a disposição contínua, as explicações em quadros e o desenho da sonda, ajustando o texto à largura do terminal. As revisões do perfil e da sonda explicam os parâmetros apresentados. O homing do perfil é reutilizado salvo ambiguidade automática. Voltar retorna a uma etapa interativa. O resumo da configuração gerada informa que a aplicação e a verificação da instalação continuam pendentes. O Crowsnest mostra seu estado observado em colunas alinhadas; sua presença não identifica quem o instalou.
+
+A seleção da placa começa com candidatas para a MCU exata; buscar outras placas é uma ação explícita. A busca de impressora pede primeiro um nome e numera as correspondências visíveis a partir de um. Os fins de curso e offsets existentes são preservados, salvo quando o operador resolve explicitamente suas diferenças com o questionário. A proposta efetiva completa continua sujeita à validação semântica; a calibração SAVE_CONFIG não é substituída automaticamente.
+
+Ao mudar uma instalação com sonda gerenciada pelo KACE para homing Z físico sem sonda, a proposta revisada remove a ramificação gerenciada anterior. As seções externas do usuário e a calibração salva continuam protegidas; qualquer conflito restante bloqueia a aplicação mostrando sua causa real. Os resumos de firmware e configuração mantêm valores brancos alinhados, títulos turquesa normais e separação entre grupos.
+
+Se o offset provisório zero conflitar com o mínimo Z, o KACE oferece preparar um mínimo compatível de zero após confirmação explícita do curso físico. A mesma revisão permite informar um offset Z conhecido de uma sonda personalizada sem alterar o curso, após validação e confirmação. A calibração desconhecida continua pendente; cancelar preserva os valores aceitos e não se inventa um offset.
+
 > **Escolher hardware** → **Configuração guiada** → **Verificar geometria**<br>
 > → **Etapas de firmware** → **Gerar configuração Klipper** → **Revisar** → **Aplicar** → **Verificar**
 
@@ -210,3 +233,5 @@ Correções no código-fonte: redirecionamentos do Moonraker são rejeitados. Co
 ## Diagnóstico de reinicializações
 
 Novas execuções do bootstrap configuram um diário persistente do Linux com orçamento de 64 MiB, retenção de sete dias e sincronização a cada 30 segundos. Após uma inicialização interrompida, use `journalctl -b -1`; registros não sincronizados antes de um travamento ou corte podem ser perdidos. Isso não diagnostica nem corrige a causa de um travamento do host.
+
+Atualização no código-fonte: no host da impressora, escolha Moonraker para instalar e verificar a configuração, inclusive na primeira instalação sem printer.cfg ativo. Exportar para uma pasta não ativa o Klipper. SSH opcional só é oferecido se sua dependência estiver disponível; o KACE nunca a instala durante a execução.

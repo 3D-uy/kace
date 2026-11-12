@@ -51,12 +51,12 @@ def test_definition_follows_selected_sensor(tmp_path, section, definition, sourc
         user = json.loads(json.dumps(persistable_wizard_data(user)))
     original = copy.deepcopy((board, user))
     text = render(tmp_path, board, user)
-    assert parse_config(text)["thermistor g2"] == definition
+    assert parse_config(text)["thermistor G2"] == definition
     assert text.index("[thermistor G2]") < text.index("[extruder]")
     assert (board, user) == original
     plan = build_managed_config_plan(text.encode(), None, {"printer.cfg": text.encode()})
     assert validate_configuration_plan(plan).valid
-    assert parse_config(effective_hardware_text(plan))["thermistor g2"] == definition
+    assert parse_config(effective_hardware_text(plan))["thermistor G2"] == definition
     remote = {a.remote_name: a.content for a in plan.artifacts}
     assert not build_managed_config_plan(text.encode(), None, remote).changed_artifacts
 
