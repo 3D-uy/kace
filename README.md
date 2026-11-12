@@ -123,8 +123,8 @@ It keeps the existing pinned reference and may differ from the current source.
 Requires `curl` and `sha256sum`. Review the script before running it.
 
 ```bash
-KACE_COMMIT='779489ad040a43178cebce339eeba18cd7f59b35'
-KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
+KACE_COMMIT='5247edff72b192935fa45d066985248ae7d85032'
+KACE_INSTALL_SHA256='f7c08cfd46ebdf9fb552eadd5f8c8d223fd7d2f4911572550716cddf3c151bd1'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
 curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" &&
