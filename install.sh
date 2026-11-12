@@ -304,7 +304,8 @@ echo -e "${G}  ✔ Python dependencies verified (isolated venv)${R}"
 
 # ── Step 4: Configure executable permissions ─────────────────
 echo -e "${C}[4/5]${R} Configuring permissions..."
-chmod +x "$STAGING_DIR/kace.py"
+# The launcher invokes kace.py through Python. Preserve the tracked file mode
+# so Studio can verify the installed runtime with Git during recovery.
 printf '%s\n' "$ACTUAL_COMMIT" > "$STAGING_DIR/$RUNTIME_COMMIT_FILE"
 
 # Publish only installer-owned runtime paths. Generated printer configs,

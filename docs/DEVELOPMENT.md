@@ -51,6 +51,14 @@ repeating bootstrap. The bootstrap recovery hint distinguishes this route from
 standalone `kace`. Reconnection alone does not resume the CLI or close a
 `DEPLOYING` checkpoint. No old validation receipt can authorize a different plan.
 
+The installer preserves the tracked mode of `kace.py`: both the installed launcher
+and Studio recovery invoke it through Python, so it does not need executable bits.
+Changing those bits on Linux makes the recovery Git integrity gate reject an
+otherwise unchanged runtime. `test_install_wizard_flow.py` covers mode preservation
+on POSIX; Windows cannot qualify this filesystem behavior. Existing installations
+need a separately verified repair or an updated installer; a source change alone
+does not update the bootstrap pin or a packaged Studio executable.
+
 The startup language and mode selectors require an explicit valid menu number.
 Blank/invalid input is re-prompted, including a newline queued during package
 downloads; EOF and Ctrl+C still cancel. No terminal input is indiscriminately

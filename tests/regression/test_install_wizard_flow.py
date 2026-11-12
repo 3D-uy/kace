@@ -227,6 +227,14 @@ class TestInstallWizardFlow(unittest.TestCase):
             (install_dir / "venv" / "pyvenv.cfg").read_text(encoding="utf-8"),
         )
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX file modes")
+    def test_installer_preserves_runtime_script_executable_bits(self):
+        result, _, install_dir = self._run_installer(0, no_launch=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # The checkout creates this tracked script without executable bits.
+        # Adding them makes Studio's Git integrity gate reject recovery.
+        self.assertEqual((install_dir / "kace.py").stat().st_mode & 0o111, 0)
+
     def test_existing_outdated_install_executes_the_expected_commit(self):
         expected = "0123456789abcdef0123456789abcdef01234567"
         result, marker, install_dir = self._run_installer(
