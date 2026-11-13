@@ -656,7 +656,9 @@ class ConfigDeploymentTransaction:
                 self.transport.restart_moonraker()
                 if not self._wait_moonraker():
                     raise RuntimeError("Moonraker did not recover after restart")
-            self._emit("FIRMWARE_RESTART", "restarting Klipper to activate configuration")
+            # Preserve the historical wire phase; identify the actual request.
+            command = "RESTART" if self.activation == "firmware" else "SERVICE_RESTART"
+            self._emit("FIRMWARE_RESTART", f"{command}: activating Klipper configuration")
             self.transport.restart(self.activation)
             self._emit("VERIFYING_CONFIG", "waiting for Klipper Ready after restart")
             ready, state = self._wait_ready()

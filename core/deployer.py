@@ -877,7 +877,7 @@ class _MoonrakerClient:
         from core.moonraker import restart_firmware
         ok, detail = restart_firmware(self._host, self._port, api_key=self._api_key)
         if not ok:
-            raise RuntimeError(f"FIRMWARE_RESTART failed: {detail}")
+            raise RuntimeError(f"RESTART failed: {detail}")
 
     def restart_moonraker(self):
         from core.moonraker import restart_moonraker_service

@@ -59,6 +59,15 @@ on POSIX; Windows cannot qualify this filesystem behavior. Existing installation
 need a separately verified repair or an updated installer; a source change alone
 does not update the bootstrap pin or a packaged Studio executable.
 
+Configuration activation retains the historical `FIRMWARE_RESTART` event phase
+for Studio compatibility, but its detail identifies the actual request:
+`RESTART` uses Moonraker's `/printer/restart`; `SERVICE_RESTART` uses the Klipper
+service endpoint. The legacy `firmware_restart` adapter also issues `RESTART`,
+not `FIRMWARE_RESTART`. `test_restart_command_identity.py` checks the dispatched
+endpoint, one request per activation, and rejection before writes/restarts when
+preflight fails. These checks identify software requests; they do not prove the
+cause of a host reboot or qualify MCU, relay or network behavior.
+
 The startup language and mode selectors require an explicit valid menu number.
 Blank/invalid input is re-prompted, including a newline queued during package
 downloads; EOF and Ctrl+C still cancel. No terminal input is indiscriminately
