@@ -33,7 +33,7 @@ Seu assistente de terminal prepara firmware MCU quando suportado e acompanha a a
 | 🔌 **Escolher hardware** | Seleção de placa/MCU, motores, sondas, termistores e ventoinhas. |
 | 📄 **Gerar configuração** | `printer.cfg` e macros aplicáveis em `~/kace/`, a partir de perfis revisados e suas respostas. |
 | ⚙️ **Preparar firmware** | Compilação para as MCUs declaradas, com o método de instalação disponível e as etapas manuais necessárias. |
-| 🔎 **Revisar alterações** | Diferenças antes da aplicação, preservando valores de calibração suportados e seções do usuário. |
+| 🔎 **Revisar alterações** | Revisão da configuração nova e dos backups antes de publicar; instalação nova não mescla calibração nem includes antigos. |
 | ✅ **Aplicar e verificar** | Implantação no host e verificações de ativação e identidade de firmware exigidas. |
 
 <a id="conheça-o-assistente"></a>
@@ -60,9 +60,9 @@ o reinício permite que o erro anterior do Klipper desapareça dentro do prazo e
 
 No código atual, os números e recomendações usam amarelo claro e as perguntas turquesa têm peso normal. Os catálogos mostram resultados numerados conforme o espaço disponível, sua quantidade visível, busca opcional em todo o catálogo e Voltar/Sair; a impressora exige uma escolha explícita. Os menus preservam a disposição contínua, as explicações em quadros e o desenho da sonda, ajustando o texto à largura do terminal. As revisões do perfil e da sonda explicam os parâmetros apresentados. O homing do perfil é reutilizado salvo ambiguidade automática. Voltar retorna a uma etapa interativa. O resumo da configuração gerada informa que a aplicação e a verificação da instalação continuam pendentes. O Crowsnest mostra seu estado observado em colunas alinhadas; sua presença não identifica quem o instalou.
 
-A seleção da placa começa com candidatas para a MCU exata; buscar outras placas é uma ação explícita. A busca de impressora pede primeiro um nome e numera as correspondências visíveis a partir de um. Os fins de curso e offsets existentes são preservados, salvo quando o operador resolve explicitamente suas diferenças com o questionário. A proposta efetiva completa continua sujeita à validação semântica; a calibração SAVE_CONFIG não é substituída automaticamente.
+A seleção da placa começa com candidatas para a MCU exata; buscar outras placas é uma ação explícita. A busca de impressora pede primeiro um nome e numera as correspondências visíveis a partir de um. A instalação nova revisa e valida a árvore nova, salva arquivos existentes fora dos includes ativos e não mescla SAVE_CONFIG, calibrações nem includes anteriores. Não exclui arquivos alheios. As APIs legadas de reconciliação mantêm a preservação, mas não são a política padrão da instalação guiada.
 
-Ao mudar uma instalação com sonda gerenciada pelo KACE para homing Z físico sem sonda, a proposta revisada remove a ramificação gerenciada anterior. As seções externas do usuário e a calibração salva continuam protegidas; qualquer conflito restante bloqueia a aplicação mostrando sua causa real. Os resumos de firmware e configuração mantêm valores brancos alinhados, títulos turquesa normais e separação entre grupos.
+A instalação nova desvincula os ramos anteriores de sonda da árvore gerada ativa. Macros omitidas ficam em um arquivo inerte, com os bytes originais no backup. A validação se aplica à árvore nova completa; sua calibração precisa ser revisada para essa configuração. Os resumos de firmware e configuração mantêm valores brancos alinhados, títulos turquesa normais e separação entre grupos.
 
 Se o offset provisório zero conflitar com o mínimo Z, o KACE oferece preparar um mínimo compatível de zero após confirmação explícita do curso físico. A mesma revisão permite informar um offset Z conhecido de uma sonda personalizada sem alterar o curso, após validação e confirmação. A calibração desconhecida continua pendente; cancelar preserva os valores aceitos e não se inventa um offset.
 
@@ -235,3 +235,5 @@ Correções no código-fonte: redirecionamentos do Moonraker são rejeitados. Co
 Novas execuções do bootstrap configuram um diário persistente do Linux com orçamento de 64 MiB, retenção de sete dias e sincronização a cada 30 segundos. Após uma inicialização interrompida, use `journalctl -b -1`; registros não sincronizados antes de um travamento ou corte podem ser perdidos. Isso não diagnostica nem corrige a causa de um travamento do host.
 
 Atualização no código-fonte: no host da impressora, escolha Moonraker para instalar e verificar a configuração, inclusive na primeira instalação sem printer.cfg ativo. Exportar para uma pasta não ativa o Klipper. SSH opcional só é oferecido se sua dependência estiver disponível; o KACE nunca a instala durante a execução.
+
+A geração e retomada da configuração independente pedem confirmação da área imprimível exata do arquivo gerado e do curso configurado, inclusive com checkpoints antigos. Esta revisão não edita o checkpoint nem os arquivos congelados de recuperação; para alterar a geometria, cancelar e usar outro fluxo de geração revisado. O tamanho físico da mesa continua desconhecido. Essas alterações no código ainda exigem qualificação do candidato.

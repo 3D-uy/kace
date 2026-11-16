@@ -2,6 +2,13 @@
 
 This document explains in detail how KACE deploys generated configuration files (`printer.cfg` and `macros.cfg`) to a Klipper-enabled 3D printer. It covers the underlying mechanisms, protocols, security considerations, verification processes, manual recovery policy, and a comparison to help you choose the best deployment method.
 
+Current source policy: new installation, configuration-only publication and export
+use a fresh validated tree, without merging old SAVE_CONFIG, calibration, macros
+or includes. Existing files are reviewed and backed up outside active includes;
+unrelated files are retained. Omitted macros become an inert file. Preservation
+paths described below remain legacy API behavior, not the default guided policy.
+See [development contracts](../DEVELOPMENT.md) for recovery and source qualification.
+
 ---
 
 ## 🛡️ Transaction safety and MCU identity
@@ -9,9 +16,10 @@ This document explains in detail how KACE deploys generated configuration files 
 Before configuration publication or combined firmware deployment, KACE requires
 a bounded Klipper preflight in Docker. When launched through Studio, the Docker
 CLI and daemon run on the Studio PC; Studio prepares the image and connects KACE
-to its validator. For standalone KACE, install Docker on the KACE host and run
-`python -m core.klipper_preflight --provision` from the KACE directory.
-Provisioning requires network access to build the image; validation itself runs
+to its validator. This remediation qualifies PC-side validation only; do not
+install Docker on Raspberry Pi for it. The standalone local-validator path is a
+separate, unqualified deployment boundary. Image provisioning requires network
+access to build the image; validation itself runs
 without network. If the selected validator, its image or receipt is unavailable,
 KACE reports the result as unverified and stops before publication. Reprovision
 after the Klipper pin, preflight recipe or worker changes.

@@ -16,6 +16,12 @@ de sonda personalizada sem descartar essa evidência. A qualificação ainda dev
 correção salva e ativação/verificação completas no candidato exato; essas
 verificações não calibram a sonda nem concluem sozinhas uma instalação.
 
+## Estado das correções no código — 2026-11-15
+
+Esta árvore já implementa instalação nova, recibos duráveis, publicação recuperável do runtime, confirmação explícita da área imprimível e force_move desativado por padrão. Software descreve a nova configuração; a instrução da sonda já passa nas verificações locais de apresentação. Os itens abaixo mantêm a ordem de qualificação e a justificativa histórica, não significam que essas alterações ainda faltem no código. As dimensões físicas da mesa são desconhecidas; coordenadas utilizáveis exigem evidência externa e confirmação do usuário.
+
+Regressões locais não qualificam o runtime instalado nem o EXE distribuído. Faltam alinhamento imutável de fontes/pacote, GitHub Actions em runner limpo, medições Pi 3B, seta para cima real, diagnóstico MCU/reinício e E2E manuais. Lançadores antigos e sessões Python diretas não participam do novo lock do atualizador: encerrar essas sessões antes de uma atualização controlada. Esses testes de código não autorizam uma atualização real.
+
 ## 🧭 Prioridades
 
 Melhoria de UX pendente: reorganizar volume, área imprimível, curso do bico e

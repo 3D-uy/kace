@@ -9,6 +9,21 @@ unfinished recovery. Studio is an independent desktop provisioner, coupled throu
 `KACE/scripts/bootstrap.sh` and validated events/checkpoints, not a shared package.
 Do not duplicate hardware decisions in Studio JavaScript.
 
+### Current installation policy and compatibility scope
+
+New installation, configuration-only publication and export use the fresh-tree
+planner. They validate the newly generated configuration instead of merging old
+SAVE_CONFIG, calibration, macros or includes. Existing files are reviewed and
+backed up outside active includes; unrelated files are not deleted. When macros
+are omitted, the old macros.cfg is replaced with an inert comment and its old
+bytes remain in the backup. CAS and activation verification still apply.
+
+The preservation/reconciliation APIs described later remain compatibility paths
+and retain their regression coverage. Their presence does not mean a new guided
+installation merges the previous printer configuration. Recovery uses the saved
+operation and its original publication policy; it does not regenerate a new plan
+over a partially applied operation.
+
 | Responsibility | Source |
 | --- | --- |
 | CLI, wizard and localized outcomes | [kace.py](../kace.py), [core/wizard/](../core/wizard/), [core/translations/](../core/translations/), [core/workflow_outcome.py](../core/workflow_outcome.py) |
@@ -1270,3 +1285,71 @@ and temporary directories: `tests/regression/test_bootstrap_journal.py`.
 This captures future boots only and cannot recover volatile history or guarantee
 the last records before a hard lock/power loss. Confirm persistence across a real
 reboot separately during hardware E2E. `journalctl -b -1` reads the prior boot.
+
+
+## Audit remediation contracts (source, qualification pending)
+
+Runtime updates in `install.sh` record a durable transaction before moving files.
+The journal binds old/new bytes, modes and paths. Exclusive installer locking
+precedes recovery; the launcher takes a shared lock and refuses an unfinished
+journal. Recovery validates the entire transaction before restoring and preserves
+copies on conflict. Legacy launchers and direct Python sessions do not take this
+lock; stop them before a controlled update. A verified committed candidate is completed forward rather
+than rolled back after its launcher may have become visible. Old backups retained
+after interrupted completion require explicit later retention review. Never delete
+the journal or backups to bypass a refusal. The embedded helper is self-contained
+so mixed runtime modules cannot execute during recovery.
+
+File publication, checkpoint/event ordering and receipts use file fsync followed
+by replace and POSIX directory fsync. Windows fixture checks do not establish
+Linux power-loss durability. A secondary snapshot failure remains diagnostic and
+must not hide the original transaction phase or rollback outcome.
+
+The printable-area wizard asks for externally established usable XY coordinates;
+nominal profile dimensions are proposals, not physical bed measurements. It binds
+confirmation to printable and travel bounds, rejects automatic acceptance in
+KACE_AUTO, and invalidates confirmation when those bounds change. Physical bed
+size/origin remain explicitly unknown. force_move defaults to false; Advanced
+mode may explicitly opt in and effective review warns when it is enabled.
+
+Firmware commands capture at most 8 MiB combined stdout/stderr by default.
+POSIX cancellation terminates the command group, including descendants retaining
+pipes after the parent exits. KACE_BUILD_TIMEOUT_SECONDS optionally bounds each
+make invocation; no default build duration is claimed before Pi qualification.
+KACE_IDENTITY_TIMEOUT_SECONDS bounds Git/tool queries (30 seconds by policy).
+Timeout, cancellation and excess output do not trigger LTO retry or publication.
+Windows orphan-tree cleanup and Pi 3B resource budgets remain unqualified.
+
+Bootstrap rejects dirty or wrong-origin pinned repositories. Nginx publication
+validates a staged effective configuration, snapshots owned files durably and
+restores bytes/type/metadata conditionally on failure. An unowned legacy
+kace-printer configuration requires explicit migration; it is not overwritten.
+New/reconciled power configuration enables locked_while_printing. Existing saved
+installation receipts do not silently authorize migration of old configurations.
+
+Focused coverage: test_install_durable_publication.py, test_durable_publication.py,
+test_printable_area_confirmation.py and the fresh-installation, transaction,
+process-runner and bootstrap regressions. Inspect test effects before running a
+broad suite: real MCU builds fetch sources; Docker and hardware tests are opt-in.
+Local passing tests do not close clean-runner, immutable-package or physical gates.
+
+
+### Cross-project runtime read exclusion
+
+Studio's explicit installation resume and configuration-only launchers hold the
+same shared `.kace-install.lock` as the wrapper before reading runtime identity,
+importing Python or launching the CLI. They retain it through final checkpoint
+or operation verification and reject a journal, including a dangling symlink.
+Bootstrap's post-failure checkpoint diagnostic takes the existing lock read-only
+before importing; if the lock is absent or cannot be acquired, it does not infer
+that recovery is available from an unverified runtime. This avoids creating a
+root-owned lock from a root bootstrap. External direct/legacy launches still
+require quiescence before an update.
+
+Configuration-only generation and resume explicitly review the immutable
+artifact's printable XY rectangle and configured travel. The review allows
+confirmation or cancellation, not editing the saved installation checkpoint.
+Resume keeps its generated bytes; a different geometry requires a separate
+reviewed generation flow. Manifest and generated-file identities are checked
+around interactive review and before publication. An old COMPLETE checkpoint is
+not evidence that this rectangle was explicitly confirmed for the new operation.

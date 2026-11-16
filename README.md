@@ -33,7 +33,7 @@ Its terminal wizard prepares MCU firmware where supported and takes you through 
 | 🔌 **Select hardware** | Board/MCU selection, motors, probes, thermistors and fans. |
 | 📄 **Generate configuration** | `printer.cfg` and applicable macros in `~/kace/`, built from reviewed profiles and your answers. |
 | ⚙️ **Prepare firmware** | Builds for declared MCU targets, with the available delivery method and any required manual steps. |
-| 🔎 **Review changes** | Configuration differences before application, with supported calibration values and user-owned sections preserved. |
+| 🔎 **Review changes** | Review the new configuration and backups before publication; fresh installation does not merge old calibration or includes. |
 | ✅ **Apply and verify** | Host deployment, activation checks and required firmware identity checks. |
 
 <a id="a-look-at-the-wizard"></a>
@@ -60,9 +60,9 @@ verification allows the previous Klipper error to clear within the existing time
 
 In the current source, selection numbers and inline recommendations use light yellow and turquoise questions use normal weight. Catalogs show a numbered preview sized to the terminal, a visible result count, optional filtering over the complete catalog and Back/Quit; printer selection requires an explicit choice. Menus retain their continuous layout, boxed explanations and probe diagram, with text wrapping to the terminal width. Profile and probe reviews explain the displayed parameters. Homing choices reviewed in the profile are reused unless the automatic direction remains ambiguous. Back returns to an interactive step. The generated-configuration summary identifies application and installation verification as pending. Crowsnest reports observed service state in aligned columns; presence alone does not establish who installed it.
 
-Board selection starts with exact-MCU candidates; searching other boards is explicit. Printer search asks for a name first, then numbers visible matches from one. Existing homing endpoints and probe offsets are preserved unless the operator explicitly resolves their differences with the questionnaire. The complete effective proposal remains subject to semantic validation; SAVE_CONFIG calibration is not automatically replaced.
+Board selection starts with exact-MCU candidates; searching other boards is explicit. Printer search asks for a name first, then numbers visible matches from one. Fresh installation reviews and validates the new tree, backs up existing files outside active includes and does not merge old SAVE_CONFIG, calibration or includes. Unrelated files are not deleted. Legacy reconciliation APIs retain their preservation contract, but are not the default guided installation policy.
 
-When changing a KACE-managed probe installation to physical Z homing without a probe, the old managed probe branch is removed in the reviewed proposal. External user sections and saved calibration remain protected; any remaining conflict blocks application with its actual cause visible. Firmware and generated summaries keep aligned white values, normal turquoise headings and spacing between groups.
+Fresh installation excludes previous probe branches from the active generated tree. Omitted macros become an inert file, with original bytes retained in the backup. Validation applies to the complete new tree; its calibration must be reviewed for that configuration. Firmware and generated summaries keep aligned white values, normal turquoise headings and spacing between groups.
 
 > **Hardware selection** → **Guided configuration** → **Check geometry**<br>
 > → **Firmware steps** → **Generate Klipper config** → **Review** → **Apply** → **Verify**
@@ -239,3 +239,5 @@ Source corrections: Moonraker redirects are rejected. See [development contracts
 New bootstrap runs configure a persistent Linux journal with a 64 MiB budget, seven-day retention and 30-second synchronization. After an interrupted boot, use `journalctl -b -1`; records not flushed before a hard lock or power loss can still be missing. This does not diagnose or fix the cause of a host freeze.
 
 Source update: on the printer host, choose Moonraker to install and verify the configuration, including a first installation without an active printer.cfg. Folder export does not activate Klipper. Optional SSH is offered only when its dependency is available; KACE never installs it at runtime.
+
+Configuration-only generation and resume now ask you to confirm the exact generated printable area and configured travel, including when the installation checkpoint is older. This review cannot edit the checkpoint or frozen recovery files; cancel and use a separate reviewed generation flow to change geometry. The physical bed size remains unknown. These source changes still require candidate qualification.

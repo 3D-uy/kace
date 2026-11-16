@@ -17,6 +17,12 @@ cancelación, corrección guardada y activación/verificación completas sobre e
 candidato exacto; estas comprobaciones no calibran la sonda ni completan solas
 una instalación.
 
+## Estado de correcciones en código — 2026-11-15
+
+Este árbol ya implementa instalación fresca, recibos durables, publicación recuperable del runtime, confirmación explícita del área imprimible y force_move desactivado por defecto. Software describe la configuración nueva; la indicación de sonda ya pasa comprobaciones locales de presentación. Los puntos siguientes conservan el orden de calificación y la justificación histórica, no significan que estos cambios aún falten en código. Las dimensiones físicas de cama son desconocidas; las coordenadas utilizables requieren evidencia externa y confirmación del usuario.
+
+Las regresiones locales no califican el runtime instalado ni el EXE distribuido. Quedan alineación inmutable de fuentes/paquete, GitHub Actions en runner limpio, mediciones Pi 3B, flecha arriba real, diagnóstico MCU/reinicio y E2E manuales. Los lanzadores antiguos y las sesiones Python directas no participan del nuevo lock del actualizador: detener esas sesiones antes de una actualización controlada. Estas pruebas de código no autorizan una actualización real.
+
 ## 🧭 Prioridades
 
 Mejora de UX pendiente: reorganizar el volumen, el área imprimible, el recorrido

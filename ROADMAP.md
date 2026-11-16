@@ -16,6 +16,12 @@ offset without discarding that evidence. Qualification must still exercise the e
 saved correction and full activation/verification on the exact candidate; these
 checks do not calibrate the probe or complete an installation by themselves.
 
+## Source remediation status — 2026-11-15
+
+Fresh installation, durable receipts, recoverable runtime publication, explicit printable-area confirmation and force_move disabled by default are now implemented in this working tree. The software screen describes the new configuration; the probe instruction already passes local presentation checks. The items below retain their qualification order and historical rationale, not a claim that these source changes are still absent. Physical bed dimensions are unknown; usable coordinates need external evidence and operator confirmation.
+
+Local regressions do not qualify the installed runtime or distributed EXE. Pending gates include immutable source/package alignment, GitHub Actions on a clean runner, Pi 3B measurements, actual Up-arrow behavior, MCU/reset diagnosis and manual E2E. Existing legacy launchers/direct Python sessions do not participate in the new runtime-update lock: stop those sessions before a controlled update. Do not perform a real update based only on these source checks.
+
 ## 🧭 Priorities
 
 Pending UX improvement: reorganize the profile review's build volume, printable
