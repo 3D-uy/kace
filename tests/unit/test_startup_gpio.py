@@ -171,7 +171,7 @@ def test_builder_rejects_wrong_embedded_startup_before_copy(tmp_path,pins):
             if pins is not None: constants['INITIAL_PINS']=pins
             data={'version':inputs.reported_version,'config':constants}
             (out/'klipper.bin').write_bytes(zlib.compress(json.dumps(data).encode()))
-    with patch('firmware.builder.subprocess.run',side_effect=run), \
+    with patch('firmware.builder.run_process',side_effect=run), \
          patch('firmware.builder.create_build_inputs',return_value=inputs), \
          patch('firmware.builder.shutil.copy2') as copy:
         result=build_firmware_orchestrator(derived_mcu='stm32f103',board=CR10_SMART_PRO,

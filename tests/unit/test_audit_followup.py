@@ -269,7 +269,7 @@ def test_legacy_build_rejects_missing_embedded_identity(tmp_path, monkeypatch):
             (tmp_path / "out").mkdir()
             (tmp_path / "out/klipper.bin").write_bytes(b"firmware without identity" * 1024)
         return Mock()
-    monkeypatch.setattr(builder.subprocess, "run", make)
+    monkeypatch.setattr(builder, "run_process", make)
     result = builder.build_firmware_orchestrator(derived_mcu="stm32f446", hint="usb",
         klipper_path=str(tmp_path), output_dir=str(tmp_path / "published"), build_context=builder.BuildContext(concurrency=1))
     assert result["status"] == "error"

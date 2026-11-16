@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from functools import partial
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ import zlib
 from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 
 from firmware.identity import ToolchainIdentity
+from firmware.process_runner import build_command_timeout, identity_command_timeout, run_process, validated_timeout
 from core.workspace import (
     BUILD_MINIMUM_FREE_BYTES,
     CHECKOUT_MINIMUM_FREE_BYTES,
@@ -614,13 +616,10 @@ def validate_target_contract(variant: HardwareVariant, target: BuildTarget) -> N
 def verify_checkout_commit(checkout: Path | str, expected_commit: str) -> str:
     """Read and validate HEAD without mutating the checkout."""
     path = Path(checkout).resolve()
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=path,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = run_process(["git", "rev-parse", "HEAD"], cwd=path, timeout=identity_command_timeout())
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CheckoutError(f"cannot read checkout commit: {exc}") from exc
     if result.returncode != 0:
         raise CheckoutError(f"cannot read checkout commit: {result.stderr.strip()}")
     observed = result.stdout.strip().lower()
@@ -632,15 +631,17 @@ def verify_checkout_commit(checkout: Path | str, expected_commit: str) -> str:
 
 
 def _default_command_runner(
-    argv: Sequence[str], cwd: Path, environment: Mapping[str, str]
+    argv: Sequence[str], cwd: Path, environment: Mapping[str, str], *,
+    timeout=None, cancel_event=None,
 ) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    if timeout is None and any(item in argv for item in ("--version", "rev-parse", "status")):
+        timeout = identity_command_timeout(environment)
+    return run_process(
         list(argv),
         cwd=cwd,
         env=dict(environment),
         check=False,
-        capture_output=True,
-        text=True,
+        timeout=timeout, cancel_event=cancel_event,
     )
 
 
@@ -654,10 +655,16 @@ class BoardContractKconfigBuilder:
         source_contract: Optional[KlipperSourceContract] = None,
         command_runner: Optional[CommandRunner] = None,
         monotonic: Callable[[], float] = time.monotonic,
+        command_timeout_seconds: Optional[float] = None,
+        cancel_event: Optional[threading.Event] = None,
     ):
         self.catalog = catalog or load_default_catalog()
         self.source_contract = source_contract or load_klipper_source_contract()
-        self.command_runner = command_runner or _default_command_runner
+        timeout = (build_command_timeout() if command_timeout_seconds is None
+                   else validated_timeout(command_timeout_seconds))
+        self.command_runner = command_runner or partial(
+            _default_command_runner, timeout=timeout, cancel_event=cancel_event,
+        )
         self.monotonic = monotonic
 
     def build(
@@ -1366,7 +1373,12 @@ class BoardContractKconfigBuilder:
         command = tuple(str(item) for item in argv)
         if any(_contains_shell_syntax(item) for item in command):
             raise BoardContractBuildError("command argv contains shell syntax")
-        completed = self.command_runner(command, cwd, environment)
+        try:
+            completed = self.command_runner(command, cwd, environment)
+        except (OSError, subprocess.SubprocessError) as exc:
+            # Not a compiler exit proof: cancellation/limits never authorize
+            # the LTO retry path or artifact publication.
+            raise BoardContractBuildError(f"firmware command did not complete: {exc}") from exc
         stdout = str(completed.stdout or "").encode("utf-8", errors="replace")
         stderr = str(completed.stderr or "").encode("utf-8", errors="replace")
         stdout_text = stdout.decode("utf-8", errors="replace")

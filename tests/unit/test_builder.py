@@ -54,8 +54,8 @@ class TestFirmwareBuilder(unittest.TestCase):
                  patch('firmware.builder.validate_config', return_value=(True, "")), \
                  patch('firmware.builder.create_build_inputs', return_value=inputs), \
                  patch('firmware.builder.is_mock_build', return_value=False), \
-                 patch('firmware.builder.subprocess.run', side_effect=run_make), \
-                 patch('firmware.builder.subprocess.check_output', return_value=b"1"):
+                 patch('firmware.builder.run_process', side_effect=run_make), \
+                 patch('firmware.builder._processor_count', return_value="1"):
                 result = build_firmware_orchestrator(
                     derived_mcu="stm32f446",
                     klipper_path=tmp_klipper,
@@ -74,8 +74,8 @@ class TestFirmwareBuilder(unittest.TestCase):
 
     @patch('firmware.builder.generate_firmware_config', return_value=(True, ""))
     @patch('firmware.builder.validate_config', return_value=(True, ""))
-    @patch('firmware.builder.subprocess.run')
-    @patch('firmware.builder.subprocess.check_output')
+    @patch('firmware.builder.run_process')
+    @patch('firmware.builder._processor_count')
     @patch('firmware.builder.os.makedirs')
     @patch('firmware.builder.shutil.copy2')
     @patch('firmware.builder.os.path.exists')
@@ -83,7 +83,7 @@ class TestFirmwareBuilder(unittest.TestCase):
     @patch('firmware.builder.os.path.getsize', return_value=100 * 1024)
     def test_build_avr_mcu(self, mock_getsize, mock_getmtime, mock_exists, mock_copy, mock_makedirs, mock_check_output, mock_run, mock_val, mock_gen):
         """Verify AVR target correctly selects klipper.elf.hex."""
-        mock_check_output.return_value = b"4"
+        mock_check_output.return_value = "4"
         mock_getmtime.return_value = time.time() + 10.0
         
         # Simulate that BOTH klipper.bin and klipper.elf.hex exist (as in mock/test envs)
@@ -108,8 +108,8 @@ class TestFirmwareBuilder(unittest.TestCase):
 
     @patch('firmware.builder.generate_firmware_config', return_value=(True, ""))
     @patch('firmware.builder.validate_config', return_value=(True, ""))
-    @patch('firmware.builder.subprocess.run')
-    @patch('firmware.builder.subprocess.check_output')
+    @patch('firmware.builder.run_process')
+    @patch('firmware.builder._processor_count')
     @patch('firmware.builder.os.makedirs')
     @patch('firmware.builder.shutil.copy2')
     @patch('firmware.builder.os.path.exists')
@@ -117,7 +117,7 @@ class TestFirmwareBuilder(unittest.TestCase):
     @patch('firmware.builder.os.path.getsize', return_value=200 * 1024)
     def test_build_rp2040_mcu(self, mock_getsize, mock_getmtime, mock_exists, mock_copy, mock_makedirs, mock_check_output, mock_run, mock_val, mock_gen):
         """Verify RP2040 target correctly selects klipper.uf2."""
-        mock_check_output.return_value = b"4"
+        mock_check_output.return_value = "4"
         mock_getmtime.return_value = time.time() + 10.0
         mock_exists.side_effect = lambda path: True if any(x in path for x in ["klipper.bin", "klipper.elf.hex", "klipper.uf2"]) else False
         
@@ -138,8 +138,8 @@ class TestFirmwareBuilder(unittest.TestCase):
 
     @patch('firmware.builder.generate_firmware_config', return_value=(True, ""))
     @patch('firmware.builder.validate_config', return_value=(True, ""))
-    @patch('firmware.builder.subprocess.run')
-    @patch('firmware.builder.subprocess.check_output')
+    @patch('firmware.builder.run_process')
+    @patch('firmware.builder._processor_count')
     @patch('firmware.builder.os.makedirs')
     @patch('firmware.builder.shutil.copy2')
     @patch('firmware.builder.os.path.exists')
@@ -147,7 +147,7 @@ class TestFirmwareBuilder(unittest.TestCase):
     @patch('firmware.builder.os.path.getsize', return_value=80 * 1024)
     def test_build_stm32_mcu(self, mock_getsize, mock_getmtime, mock_exists, mock_copy, mock_makedirs, mock_check_output, mock_run, mock_val, mock_gen):
         """Verify STM32 target correctly selects klipper.bin."""
-        mock_check_output.return_value = b"4"
+        mock_check_output.return_value = "4"
         mock_getmtime.return_value = time.time() + 10.0
         mock_exists.side_effect = lambda path: True if any(x in path for x in ["klipper.bin", "klipper.elf.hex", "klipper.uf2"]) else False
         
@@ -168,8 +168,8 @@ class TestFirmwareBuilder(unittest.TestCase):
 
     @patch('firmware.builder.generate_firmware_config', return_value=(True, ""))
     @patch('firmware.builder.validate_config', return_value=(True, ""))
-    @patch('firmware.builder.subprocess.run')
-    @patch('firmware.builder.subprocess.check_output')
+    @patch('firmware.builder.run_process')
+    @patch('firmware.builder._processor_count')
     @patch('firmware.builder.os.makedirs')
     @patch('firmware.builder.shutil.copy2')
     @patch('firmware.builder.os.path.exists')
@@ -177,7 +177,7 @@ class TestFirmwareBuilder(unittest.TestCase):
     @patch('firmware.builder.os.path.getsize', return_value=50 * 1024)
     def test_build_fallback_unknown_mcu(self, mock_getsize, mock_getmtime, mock_exists, mock_copy, mock_makedirs, mock_check_output, mock_run, mock_val, mock_gen):
         """Verify fallback checks klipper.bin first if CONFIG_MCU is unrecognized."""
-        mock_check_output.return_value = b"4"
+        mock_check_output.return_value = "4"
         mock_getmtime.return_value = time.time() + 10.0
         
         # When checking exists, simulate that both exist. The fallback should pick klipper.bin
@@ -231,8 +231,8 @@ class TestFirmwareBuilder(unittest.TestCase):
                 # Patch validator, compile subprocess calls, and getmtime to return future timestamp
                 with patch('firmware.builder.validate_config', return_value=(True, "")), \
                      patch('firmware.builder.create_build_inputs', return_value=inputs), \
-                     patch('firmware.builder.subprocess.run', side_effect=mock_compile), \
-                     patch('firmware.builder.subprocess.check_output', return_value=b"4"), \
+                     patch('firmware.builder.run_process', side_effect=mock_compile), \
+                     patch('firmware.builder._processor_count', return_value="4"), \
                      patch('firmware.builder.os.path.getmtime', return_value=time.time() + 10.0):
                      
                      result = build_firmware_orchestrator(

@@ -11,6 +11,7 @@ import subprocess
 import uuid
 from dataclasses import asdict, dataclass
 from typing import Mapping, Optional
+from .process_runner import identity_command_timeout, run_process
 
 
 IDENTITY_SCHEMA = "kace-firmware-build/v1"
@@ -184,15 +185,14 @@ def canonicalize_dot_config(content: str) -> str:
 
 def _first_version_line(command: list[str], *, cwd: str, env: Mapping[str, str]) -> str:
     try:
-        result = subprocess.run(
+        result = run_process(
             command,
             cwd=cwd,
             env=dict(env),
             check=True,
-            capture_output=True,
-            text=True,
+            timeout=identity_command_timeout(env),
         )
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         raise FirmwareIdentityError(f"could not identify build tool {command[0]!r}: {exc}") from exc
     output = (result.stdout or result.stderr or "").strip().splitlines()
     if not output:
@@ -239,22 +239,20 @@ def create_build_inputs(
         raise FirmwareIdentityError(f"could not read resolved Klipper .config: {exc}") from exc
     canonical = canonicalize_dot_config(config_text)
     try:
-        commit_result = subprocess.run(
+        commit_result = run_process(
             ["git", "-C", klipper_path, "rev-parse", "--verify", "HEAD"],
             check=True,
-            capture_output=True,
-            text=True,
+            timeout=identity_command_timeout(env),
             env=dict(env),
         )
         commit = (commit_result.stdout or "").strip().lower()
-        dirty_result = subprocess.run(
+        dirty_result = run_process(
             ["git", "-C", klipper_path, "status", "--porcelain", "--untracked-files=no"],
             check=True,
-            capture_output=True,
-            text=True,
+            timeout=identity_command_timeout(env),
             env=dict(env),
         )
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         raise FirmwareIdentityError(f"could not identify the Klipper source commit: {exc}") from exc
     if not _COMMIT_RE.fullmatch(commit):
         raise FirmwareIdentityError("Klipper checkout did not return an exact commit SHA")

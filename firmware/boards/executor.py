@@ -29,6 +29,7 @@ from core.mcu_monitor import (
     McuMonitorError,
 )
 from core.moonraker import get_klipper_state, get_mcu_versions
+from firmware.process_runner import run_process
 
 from .catalog import BoardCatalog, load_default_catalog
 from .deployment import (
@@ -370,9 +371,7 @@ class LinuxRemovableMediaProvider:
 
     @staticmethod
     def _run(argv: Sequence[str]):
-        return subprocess.run(
-            tuple(argv), check=False, capture_output=True, text=True
-        )
+        return run_process(tuple(argv), timeout=3)
 
     @staticmethod
     def _truth(value: object) -> bool:
@@ -393,7 +392,12 @@ class LinuxRemovableMediaProvider:
                 "real removable-media discovery is supported only on the KACE Linux host",
                 code="MEDIA_DISCOVERY_UNSUPPORTED",
             )
-        completed = self.command_runner(self._LSBLK)
+        try:
+            completed = self.command_runner(self._LSBLK)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise MediaSelectionError(
+                f"lsblk did not complete: {exc}", code="MEDIA_DISCOVERY_FAILED",
+            ) from exc
         if int(getattr(completed, "returncode", 1)) != 0:
             raise MediaSelectionError(
                 f"lsblk failed: {getattr(completed, 'stderr', '')}",
@@ -487,9 +491,7 @@ class LinuxSafeEjector:
 
     @staticmethod
     def _run(argv: Sequence[str]):
-        return subprocess.run(
-            tuple(argv), check=False, capture_output=True, text=True
-        )
+        return run_process(tuple(argv), timeout=120)
 
     def eject(self, selected: MediaCandidate) -> SafeEjectResult:
         timestamp = _utc_now()
@@ -508,7 +510,14 @@ class LinuxSafeEjector:
             selected.device_path,
             "--no-user-interaction",
         )
-        completed = self.command_runner(argv)
+        try:
+            completed = self.command_runner(argv)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return SafeEjectResult(
+                SafeEjectStatus.FAILED, selected.device_path,
+                f"Unmount did not complete: {exc}; verify the selected media before retrying.",
+                timestamp,
+            )
         if int(getattr(completed, "returncode", 1)) != 0:
             return SafeEjectResult(
                 SafeEjectStatus.FAILED,

@@ -3,6 +3,7 @@ import time
 import shutil
 import tempfile
 import subprocess
+import threading
 from typing import Optional
 from .derivation import derive_config
 from .firmware_generator import generate_firmware_config
@@ -16,6 +17,10 @@ from .build_mode import (
 )
 from .artifacts import BuildArtifact, BuildProvenance
 from .identity import FirmwareIdentityError, create_build_inputs, fingerprint_makefile
+from .process_runner import (
+    DEFAULT_OUTPUT_LIMIT, ProcessCancelled, ProcessOutputLimitExceeded,
+    build_command_timeout, run_process, validated_timeout,
+)
 from core.translations import t
 from core.workspace import exclusive_file_lock
 from pathlib import Path
@@ -40,6 +45,13 @@ def _tmp_is_noexec() -> bool:
     return False
 
 
+def _processor_count(environment) -> str:
+    value = run_process(["nproc"], env=environment, timeout=3, max_output_bytes=1024).stdout.strip()
+    if not value.isascii() or not value.isdecimal() or int(value) < 1:
+        raise ValueError("nproc did not return a positive processor count")
+    return value
+
+
 class BuildContext:
     """Constrained execution options for the Klipper build process."""
     def __init__(
@@ -47,10 +59,19 @@ class BuildContext:
         make_command: str = "make",
         path_override: Optional[str] = None,
         concurrency: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+        cancel_event: Optional[threading.Event] = None,
+        max_output_bytes: int = DEFAULT_OUTPUT_LIMIT,
     ):
         self.make_command = make_command
         self.path_override = path_override
         self.concurrency = concurrency
+        self.timeout_seconds = (build_command_timeout() if timeout_seconds is None
+                                else validated_timeout(timeout_seconds))
+        self.cancel_event = cancel_event
+        if isinstance(max_output_bytes, bool) or not isinstance(max_output_bytes, int) or max_output_bytes < 1:
+            raise ValueError("max_output_bytes must be a positive integer")
+        self.max_output_bytes = max_output_bytes
 
 
 def build_firmware_orchestrator(
@@ -81,6 +102,12 @@ def _build_firmware_locked(
     Orchestrates the firmware derivation, generation, validation, and build process.
     Runs headlessly without questionary prompts.
     """
+    try:
+        build_context = build_context or BuildContext()
+    except ValueError as exc:
+        return {"status": "error", "error_code": "BUILD_POLICY", "message": str(exc)}
+    if build_context.cancel_event is not None and build_context.cancel_event.is_set():
+        return {"status": "error", "error_code": "BUILD_CANCELLED", "message": "Firmware build cancelled before preparation."}
     klipper_path = os.path.expanduser(klipper_path)
     output_dir = os.path.expanduser(output_dir)
 
@@ -106,8 +133,6 @@ def _build_firmware_locked(
     # Record the build start time
     build_start_time = time.time()
 
-    build_context = build_context or BuildContext()
-
     # ── Build-mode banner: shown once at the start of every compile run ──
     print_build_mode_banner(build_context.make_command)
 
@@ -129,13 +154,12 @@ def _build_firmware_locked(
 
     try:
         # 3. Resolve full configuration with olddefconfig
-        subprocess.run(
+        run_process(
             [_make, "olddefconfig"],
             cwd=klipper_path,
             check=True,
-            capture_output=True,
-            text=True,
-            env=sub_env,
+            env=sub_env, timeout=build_context.timeout_seconds,
+            cancel_event=build_context.cancel_event, max_output_bytes=build_context.max_output_bytes,
         )
         
         # 4. Create a unique, source-aware identity and embed its build ID in
@@ -162,13 +186,12 @@ def _build_firmware_locked(
              return {"status": "error", "message": val_msg}
         
         # 5. Clean and Compile
-        subprocess.run(
+        run_process(
             [_make, "clean"],
             cwd=klipper_path,
             check=True,
-            capture_output=True,
-            text=True,
-            env=sub_env,
+            env=sub_env, timeout=build_context.timeout_seconds,
+            cancel_event=build_context.cancel_event, max_output_bytes=build_context.max_output_bytes,
         )
 
         build_cmd = [_make]
@@ -187,19 +210,18 @@ def _build_firmware_locked(
                 build_cmd.append(f"-j{build_context.concurrency}")
         else:
             try:
-                nproc = subprocess.check_output(["nproc"], env=sub_env).decode().strip()
+                nproc = _processor_count(sub_env)
                 build_cmd.append(f"-j{nproc}")
             except Exception:
                 pass  # Fallback if nproc is not available
 
         try:
-            subprocess.run(
+            run_process(
                 build_cmd,
                 cwd=klipper_path,
                 check=True,
-                capture_output=True,
-                text=True,
-                env=sub_env,
+                env=sub_env, timeout=build_context.timeout_seconds,
+                cancel_event=build_context.cancel_event, max_output_bytes=build_context.max_output_bytes,
             )
         except subprocess.CalledProcessError as compile_err:
             stderr_out = compile_err.stderr or ""
@@ -260,23 +282,21 @@ def _build_firmware_locked(
                         _klipper_version_override = _build_identity.reported_version
                     
                     # Clean and compile again
-                    subprocess.run(
+                    run_process(
                         [_make, "clean"],
                         cwd=klipper_path,
                         check=True,
-                        capture_output=True,
-                        text=True,
-                        env=sub_env,
+                        env=sub_env, timeout=build_context.timeout_seconds,
+                        cancel_event=build_context.cancel_event, max_output_bytes=build_context.max_output_bytes,
                     )
-                    subprocess.run(
+                    run_process(
                         build_cmd,
                         cwd=klipper_path,
                         check=True,
-                        capture_output=True,
-                        text=True,
-                        env=sub_env,
+                        env=sub_env, timeout=build_context.timeout_seconds,
+                        cancel_event=build_context.cancel_event, max_output_bytes=build_context.max_output_bytes,
                     )
-                except FirmwareIdentityError:
+                except (FirmwareIdentityError, ProcessCancelled, ProcessOutputLimitExceeded, subprocess.TimeoutExpired):
                     raise
                 except Exception as retry_err:
                     # Q-08: Preserve the retry failure context in the chain so both
@@ -399,6 +419,12 @@ def _build_firmware_locked(
 
         return {"status": "error", "message": t("builder.no_binary")}
         
+    except ProcessCancelled as e:
+         return {"status": "error", "error_code": "BUILD_CANCELLED", "message": str(e)}
+    except subprocess.TimeoutExpired as e:
+         return {"status": "error", "error_code": "BUILD_TIMEOUT", "message": f"Firmware command exceeded its configured budget ({e.timeout}s); no artifact published."}
+    except ProcessOutputLimitExceeded as e:
+         return {"status": "error", "error_code": "BUILD_OUTPUT_LIMIT", "message": str(e)}
     except subprocess.CalledProcessError as e:
          return {"status": "error", "message": t("builder.make_error", code=e.returncode, error=e.stderr)}
     except FileNotFoundError:

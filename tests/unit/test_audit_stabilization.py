@@ -148,7 +148,7 @@ class BuildConcurrencyTests(unittest.TestCase):
              patch("firmware.builder.validate_config", return_value=(True, "")), \
              patch("firmware.builder.create_build_inputs", side_effect=[identity("0x8000"), identity("0x7000")]), \
              patch("firmware.builder._tmp_is_noexec", return_value=False), \
-             patch("firmware.builder.subprocess.run", side_effect=[Mock(), Mock(), subprocess.CalledProcessError(1, "make", stderr="ltrans failed")]):
+             patch("firmware.builder.run_process", side_effect=[Mock(), Mock(), subprocess.CalledProcessError(1, "make", stderr="ltrans failed")]):
             (Path(temp) / "Makefile").write_text("$(PYTHON) ./scripts/buildcommands.py -d $(OUT)klipper.dict")
             result = build_firmware_orchestrator(klipper_path=temp, output_dir=str(Path(temp) / "out-copy"), config_dict={}, build_context=BuildContext(concurrency=1))
         self.assertEqual(result["status"], "error")
@@ -195,7 +195,7 @@ class BuildConcurrencyTests(unittest.TestCase):
                 if "clean" in command:
                     config.write_text('CONFIG_MCU="stm32"\nCONFIG_FLASH_START=0x7000\n')
                 return Mock(stdout="", stderr="", returncode=0)
-            with patch("firmware.builder.generate_firmware_config", return_value=(True, "")), patch("firmware.builder.validate_config", return_value=(True, "")), patch("firmware.builder.create_build_inputs", side_effect=inputs), patch("firmware.builder.subprocess.run", side_effect=make):
+            with patch("firmware.builder.generate_firmware_config", return_value=(True, "")), patch("firmware.builder.validate_config", return_value=(True, "")), patch("firmware.builder.create_build_inputs", side_effect=inputs), patch("firmware.builder.run_process", side_effect=make):
                 result = build_firmware_orchestrator(klipper_path=temp, output_dir=str(root / "published"), config_dict={}, build_context=BuildContext(concurrency=1))
             self.assertEqual(result["status"], "error")
             self.assertIn("inputs changed", result["message"])
