@@ -12,13 +12,17 @@ from tests.regression.test_bootstrap_minimal_mutation import _find_bash
 BOOTSTRAP = Path(__file__).resolve().parents[2] / "scripts/bootstrap.sh"
 
 
-@unittest.skipUnless(_find_bash(), "bash is required")
+@unittest.skipUnless(_find_bash() and os.name != "nt", "POSIX Bash/symlinks required; exercised in Linux")
 class TestBootstrapDashboards(unittest.TestCase):
     def run_provisioning(self, dashboard, prebaked, *, nginx_failure=False, download_failure=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             # Bash resolves the sandbox path itself, including on Windows.
             script = BOOTSTRAP.read_text(encoding="utf-8")
+            publisher = script.split('publish_nginx_configuration() {', 1)[1].split(
+                '\nif [ "${KACE_BOOTSTRAP_LIB_ONLY:-}"', 1,
+            )[0]
+            publisher = 'publish_nginx_configuration() {' + publisher
             packages = script.split('# ── 2. System Packages', 1)[1].split('# ── 3. Klipper', 1)[0]
             ui = script.split('# ── 6. Dashboard UI', 1)[1].split('# ── 9. Patch Systemd', 1)[0]
             # Drop the remainder of the heading, retaining the actual executable sections.
@@ -54,6 +58,21 @@ nginx() {
 }
 mkdir -p "$PRINTER_HOME/printer_data/config" "$PRINTER_HOME/mainsail" \
     "$TEST_ROOT/nginx/sites-available" "$TEST_ROOT/nginx/sites-enabled"
+printf 'events {}\nhttp {\n    include %s/nginx/sites-enabled/*;\n}\n' "$TEST_ROOT" > "$TEST_ROOT/nginx/nginx.conf"
+mkdir -p "$TEST_ROOT/bin"
+cat > "$TEST_ROOT/bin/nginx" <<'NGINX'
+#!/bin/sh
+echo "nginx:$*"
+if [ "$#" -eq 1 ]; then test ! -e "$TEST_ROOT/nginx/sites-enabled/mainsail" || exit 8; fi
+test "${FAIL_NGINX:-0}" != 1
+NGINX
+cat > "$TEST_ROOT/bin/systemctl" <<'SYSTEMCTL'
+#!/bin/sh
+echo "service:$*"
+test "$1" = restart
+SYSTEMCTL
+chmod +x "$TEST_ROOT/bin/nginx" "$TEST_ROOT/bin/systemctl"
+export TEST_ROOT PATH="$TEST_ROOT/bin:$PATH"
 echo vendor > "$TEST_ROOT/nginx/sites-available/mainsail"
 if [ "$PREBAKED" = true ]; then
     ln -s "$TEST_ROOT/nginx/sites-available/mainsail" "$TEST_ROOT/nginx/sites-enabled/mainsail"
@@ -63,7 +82,7 @@ fi
 systemctl() { echo "service:$*"; test "$1" = restart; }
 '''
             runner = root / 'runner.sh'
-            runner.write_text(harness + sections, encoding='utf-8', newline='\n')
+            runner.write_text(harness + publisher + sections, encoding='utf-8', newline='\n')
             environment = dict(os.environ, MSYS='winsymlinks:sys', FAIL_NGINX=str(int(nginx_failure)), FAIL_DOWNLOAD=str(int(download_failure)))
             result = subprocess.run(
                 [_find_bash(), runner.as_posix(), root.as_posix(), str(prebaked).lower(), dashboard],

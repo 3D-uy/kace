@@ -209,6 +209,7 @@ _monotonic_seconds() { printf '%s\n' "$TEST_MONOTONIC_SECONDS"; }
                     "restart_klipper_when_powered: false\n"
                     "initial_state: off\n"
                     "off_when_shutdown: true\n"
+                    "locked_while_printing: false\n"
                     "custom_option: preserved\n",
                     encoding="utf-8",
                 )
@@ -240,6 +241,8 @@ verify_requested_power_relay "$1"
                 self.assertIn("restart_klipper_when_powered: true", content)
                 self.assertIn("initial_state: on", content)
                 self.assertIn("off_when_shutdown: false", content)
+                self.assertEqual(content.count("locked_while_printing:"), 1)
+                self.assertIn("locked_while_printing: True", content)
                 self.assertIn("custom_option: preserved", content)
                 self.assertNotIn("gpiochip0/gpio5", content)
                 self.assertIn("# BEGIN KACE MANAGED: power", content)
