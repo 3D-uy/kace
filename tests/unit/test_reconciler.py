@@ -45,7 +45,7 @@ class TestReconcilerUnit(unittest.TestCase):
         self.assertTrue(mod)
         self.assertIn("[exclude_object]", res)
         self.assertIn("[force_move]", res)
-        self.assertIn("enable_force_move: True", res)
+        self.assertIn("enable_force_move: False", res)
 
     def test_reconcile_printer_cfg_content_preserves_existing_target_false(self):
         generated = "[printer]\nkinematics: cartesian\n"
@@ -77,7 +77,7 @@ class TestReconcilerUnit(unittest.TestCase):
             final_text = file_path.read_text(encoding="utf-8")
             self.assertIn("[exclude_object]", final_text)
             self.assertIn("[force_move]", final_text)
-            self.assertIn("enable_force_move: True", final_text)
+            self.assertIn("enable_force_move: False", final_text)
 
     def test_atomic_write_keeps_previous_file_when_publish_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -137,7 +137,7 @@ class TestReconcilerUnit(unittest.TestCase):
             m_text = (config_dir / "moonraker.conf").read_text(encoding="utf-8")
 
             self.assertIn("[exclude_object]", p_text)
-            self.assertIn("enable_force_move: True", p_text)
+            self.assertIn("enable_force_move: False", p_text)
             self.assertIn("[file_manager]", m_text)
             self.assertIn("enable_object_processing: True", m_text)
 

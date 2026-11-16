@@ -126,7 +126,7 @@ def test_final_render_is_checked_before_writing(tmp_path, extra, error):
             generate_config(parsed, user, str(output), verbose=False)
 
 
-def test_retained_nested_i2c_include_blocks_live_publication(tmp_path):
+def test_selected_nested_i2c_include_blocks_live_publication(tmp_path):
     built = peripheral_firmware(tmp_path)
     original = {"printer.cfg": GENERATED + b"[include user.cfg]\n", "user.cfg": b"[include sensor.cfg]\n",
                 "sensor.cfg": b"[temperature_sensor t]\nsensor_type: BME280\n"}
@@ -134,7 +134,7 @@ def test_retained_nested_i2c_include_blocks_live_publication(tmp_path):
     with patch("core.deployer._preflight_check", return_value=True), patch(
         "core.deployer._interactive_configuration_review", return_value=True):
         result = _run_config_transaction(transport, {"firmware_artifact": built}, "none",
-                                         generated=(str(tmp_path / "source.cfg"), PROBE, None))
+                                         generated=(str(tmp_path / "source.cfg"), PROBE, b"[include user.cfg]\n"))
     assert result.outcome == WorkflowOutcome.PRECONDITION_FAILED
     assert "i2c1" in result.detail
     assert_untouched(transport, original)

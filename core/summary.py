@@ -129,10 +129,8 @@ def print_summary(user_data: dict, parsed_data: dict = None):
     # 5. Display, Web Interface
     disp = user_data.get('display_choice')
     web = user_data.get('web_interface')
-    if user_data.get("web_interface_preserved"):
-        web = t("software.preserved", includes=", ".join(user_data["web_interface_preserved"]))
-    if user_data.get("web_interface_review_required"):
-        web = t("software.preserved_unverified")
+    # Saved legacy presentation flags cannot promise include preservation in
+    # the fresh configuration that will actually be reviewed and published.
 
     if _has_val(disp):
         # strip "recommended:" or "manual:" prefix if present
@@ -227,7 +225,7 @@ def print_summary(user_data: dict, parsed_data: dict = None):
 
     # 7. Generated Files
     from core.nozzle_bed_visualizer import print_nozzle_bed_preview
-    print_nozzle_bed_preview(user_data)
+    print_nozzle_bed_preview(user_data, max_width=width - 2)
     print('')
     _text(t('summary.generated_files'), color=C)
     _text("~/kace/printer.cfg", indent="    ")

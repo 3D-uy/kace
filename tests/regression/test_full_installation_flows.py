@@ -11,6 +11,7 @@ from core.deployer import _copy_artifacts
 from core.generator import generate_config
 from core.managed_config import HARDWARE_REMOTE, MANAGED_BEGIN
 from core.reconciler import reconcile_config_directory
+from core.snapshot import create_snapshot
 
 
 PARSED = {
@@ -80,6 +81,10 @@ class TestFullInstallationFlows(unittest.TestCase):
             proposal = new.pop()
             metadata = json.loads((proposal / "snapshot.json").read_text(encoding="utf-8"))
             # Explicit operator application, in a fixture with no other writer.
+            self.manual_backup = create_snapshot(
+                {name: before.get(Path(name)) for name in metadata["files"]},
+                persist_root=str(Path(self.kace_home, "manual-recovery")),
+            )
             for name in metadata["files"]:
                 target = Path(self.config, name)
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -89,24 +94,26 @@ class TestFullInstallationFlows(unittest.TestCase):
     def _read_outputs(self):
         return {
             "root": Path(self.config, "printer.cfg").read_text(encoding="utf-8"),
-            "hardware": Path(self.config, HARDWARE_REMOTE).read_text(encoding="utf-8"),
             "moonraker": Path(self.config, "moonraker.conf").read_text(encoding="utf-8"),
         }
 
-    def test_bootstrap_generation_and_deployment_preserve_user_owned_content(self):
+    def test_bootstrap_generation_and_fresh_deployment_replace_root_without_deleting_other_files(self):
         self._bootstrap()
+        old_root = Path(self.config, "printer.cfg").read_bytes()
         self.assertTrue(self._generate_and_manually_apply_proposal())
         output = self._read_outputs()
 
         self.assertIn(MANAGED_BEGIN, output["root"])
-        self.assertIn("[include user.cfg]", output["root"])
-        self.assertIn("[gcode_macro USER]", output["root"])
-        self.assertNotIn("[mcu]", output["root"])
-        self.assertIn("[exclude_object]", output["hardware"])
-        self.assertIn("enable_force_move: True", output["hardware"])
+        self.assertNotIn("[include user.cfg]", output["root"])
+        self.assertNotIn("[gcode_macro USER]", output["root"])
+        self.assertIn("[mcu]", output["root"])
+        self.assertIn("[exclude_object]", output["root"])
+        self.assertFalse(Path(self.config, HARDWARE_REMOTE).exists())
+        self.assertEqual(Path(self.config, "user.cfg").read_bytes(), b"# simulated user include\n")
+        self.assertEqual(self.manual_backup.config_files["printer.cfg"], old_root)
         self.assertIn("enable_object_processing: True", output["moonraker"])
 
-    def test_user_tuning_and_custom_moonraker_options_survive_migration(self):
+    def test_fresh_configuration_retires_old_tuning_but_preserves_moonraker_options(self):
         Path(self.config, "printer.cfg").write_text(
             "[force_move]\nenable_force_move: False\n"
             "[extruder]\ncontrol: pid\npid_Kp: 31.5\npid_Ki: 2.2\npid_Kd: 140\n"
@@ -118,13 +125,13 @@ class TestFullInstallationFlows(unittest.TestCase):
             encoding="utf-8",
         )
         self._bootstrap()
+        old_root = Path(self.config, "printer.cfg").read_bytes()
         self.assertTrue(self._generate_and_manually_apply_proposal())
         output = self._read_outputs()
 
-        self.assertIn("enable_force_move: False", output["hardware"])
-        self.assertIn("pid_Kp: 31.5", output["root"])
-        self.assertNotIn("pid_Kp:", output["hardware"])
-        self.assertIn("[gcode_macro USER]", output["root"])
+        self.assertNotIn("pid_Kp: 31.5", output["root"])
+        self.assertNotIn("[gcode_macro USER]", output["root"])
+        self.assertEqual(self.manual_backup.config_files["printer.cfg"], old_root)
         self.assertIn("custom_option: custom_value", output["moonraker"])
         self.assertEqual(output["moonraker"].count("[file_manager]"), 1)
 

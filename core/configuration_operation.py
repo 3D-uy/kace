@@ -16,6 +16,7 @@ from core.firmware_workflow import (
 from core.reconciler import write_text_atomically
 from core.workflow_outcome import WorkflowOutcome, cancelled, failed
 from core.workspace import exclusive_file_lock
+from core.durable_storage import ensure_durable_directory
 
 SCHEMA = "kace-configuration-operation/v1"
 
@@ -107,7 +108,7 @@ def run_configuration_operation(operation_id, checkpoint_sha256, *, resume=False
                     raise FirmwareWorkflowError("Generated manifest changed or was not committed; configuration cannot resume.")
                 receipt = saved
             else:
-                directory.mkdir(parents=True, exist_ok=False)
+                ensure_durable_directory(directory, exist_ok=False)
             emit("PREPARING", "Resuming configuration review" if resume else "Generating configuration from saved installation decisions")
 
             try:
@@ -131,8 +132,40 @@ def run_configuration_operation(operation_id, checkpoint_sha256, *, resume=False
                 expected_names = {"printer.cfg", "printer.cfg.provenance.json"}
                 if user_data.get("macros_generated"):
                     expected_names.add("macros.cfg")
-                if not isinstance(manifest, dict) or set(manifest) != expected_names or any(_digest(directory / name) != digest for name, digest in manifest.items()):
+                if not isinstance(manifest, dict) or set(manifest) != expected_names:
                     raise FirmwareWorkflowError("Generated configuration changed; interrupted operation cannot reuse it.")
+                generated_bytes = {name: (directory / name).read_bytes() for name in expected_names}
+                if any(hashlib.sha256(generated_bytes[name]).hexdigest() != digest for name, digest in manifest.items()):
+                    raise FirmwareWorkflowError("Generated configuration changed; interrupted operation cannot reuse it.")
+
+                def guard_operation_inputs():
+                    guard_checkpoint()
+                    from core.config_transaction import ConfigConflictError
+                    if (_digest(directory / "generated.json") != generated_manifest_sha256
+                            or any(_digest(directory / name) != digest for name, digest in manifest.items())):
+                        raise ConfigConflictError("Generated configuration changed after review; operation stopped.")
+
+                # A COMPLETE legacy checkpoint does not prove that its printable
+                # rectangle was explicitly confirmed. Review the exact frozen
+                # artifact on every attempt, without modifying saved decisions.
+                from core.config_geometry import load_geometry_context
+                from core.pin_validator import _read_pin_config
+                from core.wizard.steps.printable_area import _step_printable_area
+                geometry = load_geometry_context(generated_path, generated_bytes["printer.cfg"])
+                if geometry is None:
+                    raise FirmwareWorkflowError("Generated printable geometry is missing; use the configuration wizard.")
+                sections, _ = _read_pin_config(generated_bytes["printer.cfg"].decode("utf-8"))
+                geometry_review = {}
+                for axis in ("x", "y"):
+                    options = sections.get(f"stepper_{axis}", {})
+                    for bound in ("min", "max"):
+                        geometry_review[f"printable_{axis}_{bound}"] = getattr(geometry, f"printable_{axis}_{bound}")
+                        geometry_review[f"{axis}_position_{bound}"] = options.get(f"position_{bound}", 0 if bound == "min" else None)
+                    geometry_review[f"{axis}_position_endstop"] = options.get("position_endstop")
+                guard_operation_inputs()
+                if _step_printable_area(geometry_review, allow_edit=False) != "confirmed":
+                    raise WizardExit()
+                guard_operation_inputs()
                 from core.firmware_workflow import extract_mcu_serial
                 serial = extract_mcu_serial(str(generated_path))
                 if not serial or serial != checkpoint["hardware"].get("verified_serial_path"):
@@ -143,8 +176,8 @@ def run_configuration_operation(operation_id, checkpoint_sha256, *, resume=False
                 transport = configuration_transport("127.0.0.1", 7125)
                 if not transport.supports_conditional_write(b""):
                     raise FirmwareWorkflowError("Local conditional publication is unavailable.")
-                generated = (str(generated_path), generated_path.read_bytes(),
-                             (directory / "macros.cfg").read_bytes() if user_data.get("macros_generated") else None)
+                generated = (str(generated_path), generated_bytes["printer.cfg"],
+                             generated_bytes.get("macros.cfg"))
                 def record_transaction(transaction, result):
                     from core.klipper_preflight import plan_digest
                     plan = transaction.plan
@@ -167,12 +200,12 @@ def run_configuration_operation(operation_id, checkpoint_sha256, *, resume=False
                     transport, user_data, "none", generated,
                     activation_selector=_select_config_activation,
                     operation_sink=emit, snapshot_root=str(directory / "snapshots"),
-                    checkpoint_guard=guard_checkpoint,
+                    checkpoint_guard=guard_operation_inputs,
                     operation_record=record_transaction,
                     allow_existing_activation=resume,
                     preserve_moonraker=True,
                 )
-                guard_checkpoint()
+                guard_operation_inputs()
                 return finish(result)
             except (WizardExit, KeyboardInterrupt, EOFError):
                 return finish(cancelled("Configuration operation cancelled; existing installation checkpoint preserved."))

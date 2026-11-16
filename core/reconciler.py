@@ -1,7 +1,7 @@
 """
 core/reconciler.py — Single Source of Truth for KACE Native Configuration Reconciliation.
 
-Guarantees that native features ([exclude_object], [force_move] with enable_force_move: True
+Guarantees that native features ([exclude_object], [force_move] disabled by default
 in printer.cfg, and [file_manager] with enable_object_processing: True in moonraker.conf)
 are atomically and idempotently applied across all installation, generation, and deployment flows.
 """
@@ -13,6 +13,9 @@ import re
 import stat
 import tempfile
 from pathlib import Path
+
+from core.durable_storage import ensure_durable_directory, fsync_directory
+from core.force_move_policy import DEFAULT_FORCE_MOVE
 
 
 def ensure_ini_section_and_option(
@@ -79,7 +82,8 @@ def reconcile_printer_cfg_content(content: str, existing_target_content: str | N
     Reconcile printer.cfg content to guarantee [exclude_object] and [force_move].
 
     If existing_target_content contains enable_force_move: False (or false/0/no/off),
-    preserves False. Otherwise defaults enable_force_move: True.
+    preserves False. Missing enable_force_move defaults to False; an existing
+    value is never silently enabled or disabled by unrelated reconciliation.
     """
     if not isinstance(content, str):
         return "", False
@@ -121,7 +125,7 @@ def reconcile_printer_cfg_content(content: str, existing_target_content: str | N
                 content = content.replace(old_line, new_line, 1)
                 mod_false = True
 
-    default_efm = "False" if preserve_false else "True"
+    default_efm = str(DEFAULT_FORCE_MOVE)
 
     content, mod1 = ensure_ini_section_and_option(content, "exclude_object", None, None)
     content, mod2 = ensure_ini_section_and_option(content, "force_move", "enable_force_move", default_efm)
@@ -139,9 +143,9 @@ def reconcile_moonraker_conf_content(content: str) -> tuple[str, bool]:
 
 
 def write_text_atomically(file_path: Path | str, content: str) -> None:
-    """Publish text to a file only after its complete temporary copy is durable."""
+    """Publish text and confirm its directory entry on POSIX before returning."""
     path = Path(file_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_durable_directory(path.parent)
     mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".part", dir=str(path.parent)
@@ -150,9 +154,16 @@ def write_text_atomically(file_path: Path | str, content: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as temporary:
             temporary.write(content)
             temporary.flush()
+            os.chmod(temporary_name, mode)
             os.fsync(temporary.fileno())
-        os.chmod(temporary_name, mode)
         os.replace(temporary_name, path)
+        try:
+            fsync_directory(path.parent)
+        except OSError as exc:
+            raise OSError(
+                f"Published {path}, but durability is not confirmed; "
+                f"reload and verify the file before retrying: {exc}"
+            ) from exc
     except BaseException:
         try:
             os.unlink(temporary_name)

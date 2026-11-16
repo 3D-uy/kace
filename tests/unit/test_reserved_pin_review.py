@@ -28,18 +28,30 @@ def assert_untouched(transport, original):
                    for call in transport.calls)
 
 
-def test_live_adapter_rejects_reserved_include_before_every_write(tmp_path):
+@pytest.mark.parametrize("selected_include", [False, True])
+def test_live_adapter_rejects_only_selected_reserved_include_before_every_write(tmp_path, selected_include):
     built = artifact(tmp_path, {"RESERVE_PINS_USB1": "PB14,PB15"})
     transport = FakeTransport(files())
     original = dict(transport.files)
+    # The new tree must opt into this dependency. Its control pin is supplied
+    # by the include; a later generated option must not hide the collision.
+    generated = (PROBE.replace(b"control_pin: PB9\n", b"") + b"[include user.cfg]\n"
+                 if selected_include else PROBE)
     with patch("core.deployer._preflight_check", return_value=True), patch(
         "core.deployer._interactive_configuration_review", return_value=True
     ):
         result = _run_config_transaction(transport, {"firmware_artifact": built}, "none",
-                                         generated=(str(tmp_path / "source.cfg"), PROBE, None))
-    assert result.outcome == WorkflowOutcome.PRECONDITION_FAILED
-    assert "USB1" in result.detail
-    assert_untouched(transport, original)
+                                         generated=(str(tmp_path / "source.cfg"), generated, None))
+    if selected_include:
+        assert result.outcome == WorkflowOutcome.PRECONDITION_FAILED
+        assert "USB1" in result.detail
+        assert_untouched(transport, original)
+    else:
+        assert result.outcome == WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION
+        assert b"[include user.cfg]" not in transport.files["printer.cfg"]
+        assert b"control_pin: PB9" in transport.files["printer.cfg"]
+        assert transport.files["user.cfg"] == original["user.cfg"]
+        assert not any("user.cfg" in call[1] for call in transport.calls if call[0] == "read")
 
 
 @pytest.mark.parametrize("resume", [False, True])
@@ -114,18 +126,21 @@ def test_no_bltouch_does_not_require_probe_firmware_evidence():
     reader.assert_not_called()
 
 
-def test_local_export_adapter_rejects_reserved_include(tmp_path):
+def test_local_export_adapter_rejects_reserved_include(tmp_path, capsys):
     built = artifact(tmp_path, {"RESERVE_PINS_USB1": "PB14,PB15"})
     destination = tmp_path / "export"
     destination.mkdir()
-    for name, content in files().items():
-        (destination / name).write_bytes(content)
-    original = {p.name: p.read_bytes() for p in destination.iterdir()}
-    with patch("core.deployer._generated_config_bytes", return_value=("source.cfg", PROBE, None)), patch(
+    transport = FakeTransport(files())
+    original = dict(transport.files)
+    generated = PROBE.replace(b"control_pin: PB9\n", b"") + b"[include user.cfg]\n"
+    with patch("core.deployer._generated_config_bytes", return_value=("source.cfg", generated, None)), patch(
+        "core.config_transaction.LocalConfigTransport", return_value=transport
+    ), patch(
         "core.deployer._review_configuration_export", return_value=True
     ):
         assert not _copy_artifacts({"firmware_artifact": built}, str(destination), "config")
-    assert {p.name: p.read_bytes() for p in destination.iterdir()} == original
+    assert "USB1" in capsys.readouterr().out
+    assert_untouched(transport, original)
 
 
 def test_noop_retry_cannot_skip_reserved_pin_review(tmp_path):
@@ -164,7 +179,8 @@ def test_physical_adapter_rejects_before_power_or_flash(tmp_path, tamper_during_
         return True
     with patch("core.config_transaction.configuration_transport", return_value=transport), patch(
         "core.deployer._preflight_check", return_value=True
-    ), patch("core.deployer._generated_config_bytes", return_value=("source.cfg", PROBE, None)), patch(
+    ), patch("core.deployer._generated_config_bytes", return_value=(
+        "source.cfg", PROBE.replace(b"control_pin: PB9\n", b"") + b"[include user.cfg]\n", None)), patch(
         "core.deployer._interactive_configuration_review", side_effect=review
     ), patch("core.power_controller.configured_power_controller") as power:
         result = deploy_firmware_installation(user)

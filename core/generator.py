@@ -55,11 +55,11 @@ def has_todo_pins(parsed_data: dict) -> list:
     return todos
 
 
-def _native_feature_sections(parsed_data: dict) -> dict:
+def _native_feature_sections(parsed_data: dict, user_data: dict | None = None) -> dict:
     """Return idempotent defaults for KACE-managed Klipper features.
 
-    Existing section values are copied verbatim. Defaults are added only when
-    the corresponding option is absent, including case-insensitive matches.
+    Existing values are copied, except FORCE_MOVE enablement: only the explicit
+    reviewed user decision can enable diagnostic movement commands.
     """
     sections = {}
     for target in ("exclude_object", "force_move"):
@@ -75,8 +75,9 @@ def _native_feature_sections(parsed_data: dict) -> dict:
         sections[target] = dict(existing)
 
     force_move = sections["force_move"]
-    if not any(str(key).strip().casefold() == "enable_force_move" for key in force_move):
-        force_move["enable_force_move"] = "True"
+    from core.force_move_policy import reviewed_force_move
+    name = next((key for key in force_move if str(key).strip().casefold() == "enable_force_move"), "enable_force_move")
+    force_move[name] = str(reviewed_force_move(user_data or {}))
 
     return sections
 
@@ -402,7 +403,11 @@ def generate_config(parsed_data, user_data, output_path=None, include_macros=Fal
             raise GenerationError(f"{section}: invalid fan pin {token!r}; PWM allows only a leading !.")
 
     pins_ctx['_advanced_sections'] = get_advanced_sections(parsed_data)
-    pins_ctx['_native_features'] = _native_feature_sections(parsed_data)
+    pins_ctx['_native_features'] = _native_feature_sections(parsed_data, user_ctx)
+    from core.force_move_policy import inherited_force_move
+    if verbose and inherited_force_move(parsed_data) and "force_move_enabled" not in user_ctx:
+        from core.translations import t
+        print(t("force_move.inherited"))
     from core.thermistor import selected_custom_thermistors, validate_custom_thermistors
     pins_ctx['_custom_thermistors'] = selected_custom_thermistors(parsed_data, user_ctx)
     from core.adc_scaled import selected_adc_scaled, validate_adc_scaled

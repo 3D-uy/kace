@@ -1,6 +1,8 @@
 """Deployment adapters must consume bound XY evidence before physical work."""
 from copy import deepcopy
+import hashlib
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -44,10 +46,22 @@ def isolated_klipper_preflight(monkeypatch):
     monkeypatch.setattr(klipper_preflight, "validate_plan", valid_preflight)
 
 
-def _source(tmp_path, **values):
+def _source(tmp_path, *, selected_include=False, include_section=None, **values):
     source = tmp_path / "source"
     source.mkdir()
     content = _generate(source, **values)
+    if selected_include:
+        # Selected includes supply these values, without a later generated
+        # section overriding them. Bind this fixture's exact source bytes.
+        if include_section:
+            pattern = rb"(?ms)^\[" + re.escape(include_section.encode()) + rb"\]\n.*?(?=^\[|\Z)"
+            content = re.sub(pattern, b"", content)
+        content += b"\n[include user.cfg]\n"
+        (source / "printer.cfg").write_bytes(content)
+        sidecar = source / "printer.cfg.provenance.json"
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        payload["geometry"]["source_sha256"] = hashlib.sha256(content).hexdigest()
+        sidecar.write_text(json.dumps(payload), encoding="utf-8")
     return source / "printer.cfg", content
 
 
@@ -82,7 +96,8 @@ def _firmware_user(tmp_path):
     "[bltouch]\nx_offset: 500\n",
 ])
 def test_combined_xy_failure_precedes_snapshot_power_and_firmware(tmp_path, override):
-    path, content = _source(tmp_path)
+    section = override.split("]", 1)[0][1:]
+    path, content = _source(tmp_path, selected_include=True, include_section=section)
     user, _built = _firmware_user(tmp_path)
     transport = FakeTransport(_destination(content, override))
     original = dict(transport.files)
@@ -109,7 +124,7 @@ def test_combined_xy_failure_precedes_snapshot_power_and_firmware(tmp_path, over
 
 
 def test_combined_valid_xy_keeps_firmware_identity_and_final_state_guards(tmp_path):
-    path, content = _source(tmp_path)
+    path, content = _source(tmp_path, selected_include=True)
     override = "[safe_z_home]\nhome_xy_position: 100,110\n"
     user, built = _firmware_user(tmp_path)
     prepared = user["prepared_firmware_deployment"]

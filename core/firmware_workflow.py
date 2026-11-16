@@ -24,6 +24,7 @@ from core.mcu_monitor import (
     assess_mcu_identity,
 )
 from core.workspace import exclusive_file_lock
+from core.durable_storage import ensure_durable_directory, fsync_directory
 from core.profile_values import HARDWARE_SOURCE_POLICY
 
 
@@ -200,7 +201,15 @@ def discard_checkpoint(checkpoint):
     with exclusive_file_lock(destination + ".lock", timeout_seconds=30):
         if checkpoint_revision(destination) != tuple(expected):
             raise CheckpointConflict("checkpoint changed before discard; reload it")
-        os.replace(destination, destination + ".discarded-" + uuid.uuid4().hex)
+        archived = destination + ".discarded-" + uuid.uuid4().hex
+        os.replace(destination, archived)
+        try:
+            fsync_directory(os.path.dirname(destination))
+        except OSError as exc:
+            raise OSError(
+                f"Archived checkpoint at {archived}, but durability is not confirmed; "
+                f"verify the archive before continuing: {exc}"
+            ) from exc
     # Observation only: the old installation is archived, not completed or
     # replaced by a hardware checkpoint before the questionnaire is answered.
     if os.environ.get("KACE_MACHINE_OUTPUT") == "1":
@@ -519,7 +528,7 @@ def write_checkpoint(
     validated = validate_checkpoint(checkpoint, verify_artifact=False)
     destination = checkpoint_path(path)
     directory = os.path.dirname(destination)
-    os.makedirs(directory, exist_ok=True)
+    ensure_durable_directory(directory)
     expected = expected_revision or validated.get(_STORAGE_REVISION) or (destination, None)
     # Runtime CAS evidence travels with transitions, but never enters the v1
     # checkpoint format or its integrity hash.
@@ -536,6 +545,13 @@ def write_checkpoint(
                 target.flush()
                 os.fsync(target.fileno())
             os.replace(temporary, destination)
+            try:
+                fsync_directory(directory)
+            except OSError as exc:
+                raise OSError(
+                    f"Published {destination}, but durability is not confirmed; "
+                    f"reload and verify the checkpoint before retrying: {exc}"
+                ) from exc
         finally:
             if os.path.exists(temporary):
                 os.remove(temporary)

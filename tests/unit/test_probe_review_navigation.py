@@ -158,7 +158,8 @@ def test_reviewed_profile_reuses_directions_without_repeating_choices(interactiv
         assert motion._step_homing_directions(user, reviewed=True) == "done"
     assert user["homing_positive_dir_x"] == "True"
     assert user["homing_positive_dir_y"] == "False"
-    assert actual_catalog()["profile_review"]["next"]("confirm", user) == "z_mechanics"
+    catalog = actual_catalog()
+    assert catalog["profile_review"]["next"]("confirm", user) == "printable_area"
 
 
 def test_reviewed_profile_still_resolves_ambiguous_homing(interactive):

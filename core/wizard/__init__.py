@@ -1,7 +1,7 @@
 import sys
 import os
 import copy
-from core.translations import t, get_lang
+from core.translations import t, get_lang, get_mode
 from firmware.detector import discover_mcu_hardware
 
 
@@ -26,6 +26,8 @@ from core.display_wizard import run_display_setup_step
 from core.probe_offset_visualizer import run_probe_offset_step
 from core.exceptions import WizardExit
 from core.probe_configuration import normalize_probe_kind
+from core.wizard.steps.printable_area import _step_printable_area
+from core.wizard.steps.force_move import _step_force_move
 from core.validators import (
     questionary_pin_validator,
     questionary_numeric_validator,
@@ -188,7 +190,7 @@ def run_wizard(user_data_arg=None):
     New step order (all hardware decisions first):
       board → z_motors → z_socket_assignment → driver_type → driver_mode
       → printer_profile → profile_review → kinematics → x/y/z_volume
-      → homing_directions → z_mechanics → motor_directions → tmc_currents
+      → homing_directions → printable_area → z_mechanics → motor_directions → tmc_currents
       → probe → probe_offsets → probe_homing → hotend_therm → bed_therm → display → web_ui → starter_macros
 
     The wizard now also handles Z socket wiring and display setup internally,
@@ -282,6 +284,7 @@ def run_wizard(user_data_arg=None):
         "y_limits",
         "z_limits",
         "homing_directions",
+        "printable_area",
         "z_mechanics",
         "motor_directions",
         "tmc_currents",
@@ -297,6 +300,7 @@ def run_wizard(user_data_arg=None):
         "display",
         "web_ui",
         "starter_macros",
+        "force_move",
     ]
 
     # ── Step catalog ───────────────────────────────────────────────────────────
@@ -334,7 +338,7 @@ def run_wizard(user_data_arg=None):
         "profile_review": {
             "prompt": lambda ud: _review_profile_with_homing(ud),
             # Homing was reviewed here; custom geometry still visits its own step.
-            "next":   lambda ans, ud: "z_mechanics" if ans == "confirm" else _BACK
+            "next":   lambda ans, ud: "printable_area" if ans == "confirm" else _BACK
         },
         "kinematics": {
             "visible": lambda ud: "kinematics" not in ud.get("_authoritative", set()),
@@ -363,6 +367,9 @@ def run_wizard(user_data_arg=None):
         },
         "homing_directions": {
             "prompt": lambda ud: _step_homing_directions(ud)
+        },
+        "printable_area": {
+            "prompt": lambda ud: _step_printable_area(ud)
         },
         "z_mechanics": {
             "visible": lambda ud: int(ud.get("z_motors") or 1) > 1,
@@ -469,6 +476,10 @@ def run_wizard(user_data_arg=None):
         },
         "starter_macros": {
             "prompt": lambda ud: _step_starter_macros(ud)
+        },
+        "force_move": {
+            "visible": lambda ud: get_mode() == "Advanced",
+            "prompt": lambda ud: _step_force_move(ud)
         },
     }
 

@@ -3,6 +3,8 @@
 Set KACE_C3_DOCKER_INTEGRATION=1 and a provisioned receipt to run. No device
 or firmware service is contacted; only the loader and KACE plan are real.
 """
+import hashlib
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -21,14 +23,27 @@ pytestmark = pytest.mark.skipif(os.environ.get("KACE_C3_DOCKER_INTEGRATION") != 
                                 reason="requires explicitly provisioned Docker preflight")
 
 
-@pytest.mark.parametrize("value,valid", [("Missing", False), ("extruder, heater_bed", True)])
-def test_real_loader_firmware_boundary(tmp_path, value, valid):
+@pytest.mark.parametrize("value,valid,selected", [
+    pytest.param("Missing", False, True, id="selected-missing-reference"),
+    pytest.param("extruder, heater_bed", True, True, id="selected-valid-references"),
+    pytest.param("Missing", True, False, id="unselected-old-reference"),
+])
+def test_real_loader_firmware_boundary(tmp_path, value, valid, selected):
     source = tmp_path / "source"
     source.mkdir()
     base = _generate(source)
     source_path = source / "printer.cfg"
     user, _artifact = _firmware_user(tmp_path)
     remote = destination(base + EXTRA.encode(), SECTION, "heater", value, "include")
+    if selected:
+        # Fresh installation loads only dependencies selected by the NEW tree.
+        # Keep the invalid-reference case before every physical boundary.
+        base += EXTRA.encode() + b"\n[include user.cfg]\n"
+        source_path.write_bytes(base)
+        sidecar = Path(str(source_path) + ".provenance.json")
+        provenance = json.loads(sidecar.read_text(encoding="utf-8"))
+        provenance["geometry"]["source_sha256"] = hashlib.sha256(base).hexdigest()
+        sidecar.write_text(json.dumps(provenance), encoding="utf-8")
     transport = FakeTransport(remote)
     original = dict(transport.files)
     from core.snapshot import create_snapshot

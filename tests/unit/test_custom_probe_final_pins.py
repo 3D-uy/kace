@@ -116,7 +116,8 @@ def test_live_adapter_rejects_reserved_custom_include_with_mcu_scope(tmp_path, e
         "core.deployer._interactive_configuration_review", return_value=True), patch(
         "core.config_transaction.create_snapshot", side_effect=isolated_snapshot):
         result = _run_config_transaction(transport, {"firmware_artifact": built}, "none",
-                                         generated=(str(tmp_path / "source.cfg"), STANDARD, None))
+                                         generated=(str(tmp_path / "source.cfg"),
+                                                    STANDARD.replace(b"pin: ^PB8\n", b"") + b"[include user.cfg]\n", None))
     if expected:
         assert result.outcome == WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION
     else:

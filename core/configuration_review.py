@@ -375,6 +375,9 @@ def validate_configuration_plan(
     warnings: list[ReviewMessage] = [
         ReviewMessage("managed-plan", warning) for warning in plan.warnings
     ]
+    if sections.get("force_move", {}).get("enable_force_move", "").strip().casefold() in {"true", "1", "yes", "on"}:
+        from core.translations import UI_STRINGS
+        warnings.append(ReviewMessage("force-move-enabled", UI_STRINGS["force_move.warning"]["English"]))
     if any(name == "display" or name.startswith("display ") for name in sections):
         warnings.append(ReviewMessage(
             "display-hardware-unverified",
@@ -783,6 +786,9 @@ def render_configuration_review(
     from core.translations import get_mode
     advanced = get_mode() == "Advanced"
     def message(item):
+        if item.code == "force-move-enabled":
+            from core.translations import UI_STRINGS
+            return UI_STRINGS["force_move.warning"].get(language, item.message)
         if language == "English" or advanced:
             return item.message
         if item.code == "managed-plan":

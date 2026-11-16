@@ -26,6 +26,7 @@ from core.managed_config import (
     ROOT_REMOTE,
     ROOT_MACROS_REMOTE,
     ManagedConfigPlan,
+    build_fresh_config_plan,
     build_managed_config_plan,
     config_includes,
 )
@@ -68,7 +69,8 @@ class ActiveConfigurationVerificationError(ConfigConflictError):
     """The loaded configuration could not be matched to the reviewed plan."""
 
 
-def read_config_state(transport, generated_hardware: bytes = b"", generated_macros: Optional[bytes] = None) -> dict[str, Optional[bytes]]:
+def read_config_state(transport, generated_hardware: bytes = b"", generated_macros: Optional[bytes] = None,
+                      *, fresh_install: bool = False) -> dict[str, Optional[bytes]]:
     """Copy a complete byte-level baseline, distinguishing absence from failure."""
     names = ConfigDeploymentTransaction.CANDIDATES
     remote = transport.read_files(names)
@@ -78,11 +80,14 @@ def read_config_state(transport, generated_hardware: bytes = b"", generated_macr
         if content is not None and not isinstance(content, bytes):
             raise TypeError(f"configuration read did not return bytes for {name}")
         state[name] = content
-    pending = [(ROOT_REMOTE, generated_hardware), (ROOT_REMOTE, state[ROOT_REMOTE])]
+    pending = [(ROOT_REMOTE, generated_hardware)]
+    if not fresh_install:
+        pending.append((ROOT_REMOTE, state[ROOT_REMOTE]))
     if generated_macros is not None:
         # Follow relative macro includes from the destination the pure planner
         # actually selected (root-v1 or preserved-user layout), not a fixed path.
-        proposal = build_managed_config_plan(generated_hardware, generated_macros, state)
+        planner = build_fresh_config_plan if fresh_install else build_managed_config_plan
+        proposal = planner(generated_hardware, generated_macros, state)
         pending.extend((item.remote_name, item.content) for item in proposal.artifacts
                        if item.remote_name in {MACROS_REMOTE, ROOT_MACROS_REMOTE})
     visited = set()
@@ -217,6 +222,7 @@ class ConfigDeploymentTransaction:
         selected_board: Optional[dict] = None,
         resolve_preserved_homing: Optional[Callable] = None,
         geometry_context=None,
+        fresh_install: bool = False,
     ):
         if activation not in {"firmware", "service", "none"}:
             raise ValueError(f"Unsupported activation mode: {activation}")
@@ -248,6 +254,7 @@ class ConfigDeploymentTransaction:
         self.selected_board = copy.deepcopy(selected_board)
         self.resolve_preserved_homing = resolve_preserved_homing
         self.geometry_context = geometry_context
+        self.fresh_install = fresh_install
 
     def _emit(self, state: str, detail: str) -> None:
         if self.state_sink is None:
@@ -464,10 +471,16 @@ class ConfigDeploymentTransaction:
 
     def _preserve_proposal(self):
         if self.plan is not None:
-            create_snapshot(
-                {item.remote_name: item.content for item in self.plan.artifacts},
-                deployment_id=self.transaction_id + "-proposed", persist_root=self.snapshot_root,
-            )
+            try:
+                create_snapshot(
+                    {item.remote_name: item.content for item in self.plan.artifacts},
+                    deployment_id=self.transaction_id + "-proposed", persist_root=self.snapshot_root,
+                )
+            except Exception as exc:
+                # This is secondary diagnostic evidence, never authority to
+                # replace the original failure or skip partial-write recovery.
+                return f"; proposal snapshot could not be saved: {exc}"
+        return ""
 
     def _run_locked(self) -> ConfigTransactionResult:
         self._emit("BACKUP", "validating configuration and preparing snapshot")
@@ -477,17 +490,19 @@ class ConfigDeploymentTransaction:
             from core.board_auxiliary import validate_board_electrical_artifact
             validate_board_electrical_artifact(self.selected_board, self.generated_hardware)
             self.transport.validate_activation_target()
-            remote = read_config_state(self.transport, self.generated_hardware, self.generated_macros)
+            remote = read_config_state(self.transport, self.generated_hardware, self.generated_macros,
+                                       fresh_install=self.fresh_install)
             from core.managed_config import preserved_homing_conflicts
             replacements = frozenset()
-            conflicts = preserved_homing_conflicts(self.generated_hardware, remote)
+            conflicts = () if self.fresh_install else preserved_homing_conflicts(self.generated_hardware, remote)
             if conflicts and self.resolve_preserved_homing is not None:
                 replacements = self.resolve_preserved_homing(conflicts)
                 if replacements is None:
                     return ConfigTransactionResult(
                         ConfigTransactionState.CANCELLED, "homing/calibration review cancelled; no files written", self.transaction_id,
                     )
-            self.plan = build_managed_config_plan(
+            planner = build_fresh_config_plan if self.fresh_install else build_managed_config_plan
+            self.plan = planner(
                 self.generated_hardware, self.generated_macros, remote,
                 geometry_context=self.geometry_context,
                 **({"replace_preserved": frozenset(replacements)} if replacements else {}),
@@ -497,6 +512,7 @@ class ConfigDeploymentTransaction:
             }
             validate_generated_display_artifacts(
                 self.generated_hardware, self.generated_macros, included_files=self._expected_config_state,
+                macros_remote=ROOT_MACROS_REMOTE if self.fresh_install else None,
             )
             diff = self.plan.dry_run_diff()
             configuration_review = build_configuration_review(
@@ -580,10 +596,10 @@ class ConfigDeploymentTransaction:
                 persist_root=self.snapshot_root,
             ) if originals else None
         except ConfigConflictError as exc:
-            self._preserve_proposal()
+            proposal_detail = self._preserve_proposal()
             return ConfigTransactionResult(
                 ConfigTransactionState.PRECONDITION_FAILED,
-                f"{exc}; no configuration files were written",
+                f"{exc}; no configuration files were written{proposal_detail}",
                 self.transaction_id,
             )
         except OSError as exc:
@@ -616,10 +632,10 @@ class ConfigDeploymentTransaction:
                     raise ConfigConflictError("configuration validation changed before publication: "
                                               + "; ".join(item.message for item in validation.errors))
         except ConfigConflictError as exc:
-            self._preserve_proposal()
+            proposal_detail = self._preserve_proposal()
             return ConfigTransactionResult(
                 ConfigTransactionState.PRECONDITION_FAILED,
-                f"{exc}; no configuration files were written",
+                f"{exc}; no configuration files were written{proposal_detail}",
                 self.transaction_id,
                 self.snapshot,
             )
@@ -703,7 +719,7 @@ class ConfigDeploymentTransaction:
                 self.snapshot,
             )
         except Exception as exc:
-            self._preserve_proposal()
+            proposal_detail = self._preserve_proposal()
             self._emit("CONFIG_ERROR", str(exc))
             rollback_ok, rollback_detail = self._rollback()
             state = (
@@ -730,6 +746,7 @@ class ConfigDeploymentTransaction:
                 detail = f"{failure_label}: {exc}; rollback succeeded: {rollback_detail}"
             else:
                 detail = f"{failure_label}: {exc}; {rollback_detail}"
+            detail += proposal_detail
             return ConfigTransactionResult(
                 state,
                 detail,

@@ -71,10 +71,10 @@ def test_valid_mixed_models_can_publish_without_restart(tmp_path):
     assert any(c[0] == "upload" for c in transport.calls)
 
 
-def test_local_export_rejects_preserved_uart_conflict(tmp_path, capsys):
+def test_local_export_rejects_selected_uart_conflict(tmp_path, capsys):
     before = remote_files("[fan]\npin: PC11\n")
     transport = FakeTransport(before)
-    with patch("core.deployer._generated_config_bytes", return_value=("source.cfg", UART, None)), \
+    with patch("core.deployer._generated_config_bytes", return_value=("source.cfg", UART, b"[include user.cfg]\n")), \
             patch("core.config_transaction.LocalConfigTransport", return_value=transport), \
             patch("core.deployer._review_configuration_export", return_value=True):
         assert not _copy_artifacts({}, str(tmp_path), "config")

@@ -87,7 +87,7 @@ def test_inside_and_edge_are_zero_not_negative_distance(point,capsys):
     assert t('nozzle_bed.inside',axis='Y') in text
 
 
-@pytest.mark.parametrize('key,value', [('printable_x_min',None),('y_position_max',''),('printable_x_max','nan'),('x_position_max',-10)])
+@pytest.mark.parametrize('key,value', [('printable_x_min',None),('y_position_max',''),('printable_x_max','nan'),('x_position_max',-10),('x_position_max',10**1000)])
 def test_incomplete_or_invalid_geometry_never_produces_a_distance(key,value,capsys):
     print_nozzle_bed_preview(geometry(**{key:value}))
     text = _plain_label(capsys.readouterr().out)
@@ -95,9 +95,10 @@ def test_incomplete_or_invalid_geometry_never_produces_a_distance(key,value,caps
     assert t('nozzle_bed.position',x='-10',y='-5') not in text
 
 
-def test_missing_endstop_does_not_hide_known_travel_or_invent_home(capsys):
+@pytest.mark.parametrize('endstop', [None, 10**1000])
+def test_missing_endstop_does_not_hide_known_travel_or_invent_home(capsys, endstop):
     data = geometry()
-    del data['x_position_endstop']
+    data['x_position_endstop'] = endstop
     print_nozzle_bed_preview(data)
     text = ' '.join(_plain_label(capsys.readouterr().out).split())
     assert t('nozzle_bed.unknown_home',axis='X') in text

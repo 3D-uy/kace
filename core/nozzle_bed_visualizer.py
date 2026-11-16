@@ -3,7 +3,7 @@ import math
 import shutil
 import textwrap
 
-from core.motion_model import PrinterMotionSpace, PrintableGeometryError
+from core.motion_model import PrinterMotionSpace, PrintableGeometryError, printable_xy_confirmation_matches
 from core.terminal import RESET, SECTION
 from core.translations import t
 
@@ -37,15 +37,19 @@ def _bed_diagram(bed, width):
     return rows if all(len(row) <= width for row in rows) else []
 
 
-def print_nozzle_bed_preview(data):
+def print_nozzle_bed_preview(data, *, max_width=None):
     """Use the shared model, never fabricate missing bed/travel/endstop inputs."""
     width = max(12, shutil.get_terminal_size(fallback=(80, 24)).columns - 4)
+    if max_width is not None:
+        width = min(width, max_width)
 
     def line(text, color=RESET):
         for part in textwrap.wrap(text, width=width, break_on_hyphens=False):
             print(f'  {color}{part}{RESET}')
 
     line(t('nozzle_bed.title'), SECTION)
+    line(t('geometry.physical_unknown'))
+    line(t('geometry.confirmed' if printable_xy_confirmation_matches(data) else 'geometry.proposal'))
     required = [f'{axis}_position_{bound}' for axis in ('x', 'y') for bound in ('min', 'max')]
     required += [f'printable_{axis}_{bound}' for axis in ('x', 'y') for bound in ('min', 'max')]
     try:
@@ -58,7 +62,7 @@ def print_nozzle_bed_preview(data):
         bed, rails = space.printable_bed_area(), space.nozzle_reachable_area()
         if any(bed[axis][0] >= bed[axis][1] or rails[axis][0] >= rails[axis][1] for axis in ('x','y')):
             raise ValueError('empty geometry')
-    except (TypeError, ValueError, PrintableGeometryError):
+    except (TypeError, ValueError, OverflowError, PrintableGeometryError):
         line(t('nozzle_bed.invalid'))
         return
 
@@ -81,7 +85,7 @@ def print_nozzle_bed_preview(data):
             value = float(data[f'{axis}_position_endstop'])
             if math.isfinite(value) and rails[axis][0] <= value <= rails[axis][1]:
                 home[axis] = value
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
             pass
     if len(home) == 2:
         line(t('nozzle_bed.position', x=f'{home["x"]:g}', y=f'{home["y"]:g}'))

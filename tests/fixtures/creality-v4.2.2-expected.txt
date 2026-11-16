@@ -35,7 +35,7 @@ max_z_accel: 100                                # Maximum acceleration (in mm/s^
 [exclude_object]
 
 [force_move]
-enable_force_move: True
+enable_force_move: False
 
 
 # --------------------------------------------------

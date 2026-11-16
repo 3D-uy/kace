@@ -41,9 +41,13 @@ def test_preview_labels_bed_and_edges_without_detached_markers(language, columns
     text = _plain_label(capsys.readouterr().out)
     normalized = ' '.join(text.split())
     assert '300 x 300 mm' in normalized
-    # Both Y edges are directly named beside the one bed diagram.
-    assert '+Y: 300 mm' in text
-    assert '-Y: 0 mm' in text
+    # The explicit printable-area label needs textual bounds on narrow screens.
+    if columns == 28:
+        for axis in ('X', 'Y'):
+            assert t('nozzle_bed.bed_bounds', axis=axis, low='0', high='300') in normalized
+    else:
+        assert '+Y: 300 mm' in text
+        assert '-Y: 0 mm' in text
     assert not any(line.strip() in {'', 'N', '^', 'v', '<', '>'} for line in text.splitlines())
     assert all(wcswidth(line) <= columns for line in text.splitlines())
     assert data == original
@@ -72,8 +76,8 @@ def test_e2e_example_is_compact_but_keeps_absolute_home_and_overhang(capsys, mon
     text = _plain_label(capsys.readouterr().out)
     assert len(text.splitlines()) <= 25
     assert 'X = 320 mm; Y = -5 mm' in text
-    assert '20 mm fuera de la cama' in text
-    assert '5 mm fuera de la cama' in text
+    assert '20 mm fuera del área imprimible' in text
+    assert '5 mm fuera del área imprimible' in text
     assert '0 mm' in text
 
 

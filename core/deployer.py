@@ -446,6 +446,7 @@ def _run_config_transaction(
         hardware,
         macros,
         activation=activation,
+        fresh_install=True,
         review=_review_configuration,
         resolve_preserved_homing=_interactive_preserved_homing_resolution,
         activation_selector=activation_selector,
@@ -723,6 +724,7 @@ def _copy_artifacts(user_data, dest, artifact_type) -> bool:
                 hardware,
                 macros,
                 activation="none",
+                fresh_install=True,
                 geometry_context=geometry_context,
                 review=lambda review: _review_configuration_export(review, yes_no),
                 resolve_preserved_homing=_interactive_preserved_homing_resolution,
@@ -987,7 +989,7 @@ def _deploy_firmware_installation_locked(user_data):
     from core.config_transaction import (
         ConfigConflictError, configuration_transport, read_config_state, revalidate_config_state, require_conditional_writes,
     )
-    from core.managed_config import build_managed_config_plan
+    from core.managed_config import build_fresh_config_plan
     from core.menu import yes_no
     from core.moonraker import DEFAULT_PORT
     from core.power_controller import PowerControllerError, configured_power_controller
@@ -1065,23 +1067,17 @@ def _deploy_firmware_installation_locked(user_data):
             )
         client._config_transport = config_transport
         config_transport.validate_activation_target()
-        remote_files = read_config_state(config_transport, generated_hardware, generated_macros)
-        from core.managed_config import preserved_homing_conflicts
-        replacements = frozenset()
-        conflicts = preserved_homing_conflicts(generated_hardware, remote_files)
-        if conflicts:
-            replacements = _interactive_preserved_homing_resolution(conflicts)
-            if replacements is None:
-                return DeployResult(DeployState.ABORTED, "homing/calibration review cancelled before firmware deployment")
-        config_plan = build_managed_config_plan(
+        remote_files = read_config_state(config_transport, generated_hardware, generated_macros,
+                                        fresh_install=True)
+        config_plan = build_fresh_config_plan(
             generated_hardware, generated_macros, remote_files,
             geometry_context=geometry_context,
-            **({"replace_preserved": frozenset(replacements)} if replacements else {}),
         )
         from core.display_configuration import validate_generated_display_artifacts
         validate_generated_display_artifacts(
             generated_hardware, generated_macros,
             included_files={**remote_files, **{item.remote_name: item.content for item in config_plan.artifacts}},
+            macros_remote="macros.cfg",
         )
         from core.configuration_review import build_configuration_review, validate_configuration_plan
         from core.firmware_workflow import generation_pin_reservations

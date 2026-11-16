@@ -45,6 +45,8 @@ def setup_operation(tmp_path, monkeypatch):
     monkeypatch.setattr("core.klipper_preflight.validate_plan", lambda plan:
                         PreflightResult("valid", "explicit unit loader double", plan_digest(plan)))
     monkeypatch.setattr("core.deployer._interactive_configuration_review", lambda *a: True)
+    # Explicit simulated operator consent; retain the actual fixed-geometry step.
+    monkeypatch.setattr("core.wizard.steps.printable_area.numbered_select", lambda *a, **kw: "confirm")
     monkeypatch.setattr("core.deployer._select_config_activation", lambda: "firmware")
     return source, original, hashlib.sha256(original).hexdigest(), transport
 
@@ -68,6 +70,175 @@ def test_new_operation_preserves_checkpoint_and_generates_isolated_files(setup_o
     evidence = list(receipt(source).parent.glob("transaction-*.json"))
     assert len(evidence) == 1
     assert json.loads(evidence[0].read_text())["plan_digest"]
+    assert [call for call in transport.calls if call[0] == "restart"] == [("restart", "firmware")]
+
+
+def test_legacy_geometry_requires_specific_confirmation_before_publication(setup_operation, monkeypatch):
+    source, original, digest, transport = setup_operation
+    assert "_printable_xy_confirmation" not in json.loads(original)["wizard_data"]
+    decision = Mock(return_value="__back__")
+    monkeypatch.setattr("core.wizard.steps.printable_area.numbered_select", decision)
+    result = run_configuration_operation(ID, digest)
+    assert not result.ok
+    decision.assert_called_once()
+    assert source.read_bytes() == original
+    assert not any(call[0] in {"upload", "restart", "restart_moonraker"} for call in transport.calls)
+
+
+def test_resume_confirms_frozen_artifact_geometry_not_restored_proposals(setup_operation, monkeypatch):
+    source, original, digest, transport = setup_operation
+    monkeypatch.setattr("core.deployer._select_config_activation", lambda: "none")
+    assert not run_configuration_operation(ID, digest).ok
+    directory = receipt(source).parent
+    frozen = {name: (directory / name).read_bytes() for name in (
+        "printer.cfg", "printer.cfg.provenance.json", "generated.json")}
+    expected = json.loads(frozen["printer.cfg.provenance.json"])["geometry"]
+    result_hash = hashlib.sha256(receipt(source).read_bytes()).hexdigest()
+    from core.configuration_operation import restore_wizard_data as restore
+    def changed_proposal(saved):
+        restored = restore(saved)
+        restored.update(printable_x_max=120, x_position_max=150, x_size=120)
+        return restored
+    monkeypatch.setattr("core.configuration_operation.restore_wizard_data", changed_proposal)
+    monkeypatch.setattr("core.generator.generate_config", Mock(side_effect=AssertionError("resume must not regenerate")))
+    from core.wizard.steps.printable_area import _step_printable_area as review
+    seen = []
+    def capture_geometry(data, *, allow_edit):
+        seen.append(dict(data))
+        assert allow_edit is False
+        return review(data, allow_edit=allow_edit)
+    monkeypatch.setattr("core.wizard.steps.printable_area._step_printable_area", capture_geometry)
+    monkeypatch.setattr("core.deployer._select_config_activation", lambda: "firmware")
+    result = run_configuration_operation(ID, digest, resume=True, result_sha256=result_hash)
+    assert result.ok, result.detail
+    assert len(seen) == 1
+    assert seen[0]["printable_x_max"] == expected["printable_x_max"]
+    assert float(seen[0]["x_position_max"]) == 235
+    assert {name: (directory / name).read_bytes() for name in frozen} == frozen
+    assert source.read_bytes() == original
+
+
+def test_saved_confirmation_does_not_skip_operation_review(setup_operation, monkeypatch):
+    source, original, digest, transport = setup_operation
+    from core.firmware_workflow import _with_integrity, restore_wizard_data, persistable_wizard_data
+    from core.motion_model import printable_xy_confirmation_matches
+    from core.wizard.steps.printable_area import _step_printable_area
+    checkpoint = json.loads(original)
+    decisions = restore_wizard_data(checkpoint["wizard_data"])
+    decisions.update(x_position_min=0, x_position_max=235, y_position_min=0, y_position_max=235)
+    assert _step_printable_area(decisions) == "confirmed"
+    checkpoint["wizard_data"] = persistable_wizard_data(decisions)
+    write_checkpoint(_with_integrity(checkpoint), str(source), expected_revision=(str(source), digest))
+    before = source.read_bytes()
+    assert printable_xy_confirmation_matches(restore_wizard_data(json.loads(before)["wizard_data"]))
+    decision = Mock(return_value="confirm")
+    monkeypatch.setattr("core.wizard.steps.printable_area.numbered_select", decision)
+    result = run_configuration_operation(ID, hashlib.sha256(before).hexdigest())
+    assert result.ok, result.detail
+    decision.assert_called_once()
+    assert decision.call_args.kwargs["require_explicit"] is True
+    assert source.read_bytes() == before
+
+
+def test_resume_cancelled_geometry_never_republishes_or_regenerates(setup_operation, monkeypatch):
+    source, original, digest, transport = setup_operation
+    monkeypatch.setattr("core.deployer._select_config_activation", lambda: "none")
+    assert not run_configuration_operation(ID, digest).ok
+    directory = receipt(source).parent
+    frozen = {name: (directory / name).read_bytes() for name in (
+        "printer.cfg", "printer.cfg.provenance.json", "generated.json")}
+    result_hash = hashlib.sha256(receipt(source).read_bytes()).hexdigest()
+    monkeypatch.setattr("core.generator.generate_config", Mock(side_effect=AssertionError("resume must not regenerate")))
+    monkeypatch.setattr("core.wizard.steps.printable_area.numbered_select", lambda *a, **kw: "__back__")
+    transport.calls.clear()
+    result = run_configuration_operation(ID, digest, resume=True, result_sha256=result_hash)
+    assert not result.ok
+    assert json.loads(receipt(source).read_bytes())["state"] == "CANCELLED"
+    assert source.read_bytes() == original
+    assert {name: (directory / name).read_bytes() for name in frozen} == frozen
+    assert not transport.calls
+
+
+@pytest.mark.parametrize("phase", ["geometry", "effective"])
+def test_review_cannot_authorize_changed_generated_bytes(setup_operation, monkeypatch, phase):
+    source, original, digest, transport = setup_operation
+    def edit_artifact(*args, **kwargs):
+        path = receipt(source).parent / "printer.cfg"
+        path.write_bytes(path.read_bytes() + b"\n# concurrent edit\n")
+        return "confirm" if phase == "geometry" else True
+    target = ("core.wizard.steps.printable_area.numbered_select" if phase == "geometry"
+              else "core.deployer._interactive_configuration_review")
+    monkeypatch.setattr(target, edit_artifact)
+    result = run_configuration_operation(ID, digest)
+    assert not result.ok
+    assert "changed after review" in result.detail
+    assert source.read_bytes() == original
+    assert not any(call[0] in {"upload", "restart", "restart_moonraker"} for call in transport.calls)
+
+
+@pytest.mark.parametrize("invalid", ["missing", "wrong-source", "outside-travel"])
+def test_resume_rejects_unusable_frozen_geometry_before_confirmation(setup_operation, monkeypatch, invalid):
+    source, original, digest, transport = setup_operation
+    monkeypatch.setattr("core.deployer._select_config_activation", lambda: "none")
+    assert not run_configuration_operation(ID, digest).ok
+    directory = receipt(source).parent
+    sidecar = directory / "printer.cfg.provenance.json"
+    payload = json.loads(sidecar.read_bytes())
+    if invalid == "missing":
+        payload.pop("geometry")
+    elif invalid == "wrong-source":
+        payload["geometry"]["source_sha256"] = "0" * 64
+    else:
+        payload["geometry"]["printable_x_min"] = -10
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+    manifest_path = directory / "generated.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest[sidecar.name] = hashlib.sha256(sidecar.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    saved = json.loads(receipt(source).read_bytes())
+    saved["generated_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    receipt(source).write_text(json.dumps(saved), encoding="utf-8")
+    result_hash = hashlib.sha256(receipt(source).read_bytes()).hexdigest()
+    decision = Mock(side_effect=AssertionError("unusable geometry cannot be confirmed"))
+    monkeypatch.setattr("core.wizard.steps.printable_area.numbered_select", decision)
+    transport.calls.clear()
+    result = run_configuration_operation(ID, digest, resume=True, result_sha256=result_hash)
+    assert not result.ok
+    decision.assert_not_called()
+    assert source.read_bytes() == original
+    assert not transport.calls
+
+
+def test_configuration_entry_replaces_old_tree_and_recovers_partial_fresh_publication(setup_operation, monkeypatch):
+    source, original, digest, transport = setup_operation
+    old_root = b"[include missing-old/*.cfg]\n#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+    old_macros = b"[gcode_macro OLD]\ngcode: M117 old\n"
+    transport.files.update({"printer.cfg": old_root, "macros.cfg": old_macros})
+    transport.fail_upload = "printer.cfg"
+    result = run_configuration_operation(ID, digest)
+    assert not result.ok
+    records = list(receipt(source).parent.glob("transaction-*.json"))
+    assert len(records) == 1
+    evidence = json.loads(records[0].read_text())
+    assert evidence["state"] == "ROLLBACK_FAILED"
+    assert evidence["rollback_succeeded"] is False
+    backup = Path(evidence["snapshot_path"])
+    assert backup.is_relative_to(receipt(source).parent / "snapshots")
+    assert (backup / "printer.cfg").read_bytes() == old_root
+    assert (backup / "macros.cfg").read_bytes() == old_macros
+    assert transport.files["printer.cfg"] == old_root
+    assert b"gcode_macro OLD" not in transport.files["macros.cfg"]
+    assert not any(call[0] == "restart" for call in transport.calls)
+    result_hash = hashlib.sha256(receipt(source).read_bytes()).hexdigest()
+    transport.fail_upload = None
+    monkeypatch.setattr("core.generator.generate_config", Mock(side_effect=AssertionError("recovery must not regenerate")))
+    result = run_configuration_operation(ID, digest, resume=True, result_sha256=result_hash)
+    assert result.ok, result.detail
+    assert source.read_bytes() == original
+    assert (backup / "printer.cfg").read_bytes() == old_root
+    assert (backup / "macros.cfg").read_bytes() == old_macros
+    assert b"missing-old" not in transport.files["printer.cfg"]
+    assert b"SAVE_CONFIG ---------------------->" not in transport.files["printer.cfg"]
     assert [call for call in transport.calls if call[0] == "restart"] == [("restart", "firmware")]
 
 
@@ -208,6 +379,30 @@ def test_recovery_after_remote_activation_verifies_without_second_restart(setup_
     activation.assert_not_called()
     assert not any(call[0] in {"upload", "restart"} for call in transport.calls)
     assert source.read_bytes() == original
+
+
+def test_complete_receipt_sync_failure_reports_failure_without_complete_event(setup_operation, monkeypatch):
+    source, original, digest, transport = setup_operation
+    emitted = []
+    from core import reconciler
+    sync_directory = reconciler.fsync_directory
+
+    def fail_complete_barrier(directory):
+        saved = receipt(source)
+        if Path(directory) == saved.parent and saved.exists():
+            if json.loads(saved.read_text())["state"] == "COMPLETE":
+                raise OSError("synthetic COMPLETE directory sync failure")
+        sync_directory(directory)
+
+    monkeypatch.setattr(reconciler, "fsync_directory", fail_complete_barrier)
+    monkeypatch.setattr("core.moonraker_deployer.JsonEventSink", lambda: emitted.append)
+    result = run_configuration_operation(ID, digest)
+    assert not result.ok
+    assert "durability is not confirmed" in result.detail
+    assert json.loads(receipt(source).read_text())["state"] == "FAILED"
+    assert not any(event["state"] == "COMPLETE" for event in emitted)
+    assert source.read_bytes() == original
+    assert [call for call in transport.calls if call[0] == "restart"] == [("restart", "firmware")]
 
 
 def test_firmware_mismatch_never_offers_an_extra_restart(setup_operation, monkeypatch):

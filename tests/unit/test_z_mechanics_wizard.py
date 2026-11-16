@@ -232,9 +232,10 @@ def test_profile_and_custom_routes_pass_through_mechanics_before_probe():
         run_wizard()
     runner = WizardRunner(captured["config"], captured["order"])
     # Profile review already resolves homing; custom dimensions still need it.
-    assert captured["config"]["profile_review"]["next"]("confirm", {}) == "z_mechanics"
+    assert captured["config"]["profile_review"]["next"]("confirm", {}) == "printable_area"
     assert runner.get_default_next("z_limits") == "homing_directions"
-    assert runner.get_default_next("homing_directions") == "z_mechanics"
+    assert runner.get_default_next("homing_directions") == "printable_area"
+    assert runner.get_default_next("printable_area") == "z_mechanics"
     assert runner.get_default_next("z_mechanics") == "motor_directions"
     assert runner.get_default_next("motor_directions") == "tmc_currents"
     assert captured["config"]["motor_directions"]["visible"]({})

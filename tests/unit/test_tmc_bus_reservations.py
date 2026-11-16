@@ -111,7 +111,7 @@ def test_wizard_uses_selected_model_and_active_z_count(tmp_path):
 
 @pytest.mark.parametrize("pin,bus,expected", [("PC8", "spi1", False),
     ("PC8", "spi2", True), ("toolhead:PC8", "spi1", True)])
-def test_live_adapter_checks_bus_from_retained_nested_include(tmp_path, pin, bus, expected):
+def test_live_adapter_checks_bus_from_selected_nested_include(tmp_path, pin, bus, expected):
     built = built_bus(tmp_path)
     files = {"printer.cfg": GENERATED + b"[include user.cfg]\n",
              "user.cfg": b"[include driver.cfg]\n",
@@ -131,7 +131,7 @@ def test_live_adapter_checks_bus_from_retained_nested_include(tmp_path, pin, bus
         "core.deployer._interactive_configuration_review", return_value=True), patch(
         "core.config_transaction.create_snapshot", side_effect=isolated_snapshot):
         result = _run_config_transaction(transport, {"firmware_artifact": built}, "none",
-                                         generated=(str(tmp_path / "source.cfg"), PROBE, None))
+                                         generated=(str(tmp_path / "source.cfg"), PROBE, b"[include user.cfg]\n"))
     if expected:
         assert result.outcome == WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION
     else:

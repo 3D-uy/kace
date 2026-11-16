@@ -1,15 +1,40 @@
 """Software selection and compact firmware/configuration review."""
 
 SOFTWARE_PRESENTATION_STRINGS = {
+    "wizard.step.force_move.header": {
+        "English": "Advanced diagnostic movement", "Español": "Movimiento de diagnóstico avanzado", "Português": "Movimento de diagnóstico avançado",
+    },
+    "wizard.step.force_move.hint": {
+        "English": "Disabled unless explicitly reviewed.", "Español": "Deshabilitado salvo decisión explícita revisada.", "Português": "Desativado salvo decisão explícita revisada.",
+    },
+    "force_move.prompt": {
+        "English": "Enable advanced diagnostic movement commands?", "Español": "¿Habilitar comandos avanzados de movimiento de diagnóstico?", "Português": "Ativar comandos avançados de movimento de diagnóstico?",
+    },
+    "force_move.warning": {
+        "English": "FORCE_MOVE can move a motor without normal kinematic checks; SET_KINEMATIC_POSITION can change the homing reference without moving. Incorrect use can cause damage. Enabling this option sends no movement command.",
+        "Español": "FORCE_MOVE permite mover un motor sin las comprobaciones cinemáticas normales; SET_KINEMATIC_POSITION puede cambiar la referencia de homing sin moverlo. Un uso incorrecto puede causar daños. Habilitar esta opción no envía órdenes de movimiento.",
+        "Português": "FORCE_MOVE permite mover um motor sem as verificações cinemáticas normais; SET_KINEMATIC_POSITION pode alterar a referência de homing sem movê-lo. O uso incorreto pode causar danos. Ativar esta opção não envia comandos de movimento.",
+    },
+    "force_move.inherited": {
+        "English": "An inherited enable_force_move=True is not a reviewed choice. The new configuration disables it unless you explicitly enable it in Advanced mode.",
+        "Español": "Un enable_force_move=True heredado no representa una elección revisada. La configuración nueva lo deshabilita salvo que lo habilites explícitamente en modo Avanzado.",
+        "Português": "Um enable_force_move=True herdado não representa uma escolha revisada. A configuração nova o desativa, salvo se você o ativar explicitamente no modo Avançado.",
+    },
+    "force_move.disabled": {
+        "English": "Keep disabled (recommended)", "Español": "Mantener deshabilitado (recomendado)", "Português": "Manter desativado (recomendado)",
+    },
+    "force_move.enabled": {
+        "English": "Enable; I understand the diagnostic movement risk", "Español": "Habilitar; comprendo el riesgo del movimiento de diagnóstico", "Português": "Ativar; compreendo o risco do movimento de diagnóstico",
+    },
     "wizard.step.starter_macros.header": {
         "English": "KACE starter macros",
         "Español": "Macros iniciales de KACE",
         "Português": "Macros iniciais do KACE",
     },
     "wizard.step.starter_macros.hint": {
-        "English": "Choose whether to prepare the optional macros.cfg bundle. This is separate from the Mainsail/Fluidd include. Existing user macros remain protected during deployment review.",
-        "Español": "Elegí si querés preparar el archivo opcional macros.cfg. Es independiente del include de Mainsail/Fluidd. Las macros existentes del usuario se protegen en la revisión de aplicación.",
-        "Português": "Escolha se deseja preparar o arquivo opcional macros.cfg. É independente do include do Mainsail/Fluidd. As macros existentes do usuário são protegidas na revisão da aplicação.",
+        "English": "Choose whether to prepare the optional macros.cfg bundle, separately from the Mainsail/Fluidd include. After review and backup, existing macros.cfg definitions are replaced or retired if you omit this bundle.",
+        "Español": "Elegí si querés preparar el archivo opcional macros.cfg, independiente del include de Mainsail/Fluidd. Tras la revisión y el respaldo, las definiciones existentes de macros.cfg se reemplazan o se retiran si omitís este archivo.",
+        "Português": "Escolha se deseja preparar o arquivo opcional macros.cfg, independente do include do Mainsail/Fluidd. Após revisão e backup, as definições existentes de macros.cfg são substituídas ou retiradas se você omitir este arquivo.",
     },
     "software.starter_macros_yes": {
         "English": "Generate KACE starter macros (macros.cfg)",
@@ -30,6 +55,11 @@ SOFTWARE_PRESENTATION_STRINGS = {
         "English": "This selects configuration macros. It does not install, remove or disable a web interface.",
         "Español": "Esto selecciona macros de configuración. No instala, elimina ni desactiva una interfaz web.",
         "Português": "Isto seleciona macros de configuração. Não instala, remove nem desativa uma interface web.",
+    },
+    "software.fresh_configuration": {
+        "English": "This is a fresh configuration. Old includes and saved calibrations are not imported. The selected include must be available and pass validation before you approve publication; existing files are backed up before replacement.",
+        "Español": "Esta configuración es nueva. No se importan includes ni calibraciones guardadas anteriores. El include elegido debe estar disponible y superar la validación antes de aprobar la aplicación; los archivos existentes se respaldan antes de reemplazarse.",
+        "Português": "Esta configuração é nova. Includes e calibrações anteriores não são importados. O include escolhido deve estar disponível e passar pela validação antes de aprovar a aplicação; os arquivos existentes recebem backup antes da substituição.",
     },
     "software.both_detected": {
         "English": "Mainsail and Fluidd were detected. This choice disables neither; they do not require two macro includes.",

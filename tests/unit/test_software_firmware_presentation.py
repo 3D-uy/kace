@@ -1,4 +1,4 @@
-"""User choices and review output preserve existing configuration authority."""
+"""Fresh-install choices and review output never modify files before publication."""
 from copy import deepcopy
 import os
 from unittest.mock import patch
@@ -24,7 +24,7 @@ def restore_language():
 
 
 @pytest.mark.parametrize("language", ["English", "Español", "Português"])
-def test_both_interfaces_preserve_existing_include_after_conflicting_choice(tmp_path, capsys, language):
+def test_both_interfaces_choose_new_include_without_importing_old_choice(tmp_path, capsys, language):
     set_lang(language)
     cfg = tmp_path / "printer.cfg"
     original = "# user comment\n[include mainsail.cfg]\n[include custom.cfg]\n"
@@ -36,19 +36,20 @@ def test_both_interfaces_preserve_existing_include_after_conflicting_choice(tmp_
          patch("core.dashboard._detect_webui", return_value=True), \
          patch("core.menu._check_questionary_mock", return_value=menu._MOCK_DEFAULT), \
          patch.dict(os.environ, {"KACE_AUTO": "0"}), \
-         patch("builtins.input", side_effect=["2", "1"]):
-        assert _step_web_ui(state) == "None"
+         patch("builtins.input", side_effect=["2"]):
+        assert _step_web_ui(state) == "Fluidd"
     output = " ".join(_plain_label(capsys.readouterr().out).split())
     assert " ".join(t("software.both_detected").split()) in output
-    assert " ".join(t("software.include_conflict", selected="Fluidd", existing="Mainsail").split()) in output
-    assert state == {"web_interface": "None", "web_interface_preserved": ["Mainsail"],
+    assert " ".join(t("software.fresh_configuration").split()) in output
+    assert state == {"web_interface": "Fluidd", "web_interface_preserved": [],
                      "web_interface_review_required": False}
     assert cfg.read_text(encoding="utf-8") == original
-    from core.managed_config import _reconcile_root
-    reconciled, _, _ = _reconcile_root(original, "[printer]\nkinematics: cartesian\n", False)
-    assert reconciled.count("[include mainsail.cfg]") == 1
-    assert "[include fluidd.cfg]" not in reconciled
-    assert "[include custom.cfg]" in reconciled and "# user comment" in reconciled
+    from core.managed_config import build_fresh_config_plan
+    plan = build_fresh_config_plan(b"[include fluidd.cfg]\n[printer]\nkinematics: cartesian\n", None,
+                                   {"printer.cfg": original.encode(), "fluidd.cfg": b""})
+    root = next(item.content for item in plan.artifacts if item.remote_name == "printer.cfg")
+    assert root.count(b"[include fluidd.cfg]") == 1
+    assert b"[include mainsail.cfg]" not in root and b"[include custom.cfg]" not in root
 
 
 @pytest.mark.parametrize("answer, expected", [("1", "Mainsail"), ("2", "Fluidd"), ("3", "None")])
@@ -64,8 +65,8 @@ def test_both_interfaces_without_existing_include_keeps_single_choice(tmp_path, 
                      "web_interface_review_required": False}
 
 
-@pytest.mark.parametrize("answers", [["4"], ["2", "3"], ["2", "2", "4"]])
-def test_back_from_software_and_conflict_leaves_state_unchanged(tmp_path, answers):
+@pytest.mark.parametrize("answers", [["4"], ["0", "4"], ["99", "4"]])
+def test_back_from_software_leaves_state_unchanged(tmp_path, answers):
     cfg = tmp_path / "printer.cfg"
     cfg.write_text("[include mainsail.cfg]\n", encoding="utf-8")
     (tmp_path / "mainsail.cfg").write_text("# existing macros\n", encoding="utf-8")
@@ -80,8 +81,8 @@ def test_back_from_software_and_conflict_leaves_state_unchanged(tmp_path, answer
     assert state == before
 
 
-@pytest.mark.parametrize("answers", [["2", "1"], ["1"]])
-def test_nested_interface_include_is_preserved_without_adding_root_include(tmp_path, answers):
+@pytest.mark.parametrize("answer,expected", [("2", "Fluidd"), ("1", "Mainsail")])
+def test_nested_old_interface_does_not_override_new_selection(tmp_path, answer, expected):
     files = {"printer.cfg": "# root\n[include custom.cfg]\n",
              "custom.cfg": "# user macros\n[include mainsail.cfg]\n",
              "mainsail.cfg": "# Mainsail\n"}
@@ -92,38 +93,30 @@ def test_nested_interface_include_is_preserved_without_adding_root_include(tmp_p
          patch("core.dashboard._detect_webui", return_value=True), \
          patch("core.menu._check_questionary_mock", return_value=menu._MOCK_DEFAULT), \
          patch.dict(os.environ, {"KACE_AUTO": "0"}), \
-         patch("builtins.input", side_effect=answers):
-        assert _step_web_ui(state) == "None"
-    assert state["web_interface_preserved"] == ["Mainsail"]
+         patch("builtins.input", return_value=answer):
+        assert _step_web_ui(state) == expected
+    assert state["web_interface_preserved"] == []
     assert state["web_interface_review_required"] is False
-    from core.managed_config import _reconcile_root
-    root, _, _ = _reconcile_root(files["printer.cfg"], "[printer]\nkinematics: cartesian\n", False)
-    assert "[include mainsail.cfg]" not in root and "[include fluidd.cfg]" not in root
-    assert "[include custom.cfg]" in root
     for name, content in files.items():
         assert (tmp_path / name).read_text(encoding="utf-8") == content
 
 
 @pytest.mark.parametrize("content", ["[include missing.cfg]\n", "[include extras/*.cfg]\n",
                                     "[include ../outside.cfg]\n"])
-@pytest.mark.parametrize("answer", ["1", "2"])
-def test_unreviewable_include_graph_only_allows_preserving_or_back(tmp_path, content, answer, capsys):
+@pytest.mark.parametrize("answer,expected", [("1", "Mainsail"), ("2", "Fluidd")])
+def test_unreviewable_old_include_graph_does_not_block_new_selection(tmp_path, content, answer, expected, capsys):
     cfg = tmp_path / "printer.cfg"
     cfg.write_text(content, encoding="utf-8")
     state = {"web_interface": "Fluidd"}
-    before = deepcopy(state)
     with patch("core.dashboard.get_printer_cfg_path", return_value=str(cfg)), \
          patch("core.dashboard._detect_webui", return_value=True), \
          patch("core.menu._check_questionary_mock", return_value=menu._MOCK_DEFAULT), \
          patch.dict(os.environ, {"KACE_AUTO": "0"}), \
          patch("builtins.input", return_value=answer):
         result = _step_web_ui(state)
-    if answer == "1":
-        assert result == "None" and state["web_interface_review_required"] is True
-    else:
-        assert result == _BACK and state == before
+    assert result == expected and state["web_interface_review_required"] is False
     output = " ".join(_plain_label(capsys.readouterr().out).split())
-    assert " ".join(t("software.includes_unverified").split()) in output
+    assert " ".join(t("software.fresh_configuration").split()) in output
     assert cfg.read_text(encoding="utf-8") == content
 
 
@@ -182,12 +175,12 @@ def test_contract_menu_cancellation_remains_cancellation():
     build.assert_not_called()
 
 
-def test_summary_reports_preserved_include_and_real_pending_firmware(capsys):
+def test_summary_ignores_legacy_preservation_claim_and_reports_pending_firmware(capsys):
     state = {"probe": "None", "web_interface": "None", "web_interface_preserved": ["Mainsail"],
              "pending_firmware_deployment": True}
     before = deepcopy(state)
     print_summary(state)
     output = " ".join(_plain_label(capsys.readouterr().out).split())
-    assert " ".join(t("software.preserved", includes="Mainsail").split()) in output
+    assert " ".join(t("software.preserved", includes="Mainsail").split()) not in output
     assert " ".join(t("summary.firmware_pending_step").split()) in output
     assert state == before

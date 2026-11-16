@@ -10,13 +10,39 @@
 import math
 
 
+PRINTABLE_XY_KEYS = tuple(f"printable_{axis}_{bound}" for axis in ("x", "y") for bound in ("min", "max"))
+_XY_CONFIRMATION_KEYS = PRINTABLE_XY_KEYS + tuple(
+    f"{axis}_position_{bound}" for axis in ("x", "y") for bound in ("min", "max"))
+
+
+def printable_xy_confirmation_matches(data):
+    """A user decision belongs to the exact printable rectangle and travel reviewed."""
+    saved = data.get("_printable_xy_confirmation")
+    if not isinstance(saved, dict) or set(saved) != set(_XY_CONFIRMATION_KEYS):
+        return False
+    try:
+        return all(not isinstance(data[key], bool) and not isinstance(saved[key], bool)
+                   and math.isfinite(float(data[key])) and float(data[key]) == float(saved[key])
+                   for key in _XY_CONFIRMATION_KEYS)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def confirm_printable_xy(data):
+    """Record a decision made by the explicit wizard action, never by inference."""
+    values = {key: float(data[key]) for key in _XY_CONFIRMATION_KEYS}
+    if not all(math.isfinite(value) for value in values.values()):
+        raise PrintableGeometryError("Printable geometry must be finite.")
+    data["_printable_xy_confirmation"] = values
+
+
 def _safe_float(val, default):
     if val is None:
         return default
     try:
         number = float(val)
         return number if math.isfinite(number) else default
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return default
 
 
@@ -29,11 +55,11 @@ class PrintableGeometryError(ValueError):
 
 
 def resolve_printable_xy(user_data: dict, axes: dict) -> tuple[dict, dict]:
-    """Resolve bed bounds without translating them to fit mechanical travel.
+    """Resolve printable bounds without translating them to fit configured travel.
 
     ``axes`` maps X/Y to (nominal size, travel minimum, travel maximum).
     Materialized defaults retain their origin until edited or explicitly accepted.
-    Explicit bounds may exceed travel here: effective review intersects the bed
+    Explicit bounds may exceed travel here: effective review intersects the area
     with probe reach, while generation separately validates its printable area.
     """
     previous = user_data.get("_printable_bounds_defaults")
@@ -78,7 +104,7 @@ def resolve_printable_xy(user_data: dict, axes: dict) -> tuple[dict, dict]:
 
 
 class PrinterMotionSpace:
-    """Represents the printer's physical coordinate system and motion space.
+    """Represents configured coordinates and motion envelopes, not measured bed size.
 
     Differentiates between printable bed area, nozzle reachable area,
     probe reachable area, and the homed coordinate origin.
@@ -153,7 +179,7 @@ class PrinterMotionSpace:
         }
 
     def nozzle_range_for_probing(self) -> dict:
-        """Returns the nozzle travel range required to probe the full physical bed.
+        """Returns nozzle travel required to probe the configured printable area.
 
         To place the probe-tip at a bed coordinate B, the nozzle must move to
         B - offset.  To cover the full bed [0, x_size], the nozzle must reach
@@ -175,7 +201,7 @@ class PrinterMotionSpace:
         }
 
     def probeable_bed_area(self) -> dict:
-        """Returns the intersection of the physical bed and probe-reachable area.
+        """Returns the intersection of printable bounds and probe-reachable area.
 
         Computes probe_reachable_area() (probe-tip coordinates) intersected
         with the resolved printable bed bounds. The result is in probe-tip /

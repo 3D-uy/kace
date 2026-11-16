@@ -1,8 +1,67 @@
 """Focused probe review and compatible Z preparation guidance."""
 
 WIZARD_REVIEW_STRINGS = {
+    "geometry.physical_unknown": {
+        "English": "Physical bed size and origin are not established here. Klipper travel limits cannot determine them; the diagram represents only the printable area.",
+        "Español": "El tamaño y origen de la cama física no están establecidos aquí. Los límites de Klipper no permiten deducirlos; el dibujo representa sólo el área imprimible.",
+        "Português": "O tamanho e a origem da mesa física não estão estabelecidos aqui. Os limites do Klipper não permitem deduzi-los; o desenho representa apenas a área imprimível.",
+    },
+    "geometry.proposal": {
+        "English": "Printable bounds: proposal or previously supplied values; explicit confirmation is pending.",
+        "Español": "Límites imprimibles: propuesta o valores aportados anteriormente; falta confirmación explícita.",
+        "Português": "Limites imprimíveis: proposta ou valores fornecidos anteriormente; falta confirmação explícita.",
+    },
+    "geometry.confirmed": {
+        "English": "Printable bounds: confirmed by the operator for these configured travel limits; not a physical measurement by KACE.",
+        "Español": "Límites imprimibles: confirmados por el operador para estos límites de movimiento; no son una medición física de KACE.",
+        "Português": "Limites imprimíveis: confirmados pelo operador para estes limites de movimento; não são uma medição física do KACE.",
+    },
+    "geometry.explanation": {
+        "English": "Review the printable rectangle separately from mechanical travel. A profile's position_max is only a proposal. Use the manufacturer's information or measurements to enter and confirm the usable area, including its coordinate origin. Editing this area does not change the movement limits.",
+        "Español": "Revisá el rectángulo imprimible por separado del recorrido mecánico. El position_max de un perfil es sólo una propuesta. Usá información del fabricante o mediciones para ingresar y confirmar el área utilizable, incluido su origen de coordenadas. Editarla no cambia los límites de movimiento.",
+        "Português": "Revise o retângulo imprimível separadamente do curso mecânico. O position_max de um perfil é apenas uma proposta. Use informações do fabricante ou medições para informar e confirmar a área utilizável, incluindo sua origem de coordenadas. Editá-la não altera os limites de movimento.",
+    },
+    "geometry.confirm_action": {
+        "English": "Confirm this printable area using information I checked",
+        "Español": "Confirmar esta área imprimible con información que verifiqué",
+        "Português": "Confirmar esta área imprimível com informações que verifiquei",
+    },
+    "geometry.fixed_artifact": {
+        "English": "Confirm the printable rectangle of this generated configuration using the manufacturer's information or measurements. This operation keeps these files unchanged. To correct the coordinates, cancel and use the configuration wizard; resuming does not regenerate them. Physical bed size and origin remain unknown.",
+        "Español": "Confirmá el rectángulo imprimible de esta configuración generada con información del fabricante o mediciones. Esta operación conserva estos archivos. Para corregir las coordenadas, cancelá y usá el asistente de configuración; reanudar no las regenera. El tamaño y origen físicos de cama siguen siendo desconocidos.",
+        "Português": "Confirme o retângulo imprimível desta configuração gerada com informações do fabricante ou medições. Esta operação mantém estes arquivos. Para corrigir as coordenadas, cancele e use o assistente de configuração; retomar não as regenera. O tamanho e a origem físicos da mesa continuam desconhecidos.",
+    },
+    "geometry.fixed_choose": {
+        "English": "Confirm these printable coordinates or cancel",
+        "Español": "Confirmá estas coordenadas imprimibles o cancelá",
+        "Português": "Confirme estas coordenadas imprimíveis ou cancele",
+    },
+    "geometry.fixed_bounds": {
+        "English": "Exact printable {axis} bounds in the generated configuration: [{low}, {high}] mm.",
+        "Español": "Límites imprimibles exactos {axis} de la configuración generada: [{low}, {high}] mm.",
+        "Português": "Limites imprimíveis exatos {axis} da configuração gerada: [{low}, {high}] mm.",
+    },
+    "geometry.edit_action": {
+        "English": "Enter or edit printable XY bounds", "Español": "Ingresar o editar límites imprimibles XY", "Português": "Informar ou editar limites imprimíveis XY",
+    },
+    "geometry.choose": {
+        "English": "Confirm or correct the printable rectangle", "Español": "Confirmá o corregí el rectángulo imprimible", "Português": "Confirme ou corrija o retângulo imprimível",
+    },
+    "geometry.invalid": {
+        "English": "Printable geometry is unresolved: enter finite, ordered XY bounds within the configured travel; go Back if the travel itself is unknown or incorrect.",
+        "Español": "Geometría imprimible sin resolver: ingresá límites XY finitos y ordenados dentro del recorrido configurado; volvé atrás si ese recorrido es desconocido o incorrecto.",
+        "Português": "Geometria imprimível não resolvida: informe limites XY finitos e ordenados dentro do curso configurado; volte se esse curso for desconhecido ou incorreto.",
+    },
+    "wizard.step.printable_area.header": {
+        "English": "Printable area", "Español": "Área imprimible", "Português": "Área imprimível",
+    },
+    "wizard.step.printable_area.hint": {
+        "English": "Confirm usable coordinates; do not infer physical bed dimensions from travel.",
+        "Español": "Confirmá las coordenadas utilizables; no deduzcas la cama física del recorrido.",
+        "Português": "Confirme as coordenadas utilizáveis; não deduza a mesa física pelo curso.",
+    },
     "nozzle_bed.title": {
-        "English": "Nozzle relative to the printable bed", "Español": "Boquilla respecto a la cama imprimible", "Português": "Bico em relação à mesa imprimível",
+        "English": "Nozzle relative to the printable area", "Español": "Boquilla respecto al área imprimible", "Português": "Bico em relação à área imprimível",
     },
     "nozzle_bed.missing": {
         "English": "Define printable XY bounds and travel limits to display distances.",
@@ -10,9 +69,9 @@ WIZARD_REVIEW_STRINGS = {
         "Português": "Defina os limites imprimíveis XY e de movimento para mostrar as distâncias.",
     },
     "nozzle_bed.invalid": {
-        "English": "Distances unavailable: review the bed and travel limits.",
-        "Español": "Distancias no disponibles: revisá los límites de cama y movimiento.",
-        "Português": "Distâncias indisponíveis: revise os limites da mesa e de movimento.",
+        "English": "Distances unavailable: review printable and travel limits.",
+        "Español": "Distancias no disponibles: revisá los límites imprimibles y de movimiento.",
+        "Português": "Distâncias indisponíveis: revise os limites imprimíveis e de movimento.",
     },
     "nozzle_bed.orientation": {
         "English": "Top view: -X left / +X right; -Y front / +Y back.",
@@ -20,22 +79,22 @@ WIZARD_REVIEW_STRINGS = {
         "Português": "Vista superior: -X esquerda / +X direita; -Y frente / +Y trás.",
     },
     "nozzle_bed.schematic": {
-        "English": "Box = printable bed. Edge coordinates in mm; drawing not to scale.",
-        "Español": "Recuadro = cama imprimible. Coordenadas de sus bordes en mm; dibujo sin escala.",
-        "Português": "Retângulo = mesa imprimível. Coordenadas das bordas em mm; desenho sem escala.",
+        "English": "Box = printable area. Edge coordinates in mm; drawing not to scale.",
+        "Español": "Recuadro = área imprimible. Coordenadas de sus bordes en mm; dibujo sin escala.",
+        "Português": "Retângulo = área imprimível. Coordenadas das bordas em mm; desenho sem escala.",
     },
     "nozzle_bed.size": {
-        "English": "Printable bed (X width x Y depth): {x} x {y} mm.",
-        "Español": "Cama imprimible (ancho X x fondo Y): {x} x {y} mm.",
-        "Português": "Mesa imprimível (largura X x profundidade Y): {x} x {y} mm.",
+        "English": "Printable area (X width x Y depth): {x} x {y} mm.",
+        "Español": "Área imprimible (ancho X x fondo Y): {x} x {y} mm.",
+        "Português": "Área imprimível (largura X x profundidade Y): {x} x {y} mm.",
     },
     "nozzle_bed.bed_label": {
-        "English": "BED", "Español": "CAMA", "Português": "MESA",
+        "English": "PRINTABLE AREA", "Español": "ÁREA IMPRIMIBLE", "Português": "ÁREA IMPRIMÍVEL",
     },
     "nozzle_bed.bed_bounds": {
-        "English": "Bed {axis}: {low} to {high} mm.",
-        "Español": "Cama {axis}: {low} a {high} mm.",
-        "Português": "Mesa {axis}: {low} a {high} mm.",
+        "English": "Printable area {axis}: {low} to {high} mm.",
+        "Español": "Área imprimible {axis}: {low} a {high} mm.",
+        "Português": "Área imprimível {axis}: {low} a {high} mm.",
     },
     "nozzle_bed.homing": {
         "English": "1. XY homing reference (endstops)", "Español": "1. Referencia de homing XY (endstops)", "Português": "1. Referência de homing XY (endstops)",
@@ -44,14 +103,14 @@ WIZARD_REVIEW_STRINGS = {
         "English": "Nozzle: X = {x} mm; Y = {y} mm.", "Español": "Boquilla: X = {x} mm; Y = {y} mm.", "Português": "Bico: X = {x} mm; Y = {y} mm.",
     },
     "nozzle_bed.outside": {
-        "English": "{axis}: {distance} mm outside the bed — {side}.",
-        "Español": "{axis}: {distance} mm fuera de la cama — {side}.",
-        "Português": "{axis}: {distance} mm fora da mesa — {side}.",
+        "English": "{axis}: {distance} mm outside the printable area — {side}.",
+        "Español": "{axis}: {distance} mm fuera del área imprimible — {side}.",
+        "Português": "{axis}: {distance} mm fora da área imprimível — {side}.",
     },
     "nozzle_bed.inside": {
-        "English": "{axis}: 0 mm outside (on the bed or its edge).",
-        "Español": "{axis}: 0 mm fuera (sobre la cama o su borde).",
-        "Português": "{axis}: 0 mm fora (sobre a mesa ou sua borda).",
+        "English": "{axis}: 0 mm outside (within the printable area or its edge).",
+        "Español": "{axis}: 0 mm fuera (dentro del área imprimible o su borde).",
+        "Português": "{axis}: 0 mm fora (dentro da área imprimível ou sua borda).",
     },
     "nozzle_bed.unknown_home": {
         "English": "{axis}: homing reference undefined or outside travel; distance unavailable.",
@@ -64,7 +123,7 @@ WIZARD_REVIEW_STRINGS = {
         "Português": "Coordenadas configuradas dos endstops, não posição ao vivo. O homing Z ou macros podem mover o bico depois.",
     },
     "nozzle_bed.travel": {
-        "English": "2. Declared travel beyond the bed", "Español": "2. Recorrido declarado fuera de la cama", "Português": "2. Curso declarado fora da mesa",
+        "English": "2. Declared travel beyond the printable area", "Español": "2. Recorrido declarado fuera del área imprimible", "Português": "2. Curso declarado fora da área imprimível",
     },
     "nozzle_bed.travel_bounds": {
         "English": "Nozzle travel {axis}: {low} to {high} mm.",

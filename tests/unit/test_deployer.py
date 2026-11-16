@@ -516,7 +516,9 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
         from core.snapshot import create_snapshot
         from tests.fixtures.klipper_preflight import valid_preflight
 
-        files = {"printer.cfg": b"# original\n"}
+        old_root = b"[include missing-old/*.cfg]\n#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+        old_macros = b"[gcode_macro OLD]\ngcode: M117 old\n"
+        files = {"printer.cfg": old_root, "macros.cfg": old_macros}
         generated = b"[mcu]\nserial: /dev/serial/by-id/test\n[printer]\nkinematics: cartesian\n"
         with tempfile.TemporaryDirectory() as root, \
                 patch("core.klipper_preflight.validate_plan", side_effect=valid_preflight), \
@@ -532,14 +534,15 @@ class FirmwareInstallationPreconditionTests(unittest.TestCase):
                 patch("core.moonraker_deployer.Deployer") as deployer:
             def check_during_deployment():
                 gate = deployer.call_args.kwargs["before_config_upload"]
-                self.assertEqual(gate()["printer.cfg"], b"# original\n")
+                self.assertEqual(gate()["printer.cfg"], old_root)
                 files["printer.cfg"] = b"# edited during firmware operation\n"
                 with self.assertRaisesRegex(ConfigConflictError, "concurrent"):
                     gate()
             deployer.return_value.run.side_effect = check_during_deployment
             deploy_firmware_installation(self._user())
             options = deployer.call_args.kwargs
-            self.assertEqual(options["snapshot"].config_files["printer.cfg"], b"# original\n")
+            self.assertEqual(options["snapshot"].config_files["printer.cfg"], old_root)
+            self.assertEqual(options["snapshot"].config_files["macros.cfg"], old_macros)
             active = {"mcu": {"serial": "/dev/serial/by-id/test"},
                       "printer": {"kinematics": "cartesian"}}
             body = {"result": {"status": {"configfile": {"config": active}}}}

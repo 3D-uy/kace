@@ -732,12 +732,12 @@ class TestGenerateConfigMacros(unittest.TestCase):
 @_skip_no_jinja2
 class TestGenerateConfigNativeFeatures(unittest.TestCase):
 
-    def test_native_features_are_enabled_by_default(self):
+    def test_native_features_keep_force_move_disabled_by_default(self):
         output = _generate(_parsed(), _user())
 
         self.assertEqual(output.count("[exclude_object]"), 1)
         self.assertEqual(output.count("[force_move]"), 1)
-        self.assertEqual(output.count("enable_force_move: True"), 1)
+        self.assertEqual(output.count("enable_force_move: False"), 1)
 
     def test_existing_force_move_value_is_preserved(self):
         parsed = _parsed(force_move={"enable_force_move": "False"})

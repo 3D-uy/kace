@@ -73,6 +73,23 @@ def test_closed_terminal_does_not_undo_archival(tmp_path, monkeypatch):
     assert next(tmp_path.glob('*.discarded-*')).read_bytes() == before
 
 
+def test_discard_directory_sync_failure_preserves_archive_without_event(tmp_path, monkeypatch):
+    checkpoint, path = saved_checkpoint(tmp_path)
+    before = path.read_bytes()
+    monkeypatch.setenv('KACE_MACHINE_OUTPUT', '1')
+    events = []
+    def fail_sync(directory):
+        assert str(directory) == str(tmp_path)
+        assert not path.exists()
+        raise OSError('synthetic archive directory sync failure')
+    with patch('core.firmware_workflow.fsync_directory', side_effect=fail_sync), \
+            patch('core.moonraker_deployer.JsonEventSink', return_value=events.append):
+        with pytest.raises(OSError, match='durability is not confirmed'):
+            discard_checkpoint(checkpoint)
+    assert not events
+    assert next(tmp_path.glob('*.discarded-*')).read_bytes() == before
+
+
 def test_plain_cli_discard_has_no_machine_output(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv('KACE_MACHINE_OUTPUT', raising=False)
     checkpoint, path = saved_checkpoint(tmp_path)

@@ -24,6 +24,7 @@ PHASE_MAP = {
     "y_limits": "Motion",
     "z_limits": "Motion",
     "homing_directions": "Motion",
+    "printable_area": "Motion",
     "motor_directions": "Motion",
     "z_mechanics": "Motion",
     "tmc_currents": "Motion",
@@ -50,6 +51,7 @@ PHASE_MAP = {
     "display": "Software",
     "web_ui": "Software",
     "starter_macros": "Software",
+    "force_move": "Software",
 }
 
 PHASE_KEYS = {

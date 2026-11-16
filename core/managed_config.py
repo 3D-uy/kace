@@ -691,9 +691,9 @@ def build_fresh_config_plan(
 ) -> ManagedConfigPlan:
     """Prepare a new configuration without importing the previous root or macros.
 
-    This planner is intentionally separate from publication: callers must still
-    back up and conditionally replace existing files, and retire old macros when
-    no replacement is generated.  Existing selected dependencies remain inputs.
+    Publication still requires review, backup and conditional replacement.
+    Omitted starter macros are retired as an inert file, not deleted. Existing
+    dependencies explicitly selected by the new configuration remain inputs.
     """
     clean = dict(remote_files)
     for name in (ROOT_REMOTE, ROOT_MACROS_REMOTE, HARDWARE_REMOTE, MACROS_REMOTE):
@@ -701,11 +701,31 @@ def build_fresh_config_plan(
     proposal = build_managed_config_plan(
         generated_hardware, generated_macros, clean, geometry_context=geometry_context,
     )
-    artifacts = tuple(
+    artifacts = [
         PlannedConfigArtifact(item.remote_name, item.content, remote_files.get(item.remote_name))
         for item in proposal.artifacts
-    )
+    ]
+    warnings = list(proposal.warnings)
+    if remote_files.get(ROOT_REMOTE) is not None and any(
+        item.remote_name == ROOT_REMOTE and item.changed for item in artifacts
+    ):
+        warnings.append(
+            "Fresh installation replaces printer.cfg after backup; old includes, "
+            "SAVE_CONFIG and calibration values are not imported. Review and calibrate the new configuration.",
+        )
+    if generated_macros is None and remote_files.get(ROOT_MACROS_REMOTE) is not None:
+        artifacts.append(PlannedConfigArtifact(
+            ROOT_MACROS_REMOTE,
+            b"# KACE: previous starter macros retired after backup; no macros selected.\n",
+            remote_files[ROOT_MACROS_REMOTE],
+        ))
+        if artifacts[-1].changed:
+            warnings.append("Existing macros.cfg definitions will be retired after backup; the file remains as a comment only.")
+    elif generated_macros is not None and remote_files.get(ROOT_MACROS_REMOTE) is not None and any(
+        item.remote_name == ROOT_MACROS_REMOTE and item.changed for item in artifacts
+    ):
+        warnings.append("Existing macros.cfg will be replaced by the newly selected starter macros after backup.")
     return ManagedConfigPlan(
-        artifacts, warnings=proposal.warnings, source_files=tuple(clean.items()),
+        tuple(artifacts), warnings=tuple(warnings), source_files=tuple(clean.items()),
         geometry_context=geometry_context,
     )
