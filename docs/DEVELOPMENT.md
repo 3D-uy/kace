@@ -130,7 +130,15 @@ publication gate stops before writes; it must not be treated as a CFG rejection.
 
 The image runs without network, with a read-only root and configuration input,
 dropped capabilities and resource limits. A temporary executable filesystem is
-needed to compile Klipper's helper. The check covers the explicitly reviewed
+needed to compile Klipper's helper. On POSIX hosts, the temporary parent remains
+private (0700); only its `input` child is mounted read-only. Copied input
+directories use 0755 and files use 0644 so a capability-stripped container can
+read them without assuming host/container UID mappings, even with a restrictive
+host umask. Other host users cannot traverse the private parent. Source files
+are never chmodded, and Windows retains its existing ACL behavior. Rootless or
+user-namespace Docker environments still require their own qualification;
+unavailable mounts fail as unverified rather than relaxing isolation.
+The check covers the explicitly reviewed
 include tree and fan references in the pinned image. It does not attest the
 destination's installed extensions or Python environment, MCU behavior, physical
 safety, or all runtime events. Constructors that require an active reactor and

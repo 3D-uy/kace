@@ -27,6 +27,9 @@ uncommitted changes or current CI, packaging or physical qualification.
 - Bound firmware subprocess output, cancellation and identity checks. Prepare
   the pinned Klipper source independently in each complete CI validation job.
 - Verify bootstrap checkout identity and preserve recoverable Nginx state.
+- Keep Docker preflight input copies readable inside the restricted container
+  while retaining a private host-side parent, including restrictive POSIX umasks.
+  Permission failures remain unverified; no extra container capabilities are added.
 - This is source preparation only. Immutable distribution alignment, clean-runner
   CI, real firmware/ARM builds, package qualification and manual printer E2E are
   pending. No new package, signature, independent reproduction or physical
