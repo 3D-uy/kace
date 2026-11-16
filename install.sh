@@ -36,8 +36,10 @@ EXPECTED_COMMIT="${KACE_EXPECTED_COMMIT:-}"
 INSTALL_PARENT=$(dirname "$INSTALL_DIR")
 STAGING_DIR=""
 BACKUP_DIR=""
-PUBLISHED_PATHS=""
 PUBLICATION_ACTIVE=0
+RUNTIME_COMMITTED=0
+INSTALL_LOCK_HELD=0
+RUNTIME_JOURNAL="$INSTALL_PARENT/.kace-runtime-transaction.json"
 ACTIVE_KACE_BIN=""
 RUNTIME_COMMIT_FILE=".kace-runtime-commit"
 
@@ -81,6 +83,258 @@ if [ "$EXPECTED_COMMIT" != "$INSTALL_REF" ]; then
     exit 1
 fi
 
+_runtime_transaction() {
+    python3 - "$INSTALL_DIR" "$@" <<'KACE_RUNTIME_TRANSACTION_PY'
+"""Standalone installer recovery prototype; embedded in verified install.sh.
+
+No imports from the installed or staged KACE runtime are safe during recovery.
+The caller holds .kace-install.lock for the entire transaction.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+NAMES = frozenset(('.git', '.kace-runtime-commit', 'kace.py', 'VERSION',
+                   'requirements.txt', 'requirements-ssh.txt', 'core',
+                   'firmware', 'data', 'templates', 'scripts', 'venv'))
+
+
+def journal_path(live):
+    return live.parent / '.kace-runtime-transaction.json'
+
+
+def sync_dir(path):
+    if os.name == 'nt':
+        return  # Windows fixture runs do not attest POSIX directory durability.
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def tree(path):
+    yield path
+    if path.is_dir() and not path.is_symlink():
+        for child in sorted(path.iterdir()):
+            yield from tree(child)
+
+
+def fingerprint(path):
+    if not path.exists() and not path.is_symlink():
+        return None
+    digest = hashlib.sha256()
+    for entry in tree(path):
+        info = entry.lstat()
+        mode = stat.S_IMODE(info.st_mode)
+        name = entry.relative_to(path).as_posix()
+        if stat.S_ISLNK(info.st_mode):
+            value = ['link', name, mode, os.readlink(entry)]
+        elif stat.S_ISDIR(info.st_mode):
+            value = ['dir', name, mode]
+        elif stat.S_ISREG(info.st_mode):
+            content = hashlib.sha256()
+            with entry.open('rb') as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    content.update(block)
+            value = ['file', name, mode, content.hexdigest()]
+        else:
+            raise RuntimeError('unsupported runtime entry: ' + str(entry))
+        digest.update(json.dumps(value, ensure_ascii=True).encode() + b'\n')
+    return digest.hexdigest()
+
+
+def sync_tree(path):
+    if not path.exists() or path.is_symlink():
+        return
+    for entry in reversed(list(tree(path))):
+        if entry.is_symlink():
+            continue
+        if entry.is_dir():
+            sync_dir(entry)
+        elif os.name != 'nt':
+            with entry.open('rb') as stream:
+                os.fsync(stream.fileno())
+
+
+def write_record(live, record):
+    path = journal_path(live)
+    fd, temporary = tempfile.mkstemp(prefix='.kace-journal.', dir=live.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump(record, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        sync_dir(path.parent)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def transaction_dir(live, value, prefix):
+    path = Path(value)
+    if (not path.is_absolute() or path.parent != live.parent
+            or not path.name.startswith(prefix) or path.is_symlink()
+            or not path.is_dir() or path.resolve() != path):
+        raise RuntimeError('invalid recovery path: ' + str(path))
+    return path
+
+
+def read_record(live):
+    path = journal_path(live)
+    if path.is_symlink():
+        raise RuntimeError('invalid journal path')
+    record = json.loads(path.read_text(encoding='utf-8'))
+    if (record.get('schema') != 1 or record.get('live') != str(live)
+            or record.get('phase') not in ('publishing', 'ready')
+            or not isinstance(record.get('paths'), dict) or not record['paths']
+            or not set(record['paths']).issubset(NAMES)):
+        raise RuntimeError('invalid runtime recovery journal')
+    transaction_dir(live, record['stage'], '.kace-install.')
+    transaction_dir(live, record['backup'], '.kace-backup.')
+    for identities in record['paths'].values():
+        if not isinstance(identities, dict) or set(identities) != {'old', 'new'}:
+            raise RuntimeError('invalid runtime recovery identities')
+        for key, value in identities.items():
+            if value is None and key == 'old':
+                continue
+            if not isinstance(value, str) or len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+                raise RuntimeError('invalid runtime recovery identity')
+    return record
+
+
+def begin(live, stage, backup, names):
+    if journal_path(live).exists() or journal_path(live).is_symlink():
+        raise RuntimeError('unfinished runtime publication requires recovery')
+    transaction_dir(live, str(stage), '.kace-install.')
+    transaction_dir(live, str(backup), '.kace-backup.')
+    if not names or len(set(names)) != len(names) or not set(names).issubset(NAMES):
+        raise RuntimeError('invalid runtime paths')
+    if any(backup.iterdir()):
+        raise RuntimeError('backup is not empty')
+    identities = {}
+    for name in names:
+        new = fingerprint(stage / name)
+        if new is None:
+            raise RuntimeError('staged runtime incomplete: ' + name)
+        identities[name] = {'old': fingerprint(live / name), 'new': new}
+        sync_tree(stage / name)
+        sync_tree(live / name)
+    for directory in (live, stage, backup, live.parent):
+        sync_dir(directory)
+    write_record(live, {'schema': 1, 'live': str(live), 'stage': str(stage),
+                       'backup': str(backup), 'phase': 'publishing', 'paths': identities})
+
+
+def rename(src, dest):
+    if dest.exists() or dest.is_symlink():
+        raise RuntimeError('recovery conflict: destination exists: ' + str(dest))
+    os.rename(src, dest)
+    sync_dir(src.parent)
+    sync_dir(dest.parent)
+
+
+def verify_ready(live, record):
+    for name, identities in record['paths'].items():
+        if fingerprint(live / name) != identities['new']:
+            raise RuntimeError('recovery conflict: published runtime changed: ' + name)
+
+
+def ready(live):
+    record = read_record(live)
+    verify_ready(live, record)
+    record['phase'] = 'ready'
+    write_record(live, record)
+
+
+def clear(live):
+    journal_path(live).unlink()
+    sync_dir(live.parent)
+
+
+def recover(live, rollback_only=False):
+    if not journal_path(live).exists() and not journal_path(live).is_symlink():
+        return
+    record = read_record(live)
+    if record['phase'] == 'ready':
+        if rollback_only:
+            raise RuntimeError('runtime committed; wrapper completion requires rerunning the verified installer')
+        verify_ready(live, record)
+        clear(live)
+        print('Recovered verified new runtime; this install must recreate its wrapper. '
+              'Previous runtime retained at ' + record['backup'], file=sys.stderr)
+        return
+    stage, backup = Path(record['stage']), Path(record['backup'])
+    moves = []
+    # Restore metadata last so old commit-bound launchers reject intermediate trees.
+    names = sorted(record['paths'], key=lambda name: (name in ('.git', '.kace-runtime-commit'), name))
+    for name in names:
+        identities = record['paths'][name]
+        old, new = identities['old'], identities['new']
+        actual, staged, saved = (fingerprint(folder / name) for folder in (live, stage, backup))
+        if actual == old and saved is None and staged == new:
+            continue
+        if saved != old or actual not in (None, new) or staged not in (None, new):
+            raise RuntimeError('recovery conflict: ' + name)
+        if actual == new:
+            if staged is not None:
+                raise RuntimeError('recovery conflict: duplicate new path: ' + name)
+            moves.append((live / name, stage / name, new))
+        elif staged != new:
+            raise RuntimeError('recovery conflict: missing new path: ' + name)
+        if old is not None:
+            moves.append((backup / name, live / name, old))
+    # Validate the complete plan before moving anything; retain evidence on conflict.
+    for src, dest, expected in moves:
+        if fingerprint(src) != expected:
+            raise RuntimeError('recovery conflict: source changed: ' + str(src))
+        rename(src, dest)
+    for name, identities in record['paths'].items():
+        if fingerprint(live / name) != identities['old']:
+            raise RuntimeError('recovery conflict: restored runtime changed: ' + name)
+    clear(live)
+    print('Recovered previous runtime; retained transaction copies at ' + str(stage)
+          + ' and ' + str(backup), file=sys.stderr)
+
+
+def main():
+    live = Path(sys.argv[1]).resolve()
+    action = sys.argv[2]
+    if action == 'begin':
+        begin(live, Path(sys.argv[3]).resolve(), Path(sys.argv[4]).resolve(), sys.argv[5:])
+    elif action == 'sync-file':
+        for value in sys.argv[3:]:
+            sync_tree(Path(value))
+    elif action == 'sync':
+        for value in sys.argv[3:]:
+            sync_dir(Path(value))
+    elif action == 'recover':
+        recover(live)
+    elif action == 'rollback':
+        recover(live, rollback_only=True)
+    elif action == 'ready':
+        ready(live)
+    elif action == 'finish':
+        record = read_record(live)
+        if record['phase'] != 'ready':
+            raise RuntimeError('runtime not committed')
+        verify_ready(live, record)
+        clear(live)
+    else:
+        raise RuntimeError('unknown recovery action')
+
+
+if __name__ == '__main__':
+    main()
+
+KACE_RUNTIME_TRANSACTION_PY
+}
+
 _safe_remove_transaction_dir() {
     local path="$1"
     case "$path" in
@@ -96,28 +350,30 @@ _safe_remove_transaction_dir() {
 }
 
 rollback_publication() {
-    [ "$PUBLICATION_ACTIVE" -eq 1 ] || return 0
-    echo "Installation publication failed; restoring the previous runtime." >&2
-    local item failed_path
-    for item in $PUBLISHED_PATHS; do
-        # A failed backup rename leaves the original in INSTALL_DIR and the
-        # new runtime in staging. Only displace a successfully published path.
-        if [ ! -e "$STAGING_DIR/$item" ] && [ ! -L "$STAGING_DIR/$item" ] &&
-                { [ -e "$INSTALL_DIR/$item" ] || [ -L "$INSTALL_DIR/$item" ]; }; then
-            failed_path="$STAGING_DIR/.failed-${item#.}"
-            mv -- "$INSTALL_DIR/$item" "$failed_path" || return 1
-        fi
-        if [ -e "$BACKUP_DIR/$item" ] || [ -L "$BACKUP_DIR/$item" ]; then
-            mv -- "$BACKUP_DIR/$item" "$INSTALL_DIR/$item" || return 1
-        fi
-    done
-    PUBLICATION_ACTIVE=0
+    if [ -n "${RUNTIME_JOURNAL:-}" ] && { [ -e "$RUNTIME_JOURNAL" ] || [ -L "$RUNTIME_JOURNAL" ]; }; then
+        _runtime_transaction rollback || return 1
+        PUBLICATION_ACTIVE=0
+        return 0
+    fi
+    if [ "$PUBLICATION_ACTIVE" -eq 1 ]; then
+        echo "Publication journal is missing; refusing unverified rollback. Preserve transaction copies for recovery." >&2
+        return 1
+    fi
+    return 0
 }
 
 _cleanup_installer() {
     local status=$?
     trap - EXIT INT TERM
+    # A rejected second installer must never recover the owner's transaction.
+    if [ "${INSTALL_LOCK_HELD:-0}" -ne 1 ]; then
+        exit "$status"
+    fi
     if [ "$status" -ne 0 ]; then
+        if [ "${RUNTIME_COMMITTED:-0}" -eq 1 ]; then
+            echo "Runtime committed but finalization failed; rerun the verified installer. Preserved $STAGING_DIR and $BACKUP_DIR." >&2
+            exit "$status"
+        fi
         if ! rollback_publication; then
             echo "Recovery failed; preserved runtime copies in $STAGING_DIR and $BACKUP_DIR for manual recovery." >&2
             exit 1
@@ -202,6 +458,11 @@ if ! flock -n 9; then
     echo -e "${E}  Another KACE installation is already running.${R}" >&2
     exit 1
 fi
+INSTALL_LOCK_HELD=1
+
+# Recover before fetching or publishing another runtime. This helper is part of
+# the verified installer and never imports the potentially mixed installed code.
+_runtime_transaction recover
 
 # ── Step 2: Clone or update KACE repository ──────────────────
 # Only runtime files are checked out — docs, tests, docker, CI,
@@ -310,8 +571,9 @@ printf '%s\n' "$ACTUAL_COMMIT" > "$STAGING_DIR/$RUNTIME_COMMIT_FILE"
 
 # Publish only installer-owned runtime paths. Generated printer configs,
 # firmware artifacts, deployment manifests, snapshots, and any other files in
-# ~/kace remain untouched. A failure before wrapper publication restores every
-# replaced runtime path from the same-filesystem backup.
+# ~/kace remain untouched. A failure before the durable runtime commit restores
+# verified previous paths from the same-filesystem backup. A later wrapper
+# failure retains the complete new runtime and requires installer completion.
 _RUNTIME_PATHS=".git $RUNTIME_COMMIT_FILE kace.py VERSION requirements.txt requirements-ssh.txt core firmware data templates scripts venv"
 for item in $_RUNTIME_PATHS; do
     if [ ! -e "$STAGING_DIR/$item" ] && [ ! -L "$STAGING_DIR/$item" ]; then
@@ -322,13 +584,16 @@ done
 
 mkdir -p "$INSTALL_DIR"
 BACKUP_DIR=$(mktemp -d "$INSTALL_PARENT/.kace-backup.XXXXXX")
+read -r -a runtime_paths <<< "$_RUNTIME_PATHS"
+_runtime_transaction begin "$STAGING_DIR" "$BACKUP_DIR" "${runtime_paths[@]}"
 PUBLICATION_ACTIVE=1
 for item in $_RUNTIME_PATHS; do
-    PUBLISHED_PATHS="$PUBLISHED_PATHS $item"
     if [ -e "$INSTALL_DIR/$item" ] || [ -L "$INSTALL_DIR/$item" ]; then
         mv -- "$INSTALL_DIR/$item" "$BACKUP_DIR/$item"
+        _runtime_transaction sync "$INSTALL_DIR" "$BACKUP_DIR"
     fi
     mv -- "$STAGING_DIR/$item" "$INSTALL_DIR/$item"
+    _runtime_transaction sync "$STAGING_DIR" "$INSTALL_DIR"
 done
 
 PUBLISHED_COMMIT=$(git -C "$INSTALL_DIR" rev-parse --verify HEAD)
@@ -341,7 +606,7 @@ if [ "$(tr -d '\r\n' < "$INSTALL_DIR/$RUNTIME_COMMIT_FILE")" != "$EXPECTED_COMMI
     echo -e "${E}  Published runtime pin does not match the expected commit.${R}" >&2
     exit 1
 fi
-if ! "$INSTALL_DIR/venv/bin/python" -c 'import jinja2, questionary, yaml'; then
+if ! PYTHONDONTWRITEBYTECODE=1 "$INSTALL_DIR/venv/bin/python" -c 'import jinja2, questionary, yaml'; then
     echo -e "${E}  Published virtual environment failed its import preflight.${R}" >&2
     exit 1
 fi
@@ -354,6 +619,13 @@ if [[ ! "$KACE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?([.-][0-9A-Za-z.-]
 fi
 echo -e "${G}  ✔ Permissions applied${R}"
 
+# Commit the complete verified runtime before the wrapper can change. After
+# this durable boundary, a failed wrapper update is completed by rerunning this
+# installer; rolling back the runtime could mismatch an already-published wrapper.
+_runtime_transaction ready
+RUNTIME_COMMITTED=1
+PUBLICATION_ACTIVE=0
+
 # ── Step 5: Create global wrapper ────────────────────────────
 echo -e "${C}[5/5]${R} Finalizing installation..."
 if [ "$(id -u)" -eq 0 ] || command -v sudo &>/dev/null; then
@@ -363,6 +635,11 @@ if [ "$(id -u)" -eq 0 ] || command -v sudo &>/dev/null; then
         'set -euo pipefail' \
         "expected_commit=\"$EXPECTED_COMMIT\"" \
         "install_dir=\"$INSTALL_DIR\"" \
+        'exec 8>>"$install_dir/../.kace-install.lock"' \
+        'if ! flock -s -n 8 || [ -e "$install_dir/../.kace-runtime-transaction.json" ] || [ -L "$install_dir/../.kace-runtime-transaction.json" ]; then' \
+        '    echo "KACE runtime installation requires completion; rerun the verified installer." >&2' \
+        '    exit 75' \
+        'fi' \
         'pinned_commit=$(tr -d '\''\r\n'\'' < "$install_dir/.kace-runtime-commit")' \
         'actual_commit=$(git -C "$install_dir" rev-parse --verify HEAD 2>/dev/null)' \
         'if [ "$pinned_commit" != "$expected_commit" ] || [ "$actual_commit" != "$expected_commit" ]; then' \
@@ -375,7 +652,9 @@ if [ "$(id -u)" -eq 0 ] || command -v sudo &>/dev/null; then
         exit 1
     fi
     _run_root chmod 0755 "$WRAPPER_TEMP"
+    _runtime_transaction sync-file "$WRAPPER_TEMP"
     _run_root mv -f -- "$WRAPPER_TEMP" "$KACE_BIN"
+    _runtime_transaction sync "$(dirname "$KACE_BIN")"
     ACTIVE_KACE_BIN="$KACE_BIN"
     echo -e "${G}  ✔ Global wrapper command created: ${B}kace${R} → ${KACE_BIN}${R}"
 else
@@ -388,6 +667,11 @@ else
         'set -euo pipefail' \
         "expected_commit=\"$EXPECTED_COMMIT\"" \
         "install_dir=\"$INSTALL_DIR\"" \
+        'exec 8>>"$install_dir/../.kace-install.lock"' \
+        'if ! flock -s -n 8 || [ -e "$install_dir/../.kace-runtime-transaction.json" ] || [ -L "$install_dir/../.kace-runtime-transaction.json" ]; then' \
+        '    echo "KACE runtime installation requires completion; rerun the verified installer." >&2' \
+        '    exit 75' \
+        'fi' \
         'pinned_commit=$(tr -d '\''\r\n'\'' < "$install_dir/.kace-runtime-commit")' \
         'actual_commit=$(git -C "$install_dir" rev-parse --verify HEAD 2>/dev/null)' \
         'if [ "$pinned_commit" != "$expected_commit" ] || [ "$actual_commit" != "$expected_commit" ]; then' \
@@ -397,7 +681,9 @@ else
         "exec \"$INSTALL_DIR/venv/bin/python\" \"$INSTALL_DIR/kace.py\" \"\$@\"" \
         > "$WRAPPER_TEMP"
     chmod 0755 "$WRAPPER_TEMP"
+    _runtime_transaction sync-file "$WRAPPER_TEMP"
     mv -f -- "$WRAPPER_TEMP" "$FALLBACK_BIN/kace"
+    _runtime_transaction sync "$FALLBACK_BIN"
     ACTIVE_KACE_BIN="$FALLBACK_BIN/kace"
     echo -e "${Y}  ⚠ sudo not available. Created fallback wrapper at ${FALLBACK_BIN}/kace${R}"
     echo -e "${Y}  ⚠ Make sure ${FALLBACK_BIN} is in your PATH:${R}"
@@ -406,6 +692,8 @@ fi
 
 # The wrapper now resolves the new runtime. Discard the backup only after that
 # final publication point; generated files were never moved.
+_runtime_transaction finish
+RUNTIME_COMMITTED=0
 PUBLICATION_ACTIVE=0
 _safe_remove_transaction_dir "$BACKUP_DIR"
 BACKUP_DIR=""
@@ -421,6 +709,10 @@ if [ "${KACE_NO_LAUNCH:-0}" = "1" ]; then
     exit 0
 fi
 
+_safe_remove_transaction_dir "$STAGING_DIR"
+STAGING_DIR=""
+INSTALL_LOCK_HELD=0
+exec 9>&-  # The launcher acquires its own shared runtime lock.
 echo -e "  ${C}Launching KACE...${R}"
 sleep 1
 # Reconnect stdin to the terminal so interactive prompts (questionary) work

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
@@ -206,6 +207,7 @@ class TestInstallWizardFlow(unittest.TestCase):
             errors="replace",
             timeout=30,
         )
+        self.installer_environment = environment
         return result, marker, install_dir
 
     def test_default_install_launches_and_waits_for_wizard(self):
@@ -305,13 +307,32 @@ class TestInstallWizardFlow(unittest.TestCase):
         self.assertTrue((install_dir / "venv" / "stale-package").is_file())
         self.assertTrue((install_dir / "snapshots" / "state.json").is_file())
 
-    def test_wrapper_publication_failure_rolls_back_replaced_runtime(self):
+    def test_wrapper_publication_failure_preserves_committed_runtime_and_completes_forward(self):
         result, marker, install_dir = self._run_installer(0, wrapper_fail=True)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(marker.exists())
-        self.assertIn("old runtime", (install_dir / "kace.py").read_text(encoding="utf-8"))
-        self.assertTrue((install_dir / "venv" / "stale-package").is_file())
+        self.assertIn("new runtime", (install_dir / "kace.py").read_text(encoding="utf-8"))
+        journal_path = install_dir.parent / ".kace-runtime-transaction.json"
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        self.assertEqual(journal["phase"], "ready")
+        backup = Path(journal["backup"])
+        self.assertIn("old runtime", (backup / "kace.py").read_text(encoding="utf-8"))
+        self.assertTrue((backup / "venv" / "stale-package").is_file())
+        self.assertIn("finalization failed", result.stderr)
+        self.assertEqual((install_dir / "printer.cfg").read_text(encoding="utf-8"), "# generated config\n")
+        self.assertTrue((install_dir / "snapshots" / "state.json").is_file())
+        resumed = subprocess.run(
+            result.args, cwd=ROOT,
+            env={**self.installer_environment, "KACE_TEST_WRAPPER_FAIL": "0", "KACE_NO_LAUNCH": "1"},
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+        self.assertFalse(journal_path.exists())
+        self.assertFalse(marker.exists())
+        self.assertTrue((install_dir.parent / ".local/bin/kace").is_file())
+        self.assertIn("new runtime", (install_dir / "kace.py").read_text(encoding="utf-8"))
+        self.assertIn("old runtime", (backup / "kace.py").read_text(encoding="utf-8"))
         self.assertEqual((install_dir / "printer.cfg").read_text(encoding="utf-8"), "# generated config\n")
         self.assertTrue((install_dir / "snapshots" / "state.json").is_file())
 

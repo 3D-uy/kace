@@ -148,22 +148,34 @@ def test_installer_preserves_original_on_failed_rename(tmp_path, fail_at):
     (install / "core").write_text("ORIGINAL")
     (stage / "core").write_text("NEW")
     source = (ROOT / "install.sh").read_text(encoding="utf-8")
-    functions = source[source.index("_safe_remove_transaction_dir() {"):source.index("trap _cleanup_installer EXIT")]
+    functions = source[source.index("_runtime_transaction() {"):source.index("trap _cleanup_installer EXIT")]
+    functions = functions.replace("_runtime_transaction() {", "_real_runtime_transaction() {", 1)
     script = f'''export PATH=/usr/bin:/bin:$PATH
 INSTALL_PARENT='{tmp_path.as_posix()}'
 INSTALL_DIR='{install.as_posix()}'
 STAGING_DIR='{stage.as_posix()}'
 BACKUP_DIR='{backup.as_posix()}'
-PUBLICATION_ACTIVE=1
-PUBLISHED_PATHS=' core'
+RUNTIME_JOURNAL="$INSTALL_PARENT/.kace-runtime-transaction.json"
+PUBLICATION_ACTIVE=0
+RUNTIME_COMMITTED=0
+INSTALL_LOCK_HELD=1
 {functions}
+python3() {{ '{sys.executable.replace(chr(92), "/")}' "$@"; }}
+_runtime_transaction() {{
+    if [ "$1" = rollback ] && [ {fail_at} -eq 3 ]; then return 1; fi
+    _real_runtime_transaction "$@"
+}}
+_runtime_transaction begin "$STAGING_DIR" "$BACKUP_DIR" core || exit 99
+PUBLICATION_ACTIVE=1
 count=0
 mv() {{ count=$((count+1)); [ "$count" -ne {fail_at} ] || return 1; command mv "$@"; }}
 mv -- "$INSTALL_DIR/core" "$BACKUP_DIR/core" && mv -- "$STAGING_DIR/core" "$INSTALL_DIR/core"
 false
 _cleanup_installer
 '''
-    result = subprocess.run([bash, "-c", script], capture_output=True, text=True)
+    script_path = tmp_path / "publication-failure.sh"
+    script_path.write_text(script, encoding="utf-8", newline="\n")
+    result = subprocess.run([bash, script_path.as_posix()], capture_output=True, text=True)
     assert result.returncode == 1
     copies = [p for base in (install, stage, backup) for p in base.rglob("*") if p.is_file() and p.read_text() == "ORIGINAL"]
     assert copies
