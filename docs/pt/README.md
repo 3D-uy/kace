@@ -6,7 +6,9 @@
 
 **Configuração guiada de impressoras, preparação de firmware e implantação para Klipper.**
 
-[![KACE version 0.9.4-rc.3](https://img.shields.io/badge/KACE-0.9.4--rc.3-e88c30?style=flat-square)](../../VERSION)
+[![KACE version 0.10.0-rc.1](https://img.shields.io/badge/KACE-0.10.0--rc.1-e88c30?style=flat-square)](../../VERSION)
+
+**O candidato de código 0.10.0-rc.1 está em preparação e não foi publicado.** O instalador fixado abaixo ainda identifica o candidato histórico, não estas fontes. A instalação e publicação de configuração substituem a raiz ativa por uma árvore nova revisada; não incorporam automaticamente a calibração nem os includes anteriores. Revise os backups externos e a qualificação manual antes de usar.
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-d29b32?style=flat-square)](#estado-do-projeto)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](../en/INSTALLATION.md)
 [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-2d718f?style=flat-square)](../../LICENSE)

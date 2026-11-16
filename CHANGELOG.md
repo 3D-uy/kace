@@ -7,7 +7,30 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 [README](README.md) covers current usage; [ROADMAP](ROADMAP.md) covers pending work.
 
-## Unreleased
+## [0.10.0-rc.1] - 2026-11-16 (preparation; unpublished)
+
+- Add explicit configuration-only generation and recovery from a completed
+  installation, with separate operation receipts and fresh validation. Preserve
+  the installation checkpoint and frozen recovery artifacts.
+- New installation, configuration-only publication and export use a fresh
+  generated tree. They do not merge old SAVE_CONFIG, calibration, macros or
+  includes. Review the replacement and external backups before applying it;
+  omitted macros become inert, and unrelated files are not deleted.
+- Recover interrupted runtime publication using a durable journal and shared
+  runtime locks. Official Studio launches and bootstrap diagnostic reads must
+  cooperate with that lock; older launchers and external writers still require
+  quiescence. Durable checkpoints and partial-publication diagnostics retain
+  evidence rather than reporting an incomplete transaction as success.
+- Disable force_move by default; enable it only after an explicit Advanced
+  choice. Require printable-area review, including legacy configuration recovery;
+  distinguish travel limits from unknown physical bed dimensions.
+- Bound firmware subprocess output, cancellation and identity checks. Prepare
+  the pinned Klipper source independently in each complete CI validation job.
+- Verify bootstrap checkout identity and preserve recoverable Nginx state.
+- This is source preparation only. Immutable distribution alignment, clean-runner
+  CI, real firmware/ARM builds, package qualification and manual printer E2E are
+  pending. No new package, signature, independent reproduction or physical
+  safety qualification is claimed.
 
 - Require loaded raw configuration to match the complete effective reviewed plan,
   including removed sections/options, before live DONE/COMPLETE; preserve pending

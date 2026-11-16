@@ -1,4 +1,4 @@
-# Controlled hardware qualification — 0.9.4-rc.3
+# Controlled hardware qualification — 0.10.0-rc.1 (preparation)
 
 This candidate is intended to collect the first controlled physical evidence.
 Automated tests, valid checksums and Klipper `Ready` do not qualify wiring, thermal
@@ -14,8 +14,11 @@ behavior, motion or an entire printer. Record observations per exact board revis
   build fingerprint; another MCU of the same model is insufficient.
 - Checkpoints reject stale writers. Configuration review precedes activation;
   completion requires the requested restart, Klipper Ready and firmware verification.
-- Existing configuration is reconciled, including SAVE_CONFIG and explicit nested
-  user includes. Missing, cyclic, wildcard or outside-root includes fail closed.
+- New installation and configuration-only publication validate a fresh generated
+  tree; previous SAVE_CONFIG, calibration, macros and includes are not merged.
+  Review the replacement and backups outside active includes before applying it.
+  Omitted macros become inert; unrelated files remain. Compatibility reconciliation
+  APIs retain their own validation, but are not the new-installation policy.
 - Local activation on the printer host uses a cooperative destination lock,
   comparison of reviewed bytes after staging, atomic replacement per file and
   readback verification. KACE writers using the lock are serialized. An external
@@ -75,9 +78,11 @@ sources stop generation; compatible values are recorded in the provenance sideca
 Absent options remain absent, allowing Klipper to choose its defaults. Selecting
 BLTouch or CR-Touch does not establish clone identity or physical compatibility.
 
-Existing explicit flags are retained during reconciliation when generation omits
-them. This includes flags that an older KACE may have inserted: their origin
-cannot be reliably inferred from their values. Review the effective configuration
+The compatibility reconciliation API retains existing explicit flags when
+generation omits them, including flags inserted by older KACE versions whose
+origin cannot be inferred reliably. New installation and configuration-only
+publication do not inherit these flags from the previous active tree; verify
+the reviewed generated values explicitly. Review the effective configuration
 and follow the [official BLTouch initial tests and clone guidance](https://www.klipper3d.org/BLTouch.html)
 before using it on a printer. Do not disable the pin-up checks merely to bypass an
 error. Touch mode and probing without stowing require device-specific accuracy
