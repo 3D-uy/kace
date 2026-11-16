@@ -170,11 +170,20 @@ class ReproducibleCiContractTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("simulated-hardware-integration:", workflow)
-        self.assertIn(
-            "python3 -m unittest tests.integration.test_simulated_firmware_lab -v",
-            workflow,
-        )
+        job = yaml.safe_load(workflow)["jobs"]["simulated-hardware-integration"]
+        steps = job["steps"]
+        install = next(i for i, step in enumerate(steps)
+                       if "pip install" in step.get("run", ""))
+        validation = next(i for i, step in enumerate(steps)
+                          if "test_simulated_firmware_lab" in step.get("run", ""))
+        self.assertLess(install, validation)
+        self.assertEqual(steps[install]["run"],
+                         "python3 -m pip install --require-hashes -r requirements-dev.txt")
+        self.assertEqual(steps[validation]["run"],
+                         "python3 -m pytest tests/integration/test_simulated_firmware_lab.py -v")
+        self.assertNotIn("continue-on-error", job)
+        self.assertNotIn("continue-on-error", steps[validation])
+        self.assertNotIn("if", steps[validation])
         self.assertIn(
             "needs: [unit-tests, simulated-hardware-integration, yaml-integrity]",
             workflow,

@@ -1086,7 +1086,7 @@ python tests/matrix/run_matrix.py --profile quick
 python tests/matrix/run_matrix.py --profile full
 python tests/regression/validate_snapshots.py
 python -m tests.sweep.scenario_contract --artifacts tests/results/reviewed-scenarios
-python -m unittest tests.integration.test_simulated_firmware_lab -v
+python -m pytest tests/integration/test_simulated_firmware_lab.py -v
 python scripts/check_portability.py
 ```
 
@@ -1107,6 +1107,13 @@ concrete boundaries and required input separately. The legacy diagnostic command
 policy; the parser-only helper is not the integrated CI gate.
 
 Record exact source, environment, command, skips and failures with each run.
+The simulated firmware lab also runs through pytest with the hashed development
+lock. Its explicit legacy preflight fixture models acceptance of synthetic CFGs;
+the lab checks downstream publication, activation and checkpoint outcomes through
+real loopback HTTP. Running it with unittest skips that fixture and attempts an
+unprovisioned real loader. This lab is not evidence of real Klipper preflight or
+physical hardware qualification; the opt-in loader integrations remain separate.
+
 Generated results belong to ignored output directories while investigating and
 must be archived outside the repositories when closed. Keep fixtures, inventories
 and their provenance in source control. No automated test may access real storage,
