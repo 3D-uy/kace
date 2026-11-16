@@ -8,7 +8,7 @@
 
 [![KACE version 0.10.0-rc.1](https://img.shields.io/badge/KACE-0.10.0--rc.1-e88c30?style=flat-square)](VERSION)
 
-**Source candidate 0.10.0-rc.1 is in preparation and has not been published.** The pinned installer below still identifies the historical candidate, not these sources. New installation and configuration publication replace the active root with a reviewed fresh tree; old calibration and includes are not merged automatically. Review external backups and manual qualification before use.
+**Source candidate 0.10.0-rc.1 is in preparation and has not been published.** The installer example below targets this candidate; do not run it until its immutable remote inputs have been published and verified. New installation and configuration publication replace the active root with a reviewed fresh tree; old calibration and includes are not merged automatically. Review external backups and manual qualification before use.
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-d29b32?style=flat-square)](#project-status)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](docs/en/INSTALLATION.md)
 [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-2d718f?style=flat-square)](LICENSE)
@@ -117,7 +117,7 @@ For a fresh Pi, start with [KACE Studio](#kace-studio) or the [manual host prepa
 ### 🔒 Verified / pinned installation
 
 For a fixed candidate with installer checksum verification, use the command below.
-It keeps the existing pinned reference and may differ from the current source.
+Its C0 reference must be published and verified before use.
 
 <details>
 <summary>Show the pinned installer command</summary>
@@ -125,8 +125,8 @@ It keeps the existing pinned reference and may differ from the current source.
 Requires `curl` and `sha256sum`. Review the script before running it.
 
 ```bash
-KACE_COMMIT='779489ad040a43178cebce339eeba18cd7f59b35'
-KACE_INSTALL_SHA256='de7db74da6f6261bf28fa329067f9d3424bc3e5abde5db4dd91c3f66861f3500'
+KACE_COMMIT='a730518001ba257b1a510776153e1ca58b87ee59'
+KACE_INSTALL_SHA256='8321a6c9706e459dbcd8e6e29b7f8a847e2cac2c9ffd5401f6ffe268281da452'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
 curl -fsSLo "$installer" "https://raw.githubusercontent.com/3D-uy/KACE/${KACE_COMMIT}/install.sh" &&
