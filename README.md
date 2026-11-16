@@ -125,7 +125,7 @@ Its C0 reference must be published and verified before use.
 Requires `curl` and `sha256sum`. Review the script before running it.
 
 ```bash
-KACE_COMMIT='a730518001ba257b1a510776153e1ca58b87ee59'
+KACE_COMMIT='c2da6d6bdade6ab31f88ab4ccd060cc8e59eae1a'
 KACE_INSTALL_SHA256='8321a6c9706e459dbcd8e6e29b7f8a847e2cac2c9ffd5401f6ffe268281da452'
 installer=$(mktemp)
 trap 'rm -f "$installer"' EXIT
