@@ -191,6 +191,21 @@ jobs:
       - name: Install dependencies
         run: python3 -m pip install --require-hashes -r requirements-dev.txt -r requirements-ssh.txt
 
+      # Jobs have independent filesystems; needs does not carry the source
+      # prepared by unit-tests into this runner.
+      - name: Prepare pinned Klipper for regression gates
+        run: |
+          mkdir -p tests/results/ci-regression
+          readarray -t klipper_source < <(python3 -c "from tests.klipper_contract import KLIPPER_REPO_URL, KLIPPER_REF; print(KLIPPER_REPO_URL); print(KLIPPER_REF)")
+          git init .klipper-contract-source
+          git -C .klipper-contract-source remote add origin "${klipper_source[0]}"
+          git -C .klipper-contract-source fetch --depth 1 origin "${klipper_source[1]}"
+          git -C .klipper-contract-source checkout --detach FETCH_HEAD
+          test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"
+          test -z "$(git -C .klipper-contract-source status --porcelain)"
+          git rev-parse HEAD > tests/results/ci-regression/tested-commit.txt
+          git -C .klipper-contract-source rev-parse HEAD > tests/results/ci-regression/klipper-commit.txt
+
       - name: Run snapshot regression tests
         # KACE_UPDATE_SNAPSHOTS must never be set in CI.
         # Any mismatch between generated output and the golden fixture is a
@@ -220,6 +235,14 @@ jobs:
         with:
           name: kace-snapshot-klipper-validation
           path: tests/results/snapshot-validation/
+
+      - name: Upload regression source identity
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kace-regression-source-${{ github.sha }}
+          path: tests/results/ci-regression/
+          if-no-files-found: error
 
   # Reduced deterministic KACE -> pinned Klipper loader matrix for PRs.
   config-matrix-quick:

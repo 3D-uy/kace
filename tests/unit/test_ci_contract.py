@@ -9,6 +9,26 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReproducibleCiContractTests(unittest.TestCase):
+    def test_each_complete_suite_prepares_its_own_verified_klipper_checkout(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+        for name, job in workflow["jobs"].items():
+            steps = job["steps"]
+            collectors = [i for i, step in enumerate(steps)
+                          if "tests/run_tests.py --verbose" in step.get("run", "")
+                          or "-m pytest tests " in step.get("run", "")]
+            if not collectors:
+                continue
+            with self.subTest(job=name):
+                preparation = [i for i, step in enumerate(steps)
+                               if "git init .klipper-contract-source" in step.get("run", "")]
+                self.assertEqual(len(preparation), 1, "needs does not share another job's checkout")
+                prepared = steps[preparation[0]]
+                self.assertLess(preparation[0], min(collectors))
+                self.assertNotIn("if", prepared)
+                self.assertNotIn("continue-on-error", prepared)
+                self.assertIn('test "$(git -C .klipper-contract-source rev-parse HEAD)" = "${klipper_source[1]}"', prepared["run"])
+                self.assertIn('test -z "$(git -C .klipper-contract-source status --porcelain)"', prepared["run"])
+
     def test_source_validation_jobs_install_hashed_development_and_ssh_locks(self):
         workflow = yaml.safe_load(
             (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
