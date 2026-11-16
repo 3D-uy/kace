@@ -34,7 +34,7 @@ def z_question(minimum="0.5"):
 
 @pytest.mark.parametrize("language", ["English", "Español", "Português"])
 @pytest.mark.parametrize("mode", ["Beginner", "Advanced"])
-def test_later_and_physical_clearance_complete_at_z_question_without_publishing_future_fields(
+def test_later_prepares_compatible_minimum_without_a_second_question(
         monkeypatch, capsys, language, mode):
     set_lang(language)
     set_mode(mode)
@@ -43,13 +43,11 @@ def test_later_and_physical_clearance_complete_at_z_question_without_publishing_
     expected = copy.deepcopy(user)
     expected.update(custom_probe_z_offset="", z_position_min="0")
     mark_user_override(expected, "z_position_min")
-    answers = iter(["2", "y"])
+    answers = iter(["2"])
     prompts = []
     screens = []
 
     def enter(prompt):
-        # Even the first decision stays staged until physical clearance is
-        # explicitly accepted. No typed/default sampling payload leaks early.
         assert user == original
         screens.append(capsys.readouterr().out)
         prompts.append(prompt)
@@ -57,7 +55,7 @@ def test_later_and_physical_clearance_complete_at_z_question_without_publishing_
 
     monkeypatch.setattr("builtins.input", enter)
     assert sensors._step_guided_custom_probe_value(user, "custom_probe_z_offset") == "done"
-    assert len(prompts) == 2
+    assert len(prompts) == 1
     assert user == expected
     assert "custom_probe" not in user and "custom_probe_settings" not in user
     for key, *_ in sensors.GUIDED_CUSTOM_PROBE_QUESTIONS:
@@ -67,8 +65,8 @@ def test_later_and_physical_clearance_complete_at_z_question_without_publishing_
     assert t("wizard.probe_z.minimum_prompt") not in text
     assert t("wizard.probe_z.back_review") not in text
     assert t("wizard.probe_z.deferred_title") not in text
-    rendered = _plain_label(screens[-1] + prompts[-1])
-    assert " ".join(t("wizard.probe_z.confirm_deferred_minimum", old="0.5", new="0").split()) in " ".join(rendered.split())
+    assert " ".join(t("wizard.probe_z.deferred_minimum_applied", old="0.5", new="0").split()) in text
+    assert t("wizard.probe_z.confirm_deferred_minimum", old="0.5", new="0") not in text
 
 
 @pytest.mark.parametrize("minimum", ["0", "-1"])
@@ -87,12 +85,13 @@ def test_compatible_later_choice_only_asks_the_offset_decision(monkeypatch, mini
 
 
 @pytest.mark.parametrize("answers", [
-    ["later", "n", "cancel", "<"],
-    ["later", "", "cancel", "<"],
-    ["later", "n", "edit", "<", "<"],
+    ["later", "cancel", "<"],
+    ["later", "edit", "<", "<"],
 ])
-def test_back_or_default_no_preserves_offset_minimum_and_nested_draft(monkeypatch, answers):
+def test_back_with_incompatible_maximum_preserves_offset_and_limits(monkeypatch, answers):
     user = z_question()
+    user["z_position_max"] = "-1"
+    mark_user_override(user, "z_position_max")
     original = copy.deepcopy(user)
     responses = iter(answers)
     monkeypatch.setattr("builtins.input", lambda *a: next(responses))
@@ -105,18 +104,15 @@ def test_back_or_default_no_preserves_offset_minimum_and_nested_draft(monkeypatc
 @pytest.mark.parametrize("value", ["0.5", "2", "nan", "inf"])
 def test_rejected_minimum_in_z_question_cannot_commit_any_part_of_decision(monkeypatch, value):
     user = z_question()
+    user["z_position_max"] = "-1"
+    mark_user_override(user, "z_position_max")
     original = copy.deepcopy(user)
     answers = iter(["later", "<"])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
     actions = iter(["edit", "cancel"])
     monkeypatch.setattr(probe_homing, "numbered_select", lambda *a, **k: next(actions))
     monkeypatch.setattr(probe_homing, "simple_input", lambda *a, **k: value)
-    confirmations = []
-    def decline_proposal(prompt, **kwargs):
-        assert not confirmations, "An invalid manual range must not reach confirmation"
-        confirmations.append(prompt)
-        return False
-    monkeypatch.setattr(probe_homing, "yes_no", decline_proposal)
+    monkeypatch.setattr(probe_homing, "yes_no", lambda *a, **k: pytest.fail("Invalid range"))
     assert sensors._step_guided_custom_probe_value(user, "custom_probe_z_offset") == _BACK
     assert user == original
 
@@ -130,7 +126,7 @@ def test_confirmed_minimum_survives_editing_an_existing_probe_review(monkeypatch
         user = restore_wizard_data(persistable_wizard_data(user))
     original = copy.deepcopy(user)
     original_raw = user["custom_probe"].config_text
-    responses = iter(["offset", "later", "y", "continue"])
+    responses = iter(["offset", "later", "continue"])
     monkeypatch.setattr("builtins.input", lambda *a: next(responses))
     assert sensors._step_custom_probe_review(user) == "done"
     assert user["z_position_min"] == "0"
@@ -158,7 +154,7 @@ def test_restored_raw_review_does_not_require_duplicate_guided_input_fields(monk
         if key.startswith("custom_probe_") and key != "custom_probe_settings":
             user.pop(key)
     original_raw = user["custom_probe"].config_text
-    replies = iter(["offset", "later", "y", "continue"])
+    replies = iter(["offset", "later", "continue"])
     monkeypatch.setattr("builtins.input", lambda *a: next(replies))
     assert sensors._step_custom_probe_review(user) == "done"
     assert user["z_position_min"] == "0"
@@ -172,7 +168,7 @@ def test_actual_wizard_route_reaches_thermal_without_second_range_panel(monkeypa
     catalog["hotend_therm"] = {"prompt": lambda state: "done", "next": lambda a, u: None}
     # The real catalog visits all remaining sample questions and builds the
     # authoritative raw probe only after the Z decision has been completed.
-    replies = iter(["later", "y", "", "", "1", "", "", "", "continue"])
+    replies = iter(["later", "", "", "1", "", "", "", "continue"])
     monkeypatch.setattr("builtins.input", lambda *a: next(replies))
     headers = []
     monkeypatch.setattr("core.wizard.ui._print_step_header", lambda step, *a, **k: headers.append(step))
@@ -193,7 +189,7 @@ def test_actual_wizard_route_reaches_thermal_without_second_range_panel(monkeypa
 
 def test_later_boundary_change_reopens_the_same_validator(monkeypatch):
     user = z_question()
-    replies = iter(["later", "y"])
+    replies = iter(["later"])
     monkeypatch.setattr("builtins.input", lambda *a: next(replies))
     assert sensors._step_guided_custom_probe_value(user, "custom_probe_z_offset") == "done"
     assert sensors._step_custom_probe(user) == "done"

@@ -277,7 +277,10 @@ def _step_probe_z_decision(user_data):
                 return _BACK
             from core.wizard.steps.probe_homing import review_probe_homing_geometry
             try:
-                accepted = review_probe_homing_geometry(staged, back_label=t("wizard.probe_z.back_offset"))
+                accepted = review_probe_homing_geometry(
+                    staged, back_label=t("wizard.probe_z.back_offset"),
+                    accept_deferred_minimum=True,
+                )
             except GenerationError:
                 for line in _wrapped_prompt_lines(t("wizard.probe_z.range_unresolved")):
                     print("  " + line)
@@ -570,6 +573,7 @@ def _step_custom_probe_review(user_data):
             except (TypeError, ValueError):
                 settings = None
         rows = [(t("wizard.review_probe.title", section=custom_probe.primary_section), None)]
+        provisional_row = None
         columns = shutil.get_terminal_size(fallback=(80, 24)).columns
         if isinstance(settings, GuidedCustomProbeSettings):
             values = [
@@ -600,6 +604,8 @@ def _step_custom_probe_review(user_data):
                       else "wizard.review_probe.supplied")
             label, _, value = state.partition(": ")
             rows.append((label + ":", value))
+            if state == t("wizard.review_probe.provisional"):
+                provisional_row = (label + ":", value)
         else:
             rows.extend([
                 (None, t("wizard.review_probe.offsets", x=custom_probe.x_offset,
@@ -614,6 +620,19 @@ def _step_custom_probe_review(user_data):
         explanation_texts = {t("wizard.probe_parameter." + name) for name in parameter_names}
         description_color = "\033[97m"
         for label, value in rows:
+            if (label, value) == provisional_row:
+                status, _, explanation = value.partition("; ")
+                prefix = f"{label:<{name_width}}  "
+                if len(prefix) + len(value) > columns - 2:
+                    prefix = label + " "
+                if len(prefix) + len(value) <= columns - 2:
+                    print(f"  {SECTION}{prefix}{RESET}{WARNING}{status};{RESET} "
+                          f"{description_color}{explanation}{RESET}")
+                else:
+                    print(f"  {SECTION}{label}{RESET} {WARNING}{status};{RESET}")
+                    for line in _wrapped_prompt_lines(explanation):
+                        print(f"  {description_color}{line}{RESET}")
+                continue
             if value is None or label is None:
                 role, text = (SECTION, label) if value is None else (description_color if value in explanation_texts else WARNING, value)
                 for line in _wrapped_prompt_lines(text):

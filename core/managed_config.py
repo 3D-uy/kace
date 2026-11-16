@@ -681,3 +681,31 @@ def build_managed_config_plan(
         source_files=sources,
         geometry_context=geometry_context,
     )
+
+
+def build_fresh_config_plan(
+    generated_hardware: bytes,
+    generated_macros: Optional[bytes],
+    remote_files: Mapping[str, Optional[bytes]],
+    *, geometry_context: GeometryContext | None = None,
+) -> ManagedConfigPlan:
+    """Prepare a new configuration without importing the previous root or macros.
+
+    This planner is intentionally separate from publication: callers must still
+    back up and conditionally replace existing files, and retire old macros when
+    no replacement is generated.  Existing selected dependencies remain inputs.
+    """
+    clean = dict(remote_files)
+    for name in (ROOT_REMOTE, ROOT_MACROS_REMOTE, HARDWARE_REMOTE, MACROS_REMOTE):
+        clean[name] = None
+    proposal = build_managed_config_plan(
+        generated_hardware, generated_macros, clean, geometry_context=geometry_context,
+    )
+    artifacts = tuple(
+        PlannedConfigArtifact(item.remote_name, item.content, remote_files.get(item.remote_name))
+        for item in proposal.artifacts
+    )
+    return ManagedConfigPlan(
+        artifacts, warnings=proposal.warnings, source_files=tuple(clean.items()),
+        geometry_context=geometry_context,
+    )

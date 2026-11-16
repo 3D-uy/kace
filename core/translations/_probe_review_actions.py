@@ -1,6 +1,11 @@
 """Probe parameter explanations and explicit Z review actions."""
 
 PROBE_REVIEW_ACTION_STRINGS = {
+    "wizard.probe_z.deferred_minimum_applied": {
+        "English": "For the provisional offset, minimum Z changed from {old} to {new} mm. Physical clearance has not been verified; check it before moving Z.",
+        "Español": "Para el offset provisional, el mínimo Z cambió de {old} a {new} mm. El recorrido físico no fue verificado; comprobalo antes de mover Z.",
+        "Português": "Para o offset provisório, o mínimo Z mudou de {old} para {new} mm. O curso físico não foi verificado; confira-o antes de mover Z.",
+    },
     "wizard.probe_z.confirm_deferred_minimum": {
         "English": "Provisional offset 0 requires changing minimum Z from {old} to {new} mm. Have you checked that the nozzle can physically reach Z={new} without collision, and do you accept this limit change?",
         "Español": "El offset provisional 0 requiere cambiar el mínimo Z de {old} a {new} mm. ¿Comprobaste que la boquilla puede llegar físicamente a Z={new} sin chocar y aceptás este cambio de límite?",

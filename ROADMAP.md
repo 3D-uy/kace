@@ -18,6 +18,53 @@ checks do not calibrate the probe or complete an installation by themselves.
 
 ## 🧭 Priorities
 
+Pending UX improvement: reorganize the profile review's build volume, printable
+area, nozzle travel and homing reference into a compact summary with optional
+details. Clarify nominal versus printable dimensions and configured versus
+measured positions; preserve geometry calculations, translations and navigation.
+
+Pending investigation: Up-arrow produces a literal escape sequence in the KACE
+session currently in use. Identify the running runtime and terminal path, then
+verify in-session history recall; source-level readline support alone does not
+establish that the deployed session uses it.
+
+Pending probe-review presentation: keep the provisional Z value highlighted,
+but render the calibration instruction in white on one line when terminal width
+permits, with readable wrapping on narrower terminals. Preserve EN/ES/PT.
+
+Pending software-screen UX review: clarify that Mainsail/Fluidd selection concerns
+the new configuration, not web interface installation. Simplify help and remove
+choices promising preservation of old installation includes. Validate dependencies
+selected by the new configuration.
+
+Product decision pending implementation: KACE performs fresh installations.
+Inform users when printer.cfg or macros.cfg exists and replace it with the new
+files; do not merge old SAVE_CONFIG, calibration, macros or includes. This supersedes
+the proposed PID-preserving resolution of the observed watermark/PID conflict
+on the Pi (READY_TO_DEPLOY). Prepare and validate the new tree first, back up old
+files outside active includes, and publish through the existing recoverable
+transaction. If macros are omitted, retire old macros.cfg and its active references.
+Do not indiscriminately delete the configuration directory. Separately investigate
+Klipper's observed MCU communication shutdown; its cause remains unverified.
+
+Implementation order, one item at a time:
+1. Fresh installation and recovery, including resume and the separate configuration
+   flow; test old files, SAVE_CONFIG, broken includes, omitted macros and interruption.
+   Retain new-tree validation and the existing publication approval.
+2. Diagnose MCU communication before final hardware validation.
+3. Verify/fix Up-arrow history in the actual Studio/Pi session.
+4. Finish reviewing deferred calibration: local changes already remove the second
+   compatible-minimum confirmation; full regression review, delivery and Pi checks
+   remain pending. This is not physical calibration.
+5. Render the probe review's PROBE_CALIBRATE instruction in white.
+6. Simplify Mainsail/Fluidd presentation for fresh installation.
+7. Reorganize volume, geometry and thermistors into summary and optional details.
+8. Align EN/ES/PT messages, verify source/packaged Studio and installed KACE, and
+   exercise the full flow without inferring completion from reconnection.
+
+This plan is not immediate execution: implement each item when the user requests
+it. The current diagnosis did not change Pi configuration files.
+
 The source includes unified board recommendations, yellow selection numbers, interactive Back navigation and reuse of reviewed homing directions. The continuous questionnaire preserves boxed explanations, the probe diagram and full profile review; catalogs show a bounded preview and optional filtering over all entries without paging. The generated summary keeps application and verification pending. Crowsnest reports files and service state separately. Validate these flows, including probe-range cancellation and correction, on the actual Pi and exact distributed candidate; source regressions do not establish physical qualification.
 
 | Priority | Required result | Reference |

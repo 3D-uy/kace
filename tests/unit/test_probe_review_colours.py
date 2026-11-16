@@ -49,6 +49,10 @@ def test_probe_columns_and_colours_preserve_all_values(monkeypatch, capsys, lang
         for name in fields:
             assert t('wizard.probe_parameter.' + name) in normalized
         assert t('wizard.review_probe.provisional') in normalized
+        status, explanation = t('wizard.review_probe.provisional').split(': ', 1)[1].split('; ', 1)
+        row = next(row for row in raw if explanation in _plain_label(row))
+        assert WARNING + status + ';' + RESET in row
+        assert '\033[97m' + explanation + RESET in row
         for group in ('connection', 'offsets', 'measurements'):
             row = next(row for row in raw if _plain_label(row).strip() == t('wizard.probe_review.group_' + group))
             assert SECTION in row and WARNING not in row

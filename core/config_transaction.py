@@ -204,6 +204,8 @@ class ConfigDeploymentTransaction:
         review: Optional[Callable[[ConfigurationReview], bool]] = None,
         activation_selector: Optional[Callable[[], str]] = None,
         snapshot_root: Optional[str] = None,
+        publication_guard=None,
+        allow_existing_activation: bool = False,
         board: str = "",
         kace_version: str = "unknown",
         timeout: float = 90.0,
@@ -227,6 +229,8 @@ class ConfigDeploymentTransaction:
         self.review = review
         self.activation_selector = activation_selector
         self.snapshot_root = snapshot_root
+        self.publication_guard = publication_guard
+        self.allow_existing_activation = allow_existing_activation
         self.board = board
         self.kace_version = kace_version
         self.timeout = timeout
@@ -509,6 +513,8 @@ class ConfigDeploymentTransaction:
                 )
             validated_digest = preflight.tree_digest
             def check_preflight_plan():
+                if self.publication_guard is not None:
+                    self.publication_guard()
                 try:
                     current_digest = plan_digest(self.plan)
                 except Exception as exc:
@@ -631,17 +637,39 @@ class ConfigDeploymentTransaction:
             self._verify_plan()
             if not self.plan.changed_artifacts and self.verify_existing_ready:
                 ready, state = self._wait_ready()
-                if not ready:
+                existing_verified = False
+                if ready:
+                    # A firmware identity mismatch must not be "repaired" by
+                    # another restart. Only an inactive configuration may ask
+                    # the operator to activate a previously published tree.
+                    self._verify_firmware()
+                    try:
+                        self._verify_active_configuration()
+                    except ActiveConfigurationVerificationError:
+                        if not self.allow_existing_activation:
+                            raise
+                    else:
+                        existing_verified = True
+                elif not self.allow_existing_activation:
                     raise self._readiness_failure(state)
-                self._verify_firmware()
-                self._verify_active_configuration()
+                if existing_verified:
+                    self._verify_plan()
+                    self._emit("DONE", "configuration already installed; Klipper Ready")
+                    return ConfigTransactionResult(
+                        ConfigTransactionState.COMMITTED,
+                        "configuration already installed; Klipper Ready and firmware verified",
+                        self.transaction_id,
+                    )
+                if self.activation_selector is None:
+                    raise ConfigConflictError("existing configuration requires explicit activation approval")
+                self.output("Published files match, but active configuration is not verified; choose activation explicitly.")
+                selected = self.activation_selector()
+                if selected not in {"firmware", "service", "none"}:
+                    raise ValueError(f"Unsupported activation mode: {selected}")
+                self.activation = selected
+                check_preflight_plan()
+                revalidate_config_state(self.transport, current)
                 self._verify_plan()
-                self._emit("DONE", "configuration already installed; Klipper Ready")
-                return ConfigTransactionResult(
-                    ConfigTransactionState.COMMITTED,
-                    "configuration already installed; Klipper Ready and firmware verified",
-                    self.transaction_id,
-                )
             if self.activation == "none":
                 return ConfigTransactionResult(
                     ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION,
@@ -656,7 +684,9 @@ class ConfigDeploymentTransaction:
                 self.transport.restart_moonraker()
                 if not self._wait_moonraker():
                     raise RuntimeError("Moonraker did not recover after restart")
-            self._emit("FIRMWARE_RESTART", "restarting Klipper to activate configuration")
+            # Preserve the historical wire phase; identify the actual request.
+            command = "RESTART" if self.activation == "firmware" else "SERVICE_RESTART"
+            self._emit("FIRMWARE_RESTART", f"{command}: activating Klipper configuration")
             self.transport.restart(self.activation)
             self._emit("VERIFYING_CONFIG", "waiting for Klipper Ready after restart")
             ready, state = self._wait_ready()

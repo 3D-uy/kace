@@ -74,8 +74,9 @@ def _staged_minimum(user_data, value):
     return staged
 
 
-def review_probe_homing_geometry(user_data, *, force=False, back_label=None):
-    """Return False on cancellation; publish only an explicitly confirmed edit."""
+def review_probe_homing_geometry(user_data, *, force=False, back_label=None,
+                                 accept_deferred_minimum=False):
+    """Review travel; the deferred choice may accept a validated zero minimum."""
     sections = _probe_homing_sections(user_data)
     if not sections:
         return True
@@ -111,6 +112,14 @@ def review_probe_homing_geometry(user_data, *, force=False, back_label=None):
     # The deferred decision is already made. Ask only for the physical limit
     # change, without an intervening menu that asks the user to choose it again.
     direct_review = deferred and preparation is not None and not force
+    if direct_review and accept_deferred_minimum:
+        width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns - 2)
+        print("\n" + textwrap.fill(t("wizard.probe_z.deferred_minimum_applied",
+                                     old=rail["position_min"],
+                                     new=preparation["z_position_min"]), width=width))
+        user_data.clear()
+        user_data.update(preparation)
+        return True
     if direct_review:
         width = max(20, shutil.get_terminal_size(fallback=(80, 24)).columns - 2)
         print("\n" + textwrap.fill(t("wizard.probe_z.deferred_context"), width=width))

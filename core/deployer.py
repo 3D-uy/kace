@@ -383,6 +383,12 @@ def _run_config_transaction(
     generated=None,
     *,
     activation_selector=None,
+    operation_sink=None,
+    snapshot_root=None,
+    checkpoint_guard=None,
+    operation_record=None,
+    allow_existing_activation=False,
+    preserve_moonraker=False,
 ):
     from core.config_transaction import ConfigDeploymentTransaction
     from core.firmware_workflow import generation_pin_reservations
@@ -408,9 +414,9 @@ def _run_config_transaction(
     def _review_configuration(review):
         return _interactive_configuration_review(review, yes_no)
 
-    state_sink = None
+    state_sink = operation_sink
     checkpoint = user_data.get("workflow_checkpoint")
-    if isinstance(checkpoint, dict) and checkpoint.get("workflow_id"):
+    if state_sink is None and isinstance(checkpoint, dict) and checkpoint.get("workflow_id"):
         from core.moonraker_deployer import JsonEventSink
 
         event_output = JsonEventSink()
@@ -427,6 +433,14 @@ def _run_config_transaction(
                 "detail": detail,
             })
 
+    def guard_publication():
+        if checkpoint_guard is not None:
+            checkpoint_guard()
+        if preserve_moonraker and transaction.plan is not None:
+            if any(item.remote_name == "moonraker.conf" for item in transaction.plan.changed_artifacts):
+                from core.config_transaction import ConfigConflictError
+                raise ConfigConflictError("Configuration-only operation cannot change moonraker.conf; review service and energy changes separately.")
+
     transaction = ConfigDeploymentTransaction(
         transport,
         hardware,
@@ -438,6 +452,9 @@ def _run_config_transaction(
         board=user_data.get("board", ""),
         kace_version=_KACE_VERSION,
         state_sink=state_sink,
+        snapshot_root=snapshot_root,
+        publication_guard=guard_publication if checkpoint_guard is not None or preserve_moonraker else None,
+        allow_existing_activation=allow_existing_activation,
         verify_existing_ready=True,
         geometry_context=geometry_context,
         selected_board=selected_board,
@@ -447,6 +464,8 @@ def _run_config_transaction(
         ) if checkpoint is not None else None,
     )
     result = transaction.run()
+    if operation_record is not None:
+        operation_record(transaction, result)
     if result.ok and "already installed" in result.detail:
         from core.translations import t
         print(t("deploy.already_installed"))
@@ -877,7 +896,7 @@ class _MoonrakerClient:
         from core.moonraker import restart_firmware
         ok, detail = restart_firmware(self._host, self._port, api_key=self._api_key)
         if not ok:
-            raise RuntimeError(f"FIRMWARE_RESTART failed: {detail}")
+            raise RuntimeError(f"RESTART failed: {detail}")
 
     def restart_moonraker(self):
         from core.moonraker import restart_moonraker_service

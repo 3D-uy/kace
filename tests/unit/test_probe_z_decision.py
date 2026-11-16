@@ -38,25 +38,22 @@ def test_known_choice_preserves_supplied_value_and_never_changes_minimum(monkeyp
         assert probe_homing.review_probe_homing_geometry(user)
 
 
-@pytest.mark.parametrize("accept", [True, False])
-def test_unknown_choice_then_confirmed_preparation_uses_zero_without_calibrating(monkeypatch, accept):
+def test_unknown_choice_prepares_zero_without_calibrating(monkeypatch):
     user = guided_user()
     original = copy.deepcopy(user)
-    answers = iter(["2", "y"] if accept else
-                   ["2", "n", "cancel", "<"])
+    answers = iter(["2"])
     monkeypatch.setattr("builtins.input", lambda *args: next(answers))
     result = sensors._step_guided_custom_probe_value(user, "custom_probe_z_offset")
-    assert result == ("done" if accept else _BACK)
-    if accept:
-        assert sensors._step_custom_probe(user) == "done"
-        monkeypatch.setattr(probe_homing, "numbered_select", lambda *a, **k: pytest.fail("Already reviewed in Z decision"))
-        assert probe_homing.review_probe_homing_geometry(user)
-        assert user["z_position_min"] == "0"
-        assert user["custom_probe_settings"].z_offset is None
-        assert user["custom_probe"].z_offset == 0
-        assert user["custom_probe"].config_text == original["custom_probe"].config_text
-    else:
-        assert user == original
+    assert result == "done"
+    assert sensors._step_custom_probe(user) == "done"
+    monkeypatch.setattr(probe_homing, "numbered_select", lambda *a, **k: pytest.fail("Already reviewed in Z decision"))
+    assert probe_homing.review_probe_homing_geometry(user)
+    assert user["z_position_min"] == "0"
+    assert user["custom_probe_settings"].z_offset is None
+    assert user["custom_probe"].z_offset == 0
+    assert user["custom_probe"].config_text == original["custom_probe"].config_text
+    with pytest.raises(StopIteration):
+        next(answers)
 
 
 @pytest.mark.parametrize("answers", [["<"], ["known", "<", "<"]])
@@ -107,7 +104,7 @@ def test_resumed_review_edits_z_while_preserving_other_raw_bytes(monkeypatch, ch
     sensors._step_custom_probe(user)
     user = restore_wizard_data(persistable_wizard_data(user))
     raw = user["custom_probe"].config_text
-    answers = iter(["offset", choice] + (["2"] if choice == "known" else ["y"]) + ["continue"])
+    answers = iter(["offset", choice] + (["2"] if choice == "known" else []) + ["continue"])
     monkeypatch.setattr("builtins.input", lambda *args: next(answers))
     assert sensors._step_custom_probe_review(user) == "done"
     assert user["custom_probe_settings"]["z_offset"] == expected

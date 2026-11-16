@@ -31,6 +31,11 @@ _ap.add_argument("--auto", action="store_true", help="Non-interactive mode (CI/a
 _ap.add_argument("--dev-deploy", action="store_true", dest="dev_deploy", help="Enable dev-deploy mode")
 _ap.add_argument("--debug", action="store_true", help="Enable KACE_DEBUG verbose output")
 _ap.add_argument("--real-build", action="store_true", dest="real_build", help="Use the real system make binary")
+_configuration_action = _ap.add_mutually_exclusive_group()
+_configuration_action.add_argument("--new-configuration", metavar="OPERATION_ID", help="Generate and review a new configuration without reinstalling")
+_configuration_action.add_argument("--resume-configuration", metavar="OPERATION_ID", help="Review an interrupted configuration-only operation again")
+_ap.add_argument("--configuration-checkpoint-sha256", metavar="SHA256", help="Bind a configuration operation to the unchanged installation checkpoint")
+_ap.add_argument("--configuration-result-sha256", metavar="SHA256", help="Bind recovery to the exact interrupted configuration result")
 _ap.add_argument(
     "--board-contract-sd-deploy",
     action="store_true",
@@ -43,6 +48,13 @@ _ap.add_argument(
     help="Run one non-interactive Moonraker power operation and return JSON",
 )
 _known = _ap.parse_args() if __name__ == "__main__" else _ap.parse_args([])
+if _known.new_configuration or _known.resume_configuration:
+    if not _known.configuration_checkpoint_sha256 or _known.auto or _known.power or _known.board_contract_sd_deploy or _known.dev_deploy:
+        _ap.error("configuration-only operation requires its checkpoint hash and cannot be combined with automatic, power, firmware or development actions")
+elif _known.configuration_checkpoint_sha256:
+    _ap.error("--configuration-checkpoint-sha256 requires a configuration-only operation")
+if bool(_known.resume_configuration) != bool(_known.configuration_result_sha256):
+    _ap.error("--configuration-result-sha256 is required only with --resume-configuration")
 
 if _known.version:
     print(f"KACE {__version__}")
@@ -453,6 +465,14 @@ def _select_configuration_deployment():
 
 
 def main():
+    if _known.new_configuration or _known.resume_configuration:
+        from core.configuration_operation import run_configuration_operation
+        _finish(run_configuration_operation(
+            _known.new_configuration or _known.resume_configuration,
+            _known.configuration_checkpoint_sha256,
+            resume=bool(_known.resume_configuration),
+            result_sha256=_known.configuration_result_sha256,
+        ))
     initial_checkpoint_revision = checkpoint_revision()
     try:
         workflow_checkpoint, resume_action = _resume_firmware_workflow()

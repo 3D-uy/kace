@@ -51,6 +51,51 @@ repeating bootstrap. The bootstrap recovery hint distinguishes this route from
 standalone `kace`. Reconnection alone does not resume the CLI or close a
 `DEPLOYING` checkpoint. No old validation receipt can authorize a different plan.
 
+The legacy activation phase `FIRMWARE_RESTART` remains unchanged on the wire.
+Its detail identifies `RESTART` (POST `/printer/restart`) or `SERVICE_RESTART`
+(the Klipper service API). The Python helper `restart_firmware` sends RESTART,
+not the literal FIRMWARE_RESTART G-code; errors name the effective command.
+Klipper can independently request a firmware restart after an MCU configuration
+CRC mismatch. Do not count a legacy phase marker as a separate MCU reset.
+`test_restart_command_identity.py` checks the single request, error label and
+phase compatibility with an explicit unit preflight double; it does not run
+Docker or attest hardware behavior.
+
+Studio can explicitly launch `--new-configuration <32-hex-operation-id>` with
+`--configuration-checkpoint-sha256 <sha256>` after a validated COMPLETE
+installation. `core/configuration_operation.py` restores the saved decisions
+without running bootstrap, the hardware wizard, firmware compilation or flashing.
+It requires saved board data; it never fetches a replacement board implicitly.
+Generation, provenance, receipts and snapshots go under
+`~/kace/configuration-operations/<id>/`; existing generated artifacts and the
+firmware checkpoint remain unchanged. The operation holds the checkpoint lock,
+checks its exact hash before publication, binds generated serial to the verified
+MCU and retains the existing effective review, isolated preflight and firmware
+verification. This focused entry rejects proposed moonraker.conf changes before
+review/writes: service and energy policy changes need a separate explicit flow.
+
+`--resume-configuration <id>` additionally requires
+`--configuration-result-sha256 <sha256>`. It verifies the receipt and generated
+manifest/bytes, repeats preflight and approval, and never regenerates silently.
+A verified already-active tree completes without another restart. For this
+explicit recovery only, files already published but not activated can prompt for
+activation; no restart occurs without that choice, and firmware mismatch is not
+treated as permission to restart. Deferred activation remains non-success.
+`result.json` uses `kace-configuration-operation/v1`; only its new COMPLETE with
+exit_code0, after verification and checkpoint recheck, completes the operation.
+Legacy DONE progress and the original installation COMPLETE are not that result.
+Transaction records bind plan digests, artifact hashes and original snapshot
+paths. An interruption before generated manifest commit requires a new operation,
+not a fabricated recovery receipt. No native EXE/Pi delivery is implied by these
+source changes.
+
+Run `tests/unit/test_configuration_operation.py` with the transaction and restart
+regressions. Its generator/transaction are real but Docker, destination and MCU
+proof use explicit doubles. The opt-in
+`tests/integration/test_configuration_operation_preflight.py` replaces the loader
+double with the real provisioned Docker engine (`KACE_C3_DOCKER_INTEGRATION=1`),
+still with a simulated destination and deferred activation.
+
 The startup language and mode selectors require an explicit valid menu number.
 Blank/invalid input is re-prompted, including a newline queued during package
 downloads; EOF and Ctrl+C still cancel. No terminal input is indiscriminately
@@ -925,21 +970,19 @@ A supplied zero is a known value; an unknown value remains the existing optional
 setting and renders a clearly commented provisional zero. Checkpoint restoration
 preserves that distinction. Choosing calibration later resolves any incompatible
 Z minimum in that same offset question, using a temporary probe payload and the
-existing range review. Only the offset decision and explicitly confirmed minimum
-are committed; later sample questions still own their values. Cancelling the range
+existing range review. When zero is a valid minimum, choosing calibration later
+also prepares that minimum without another confirmation and reports the change;
+physical clearance is not verified. Later sample questions still own their values. Cancelling the range
 review returns to the offset choice without altering the accepted draft.
 The later homing gate revalidates effective values and stays silent (including its
 header) when compatible. Changed or older unresolved values reopen the review;
 there is no cached approval that bypasses validation. Known and imported offsets retain
 their direct editor, with trigger height explained separately from travel limits.
 Explicit manual range review remains available even for a compatible range.
-All paths retain the same validator and explicit physical-clearance confirmation
-for a changed limit.
-For deferred calibration with an incompatible minimum, the wizard asks directly
-for physical-clearance confirmation of the validated minimum change. There is no
-intervening minimum-selection menu. The answer defaults to No; only an explicit
-Yes publishes the staged change. Declining offers manual editing or Back, keeping
-the deferred decision and accepted limits intact. Compatible ranges remain silent.
+All paths retain the same validator. Manual limit changes and later reviews retain
+explicit physical-clearance confirmation. A deferred calibration choice prepares
+zero only when it passes that validator; other incompatible ranges still require
+review or Back. Compatible ranges remain silent.
 The optional unknown offset, shared geometry validator and explicit manual review
 retain their existing contracts. Cover this with `test_probe_z_step_completion.py`
 and `test_probe_deferred_z_review.py`.
