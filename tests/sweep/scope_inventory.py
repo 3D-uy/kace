@@ -6,6 +6,7 @@ In particular, no entry here turns a generation/loader failure into success.
 from collections import Counter
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -36,7 +37,10 @@ def verify_source_checkout(source):
     """Shared prerequisite for portable scenario proofs against official sources."""
     source = Path(source)
     def git(*args):
-        return subprocess.check_output(['git', '-C', str(source), *args], text=True).strip()
+        # Native Windows inheritance can lose empty Git configuration values
+        # when another test restores os.environ. Pass the complete Python copy.
+        return subprocess.check_output(['git', '-C', str(source), *args], text=True,
+                                       env=os.environ.copy()).strip()
     if git('rev-parse', 'HEAD') != KLIPPER_REF:
         raise InventoryError('Wrong Klipper revision')
     if git('status', '--porcelain'):

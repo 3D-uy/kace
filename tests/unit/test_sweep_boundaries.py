@@ -96,3 +96,14 @@ def test_unreviewed_checkout_fails_before_inventory(git_results, message, tmp_pa
         with pytest.raises(scope_inventory.InventoryError, match=message):
             contract.reviewed_boundaries(tmp_path)
         inventory.assert_not_called()
+
+
+def test_checkout_verifier_passes_empty_environment_values_to_git(monkeypatch, tmp_path):
+    monkeypatch.setenv('KACE_TEST_EMPTY_VALUE', '')
+    with patch.object(scope_inventory.subprocess, 'check_output',
+                      side_effect=[contract.KLIPPER_REF, '']) as git, \
+            patch.object(scope_inventory, 'verify_source_inventory') as inventory:
+        assert scope_inventory.verify_source_checkout(tmp_path) is inventory.return_value
+    assert len(git.call_args_list) == 2
+    for call in git.call_args_list:
+        assert call.kwargs['env']['KACE_TEST_EMPTY_VALUE'] == ''
