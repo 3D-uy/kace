@@ -9,6 +9,10 @@
 
 # Force LF for shell scripts (must not have CRLF on Linux/Pi)
 *.sh text eol=lf
+core/klipper_preflight.Dockerfile text eol=lf
+VERSION text eol=lf
+*.json text eol=lf
+requirements*.txt text eol=lf
 *.py text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
