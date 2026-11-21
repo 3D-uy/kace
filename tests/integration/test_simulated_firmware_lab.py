@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import copy
 import io
 import hashlib
 import json
@@ -518,6 +517,8 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
 
     def test_checkpoint_complete_requires_loaded_configuration_and_activation(self):
         import kace
+        from core.config_geometry import load_geometry_context
+        from core.generator import generate_config
         from core.config_transaction import (
             ConfigDeploymentTransaction, ConfigTransactionState,
             LocalMoonrakerConfigTransport,
@@ -528,8 +529,8 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
             load_checkpoint, FirmwareWorkflowState as State,
         )
         from core.translations import get_lang, get_mode, set_lang, set_mode
-        from tests.regression.test_main_integration import _WIZARD_USER_DATA_WITH_PARSED
-        from tests.unit.test_config_transaction import GENERATED
+        from tests.regression.test_main_integration import _reviewed_xy
+        from tests.unit.test_generator import _parsed, _user
 
         self.addCleanup(set_lang, get_lang())
         self.addCleanup(set_mode, get_mode())
@@ -538,8 +539,21 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
             "noop_verified", "noop_stale", "deferred",
         )
         for scenario in scenarios:
-            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory, MoonrakerLab() as lab:
+            with (
+                self.subTest(scenario=scenario),
+                tempfile.TemporaryDirectory() as directory,
+                MoonrakerLab() as lab,
+                contextlib.ExitStack() as fixtures,
+            ):
                 root = Path(directory)
+                fixtures.enter_context(patch.dict(os.environ, {"HOME": directory, "USERPROFILE": directory}))
+                user = _reviewed_xy(_user(mcu_type="lpc1769", mcu_path="/dev/serial/by-id/test",
+                                          language="English", board_parsed=_parsed(), macros_generated=False))
+                generated = root / "kace" / "printer.cfg"
+                generated.parent.mkdir()
+                generate_config(user["board_parsed"], user, output_path=str(generated), verbose=False)
+                hardware = generated.read_bytes()
+                geometry = load_geometry_context(generated, hardware)
                 config = root / "config"
                 config.mkdir()
                 live = config / "printer.cfg"
@@ -558,9 +572,10 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
                 events = []
                 results = []
 
-                def transaction(activation):
+                def transaction(activation, checkpoint=None):
                     result = ConfigDeploymentTransaction(
-                        transport, GENERATED, None, activation=activation,
+                        transport, hardware, None, activation=activation,
+                        fresh_install=True, geometry_context=geometry, installation_checkpoint=checkpoint,
                         verify_existing_ready=True, poll_interval=0,
                         timeout=1, output=lambda _line: None,
                         snapshot_root=str(root / "snapshots"),
@@ -570,9 +585,11 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
                     return result
 
                 if scenario.startswith("noop_"):
+                    staged = transaction("none")
                     self.assertEqual(
-                        transaction("none").state,
+                        staged.state,
                         ConfigTransactionState.DEPLOYED_PENDING_ACTIVATION,
+                        staged.detail,
                     )
                     if scenario == "noop_verified":
                         lab.load_configuration()
@@ -581,14 +598,15 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
                 elif scenario == "fresh_stale":
                     lab.load_config_on_restart = False
                 elif scenario == "fresh_extra":
-                    lab.loaded_config_override = {
-                        "mcu": {"serial": "/dev/serial/by-id/test"},
-                        "printer": {"kinematics": "cartesian"},
-                        "stepper_x": {"step_pin": "PA1", "position_min": "-100"},
-                    }
+                    load_published = lab.load_configuration
 
-                user = copy.deepcopy(_WIZARD_USER_DATA_WITH_PARSED)
-                user.update(mcu_type="lpc1769", mcu_path="/dev/serial/by-id/test", language="English")
+                    def load_extra_option():
+                        load_published()
+                        self.assertNotIn("homing_retract_speed", lab.loaded_config["stepper_x"])
+                        lab.loaded_config["stepper_x"]["homing_retract_speed"] = "25"
+
+                    fixtures.enter_context(patch.object(lab, "load_configuration", side_effect=load_extra_option))
+
                 artifact = root / "firmware.bin"
                 artifact.write_bytes(b"firmware")
                 checkpoint = transition_checkpoint(create_checkpoint(user), State.ARTIFACT_READY, artifact={
@@ -606,9 +624,6 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
                 checkpoint = transition_checkpoint(checkpoint, State.READY_TO_DEPLOY)
                 checkpoint_path = str(root / "firmware-workflow.json")
                 write_checkpoint(checkpoint, checkpoint_path)
-                generated = root / "generated-printer.cfg"
-                generated.write_bytes(GENERATED)
-                expanduser = os.path.expanduser
                 activation = "none" if scenario == "deferred" else "firmware"
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(patch.dict(os.environ, {
@@ -618,18 +633,19 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
                     for name in ("print_kace_banner", "print_summary"):
                         stack.enter_context(patch("kace." + name))
                     stack.enter_context(patch("kace.check_display_compatibility", return_value=[]))
-                    stack.enter_context(patch("kace.os.path.expanduser", side_effect=lambda path:
-                        str(generated) if path == "~/kace/printer.cfg" else expanduser(path)))
                     stack.enter_context(patch("kace.numbered_select", return_value="moonraker"))
-                    stack.enter_context(patch("kace.deploy_moonraker", side_effect=lambda _user:
-                        _config_result_to_workflow(transaction(activation))))
+                    stack.enter_context(patch("kace.deploy_moonraker", side_effect=lambda data:
+                        _config_result_to_workflow(transaction(activation, data["workflow_checkpoint"]))))
                     stack.enter_context(patch("kace.run_wizard", side_effect=AssertionError("must resume")))
                     output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                     with self.assertRaises(SystemExit) as exited:
                         kace.main()
 
                 saved = load_checkpoint(checkpoint_path)
-                self.assertEqual(len(results), 1)
+                self.assertEqual(len(results), 1, output.getvalue())
+                publication = saved.get("installation_publication")
+                self.assertIsInstance(publication, dict, results[0].detail)
+                self.assertEqual(publication["hardware"], hashlib.sha256(hardware).hexdigest())
                 if scenario.endswith("_verified"):
                     self.assertEqual(exited.exception.code, 0, output.getvalue())
                     self.assertEqual(saved["state"], "COMPLETE")
@@ -637,7 +653,7 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
                     self.assertIn("DONE", events)
                 else:
                     self.assertNotEqual(exited.exception.code, 0, output.getvalue())
-                    self.assertEqual(saved["state"], "READY_TO_DEPLOY")
+                    self.assertEqual(saved["state"], "DEPLOYING")
                     self.assertFalse(results[0].ok)
                     self.assertNotIn("DONE", events)
                     self.assertTrue(saved["last_error"])
@@ -650,8 +666,11 @@ class SimulatedConfigurationCompletionTests(unittest.TestCase):
                     self.assertEqual(lab.restarts, [] if scenario.startswith("noop_") else ["klipper"])
                 if scenario in {"fresh_stale", "fresh_extra"}:
                     self.assertIn(b"[stepper_x]", live.read_bytes())
+                    self.assertTrue((Path(publication["snapshot"]) / "printer.cfg").is_file())
                     self.assertFalse(results[0].rollback_succeeded)
                     self.assertIn("manual recovery", results[0].detail)
+                if scenario == "fresh_extra":
+                    self.assertIn("unexpected [stepper_x] homing_retract_speed", results[0].detail)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 """Hardware-free regressions for firmware identity and rollback ownership."""
 
+import hashlib
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -81,9 +83,14 @@ class TransactionIdentityTests(unittest.TestCase):
     def test_both_live_adapters_keep_fingerprint_inside_real_transaction(self):
         from contextlib import ExitStack
         from core import deployer
+        from core.config_transaction import LocalMoonrakerConfigTransport
 
         for route in ("moonraker", "sftp"):
             with self.subTest(route=route), tempfile.TemporaryDirectory() as root, ExitStack() as stack:
+                checkpoint_path = str(Path(root) / "firmware-workflow.json")
+                stack.enter_context(patch.dict(os.environ, {
+                    "KACE_FIRMWARE_WORKFLOW_PATH": checkpoint_path, "HOME": root, "USERPROFILE": root,
+                }))
                 checkpoint = awaiting_flash(Path(root))
                 checkpoint = transition_checkpoint(checkpoint, State.VERIFYING_MCU)
                 checkpoint = transition_checkpoint(
@@ -92,8 +99,18 @@ class TransactionIdentityTests(unittest.TestCase):
                 )
                 for state in (State.CONFIG_GENERATED, State.READY_TO_DEPLOY, State.DEPLOYING):
                     checkpoint = transition_checkpoint(checkpoint, state)
-                transport = FakeTransport({"printer.cfg": b"# original\n"})
-                transport.host, transport.port, transport.api_key = "pi.local", 7125, None
+                write_checkpoint(checkpoint, checkpoint_path)
+                config_dir = Path(root) / "destination"
+                config_dir.mkdir()
+                (config_dir / "printer.cfg").write_bytes(b"# original\n")
+                transport = LocalMoonrakerConfigTransport(str(config_dir), host="pi.local", port=7125)
+                stack.enter_context(patch.object(transport, "validate_activation_target"))
+                restart = stack.enter_context(patch.object(transport, "restart"))
+                stack.enter_context(patch.object(transport, "klipper_state", return_value="ready"))
+                stack.enter_context(patch.object(transport, "moonraker_online", return_value=True))
+                generated = Path(root) / "kace" / "printer.cfg"
+                generated.parent.mkdir()
+                generated.write_bytes(GENERATED)
                 user = {"workflow_checkpoint": checkpoint, "host": "pi.local",
                         "user": "kace", "dest_path": "~/printer_data/config/",
                         # This identity test needs complete board evidence to
@@ -103,7 +120,6 @@ class TransactionIdentityTests(unittest.TestCase):
                     kwargs["persist_root"] = root
                     return create_snapshot(*args, **kwargs)
                 stack.enter_context(patch("core.config_transaction.create_snapshot", side_effect=snapshot))
-                stack.enter_context(patch.object(deployer, "_generated_config_bytes", return_value=("unused", GENERATED, None)))
                 stack.enter_context(patch.object(deployer, "_preflight_check", return_value=True))
                 stack.enter_context(patch.object(deployer, "_interactive_configuration_review", return_value=True))
                 stack.enter_context(patch.object(deployer, "_select_config_activation", return_value="firmware"))
@@ -116,7 +132,7 @@ class TransactionIdentityTests(unittest.TestCase):
                     stack.enter_context(patch("core.menu.simple_input", side_effect=["pi.local", "7125"]))
                     stack.enter_context(patch("core.menu.password_input", return_value=""))
                     stack.enter_context(patch("core.moonraker.check_moonraker", return_value=(True, "ok")))
-                    stack.enter_context(patch("core.config_transaction.MoonrakerConfigTransport", return_value=transport))
+                    stack.enter_context(patch("core.config_transaction.configuration_transport", return_value=transport))
                     result = deployer.deploy_moonraker(user)
                 else:
                     stack.enter_context(patch.object(deployer, "_require_paramiko", return_value=SimpleNamespace(AuthenticationException=RuntimeError)))
@@ -127,7 +143,12 @@ class TransactionIdentityTests(unittest.TestCase):
                 self.assertEqual(result.outcome, WorkflowOutcome.DEPLOYMENT_FAILED, result.detail)
                 self.assertIn("firmware verification error", result.detail)
                 self.assertIn("manual recovery", result.detail)
-                self.assertEqual(transport.calls.count(("restart", "firmware")), 1)
+                restart.assert_called_once_with("firmware")
+                publication = load_checkpoint(checkpoint_path)["installation_publication"]
+                self.assertEqual(publication["hardware"], hashlib.sha256(GENERATED).hexdigest())
+                self.assertEqual(publication["target"]["printer.cfg"],
+                                 hashlib.sha256((config_dir / "printer.cfg").read_bytes()).hexdigest())
+                self.assertEqual((Path(publication["snapshot"]) / "printer.cfg").read_bytes(), b"# original\n")
 
 
 class RollbackOwnershipTests(unittest.TestCase):
