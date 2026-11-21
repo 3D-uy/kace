@@ -179,19 +179,22 @@ def test_combined_valid_xy_keeps_firmware_identity_and_final_state_guards(tmp_pa
 
 @pytest.mark.parametrize("route", ["config-only", "export"])
 @pytest.mark.parametrize("evidence", ["valid", "missing", "legacy", "stale"])
-def test_configuration_adapters_read_actual_geometry_sidecar(tmp_path, route, evidence):
-    path, content = _source(tmp_path)
+def test_configuration_adapters_read_actual_geometry_sidecar(tmp_path, capsys, route, evidence):
+    path, content = _source(tmp_path, selected_include=route == "export")
     if evidence != "valid":
         _damage_evidence(path, evidence)
     remote = _destination(content, "[safe_z_home]\nhome_xy_position: 100,110\n")
     transport = FakeTransport(remote)
     destination = tmp_path / "destination"
     destination.mkdir()
+    # Exercise actual exclusive creation while retaining the two selected includes.
+    includes = {name: data for name, data in remote.items() if name != "printer.cfg"}
+    for name, data in includes.items():
+        (destination / name).write_bytes(data)
     with patch.object(deployer, "_generated_config_bytes", return_value=(str(path), content, None)), \
             patch.object(deployer, "_preflight_check", return_value=True), \
             patch.object(deployer, "_interactive_configuration_review", return_value=True), \
-            patch.object(deployer, "_review_configuration_export", return_value=True), \
-            patch.object(config_transaction, "LocalConfigTransport", return_value=transport):
+            patch.object(deployer, "_review_configuration_export", return_value=True):
         if route == "config-only":
             result = deployer._run_config_transaction(transport, {}, "none")
             accepted = result.outcome == WorkflowOutcome.DEPLOYED_PENDING_ACTIVATION
@@ -202,7 +205,11 @@ def test_configuration_adapters_read_actual_geometry_sidecar(tmp_path, route, ev
         else:
             accepted = deployer._copy_artifacts({}, str(destination), "config")
             if not accepted:
-                assert_untouched(transport, remote)
+                assert "geometry" in capsys.readouterr().out.lower()
+                assert {p.name: p.read_bytes() for p in destination.iterdir()} == includes
+            else:
+                assert (destination / "printer.cfg").is_file()
+                assert all((destination / name).read_bytes() == data for name, data in includes.items())
 
     assert accepted is (evidence == "valid")
 

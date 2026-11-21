@@ -162,11 +162,12 @@ def test_rollback_preserves_post_read_external_edit_on_real_files(tmp_path, orig
     assert Path(transaction.snapshot.storage_path).is_dir()
 
 
-@pytest.mark.parametrize("state", [State.CONFIG_GENERATED, State.READY_TO_DEPLOY, State.DEPLOYING])
-def test_resume_regenerates_missing_config_without_recompiling(tmp_path, monkeypatch, state):
+@pytest.mark.parametrize("state", [State.MCU_VERIFIED, State.CONFIG_GENERATED,
+                                   State.READY_TO_DEPLOY, State.DEPLOYING])
+def test_resume_only_generates_missing_config_before_the_generation_checkpoint(tmp_path, monkeypatch, state):
     import kace
-    from tests.regression.test_main_integration import _WIZARD_USER_DATA_WITH_PARSED
-    data = copy.deepcopy(_WIZARD_USER_DATA_WITH_PARSED)
+    from tests.regression.test_main_integration import _WIZARD_USER_DATA_WITH_PARSED, _reviewed_xy
+    data = _reviewed_xy(copy.deepcopy(_WIZARD_USER_DATA_WITH_PARSED))
     serial = "/dev/serial/by-id/usb-Klipper_lpc1769_ORIGINAL-if00"
     data.update(mcu_type="lpc1769", mcu_hint="usb", mcu_path=serial, probe="None", display_choice="none",
                 macros_generated=False)
@@ -175,15 +176,16 @@ def test_resume_regenerates_missing_config_without_recompiling(tmp_path, monkeyp
     cp = transition_checkpoint(cp, State.VERIFYING_MCU)
     cp = transition_checkpoint(cp, State.MCU_VERIFIED, verified_serial_path=serial, flash_evidence_recorded_at=1)
     for step in (State.CONFIG_GENERATED, State.READY_TO_DEPLOY, State.DEPLOYING):
-        cp = transition_checkpoint(cp, step)
-        if step is state:
+        if State(cp["state"]) is state:
             break
+        cp = transition_checkpoint(cp, step)
     cfg = tmp_path / "printer.cfg"
     expand = os.path.expanduser
     monkeypatch.setenv("KACE_AUTO", "1")
     monkeypatch.setenv("KACE_FIRMWARE_WORKFLOW_PATH", str(tmp_path / "workflow.json"))
     monkeypatch.setattr(kace, "_resume_firmware_workflow", lambda: (cp, "continue"))
-    monkeypatch.setattr(kace, "_persist_workflow", lambda *_a, **_k: None)
+    persist = Mock()
+    monkeypatch.setattr(kace, "_persist_workflow", persist)
     monkeypatch.setattr(kace.os.path, "expanduser", lambda p: str(cfg) if p == "~/kace/printer.cfg" else expand(p))
     # This LPC endpoint uses KACE's existing command-restart fallback; a
     # serial-only stub fails the real check before the resume assertions.
@@ -191,11 +193,19 @@ def test_resume_regenerates_missing_config_without_recompiling(tmp_path, monkeyp
         f"[mcu]\nserial: {serial}\nrestart_method: command\n"))
     monkeypatch.setattr(kace, "generate_config", generator)
     with patch("kace.yes_no", return_value=True), patch("kace.numbered_select", return_value="none"), \
-         patch("kace.print_summary"), patch("kace.time.sleep"), patch("builtins.print"), \
+         patch("kace.print_summary"), patch("kace.time.sleep"), patch("builtins.print") as output, \
          patch("core.firmware_wizard.run_firmware_wizard") as compile_firmware:
         with pytest.raises(SystemExit) as exit_result:
             kace.main()
-    assert exit_result.value.code == 0
-    generator.assert_called_once()
-    assert generator.call_args.kwargs["include_macros"] is False
     compile_firmware.assert_not_called()
+    if state is State.MCU_VERIFIED:
+        assert exit_result.value.code == 0
+        generator.assert_called_once()
+        assert generator.call_args.kwargs["include_macros"] is False
+        assert cfg.is_file()
+    else:
+        assert exit_result.value.code == 10
+        assert any("printer.cfg not found" in str(call) for call in output.call_args_list)
+        generator.assert_not_called()
+        persist.assert_not_called()
+        assert not cfg.exists()

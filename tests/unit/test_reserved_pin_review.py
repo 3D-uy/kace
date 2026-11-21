@@ -130,17 +130,15 @@ def test_local_export_adapter_rejects_reserved_include(tmp_path, capsys):
     built = artifact(tmp_path, {"RESERVE_PINS_USB1": "PB14,PB15"})
     destination = tmp_path / "export"
     destination.mkdir()
-    transport = FakeTransport(files())
-    original = dict(transport.files)
+    include = files()["user.cfg"]
+    (destination / "user.cfg").write_bytes(include)
     generated = PROBE.replace(b"control_pin: PB9\n", b"") + b"[include user.cfg]\n"
     with patch("core.deployer._generated_config_bytes", return_value=("source.cfg", generated, None)), patch(
-        "core.config_transaction.LocalConfigTransport", return_value=transport
-    ), patch(
         "core.deployer._review_configuration_export", return_value=True
     ):
         assert not _copy_artifacts({"firmware_artifact": built}, str(destination), "config")
     assert "USB1" in capsys.readouterr().out
-    assert_untouched(transport, original)
+    assert {p.name: p.read_bytes() for p in destination.iterdir()} == {"user.cfg": include}
 
 
 def test_noop_retry_cannot_skip_reserved_pin_review(tmp_path):

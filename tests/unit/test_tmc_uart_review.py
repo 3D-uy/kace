@@ -72,15 +72,14 @@ def test_valid_mixed_models_can_publish_without_restart(tmp_path):
 
 
 def test_local_export_rejects_selected_uart_conflict(tmp_path, capsys):
-    before = remote_files("[fan]\npin: PC11\n")
-    transport = FakeTransport(before)
+    before = {"user.cfg": b"[include wiring.cfg]\n", "wiring.cfg": b"[fan]\npin: PC11\n"}
+    for name, content in before.items():
+        (tmp_path / name).write_bytes(content)
     with patch("core.deployer._generated_config_bytes", return_value=("source.cfg", UART, b"[include user.cfg]\n")), \
-            patch("core.config_transaction.LocalConfigTransport", return_value=transport), \
             patch("core.deployer._review_configuration_export", return_value=True):
         assert not _copy_artifacts({}, str(tmp_path), "config")
     assert "TMC UART" in capsys.readouterr().out
-    assert transport.files == before
-    assert not any(c[0] == "upload" for c in transport.calls)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
 
 
 def test_include_edit_after_confirmation_cannot_be_published(tmp_path):
