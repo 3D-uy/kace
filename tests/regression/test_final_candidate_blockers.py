@@ -56,7 +56,11 @@ def _bash() -> str | None:
 
 
 def _runtime_changes(root, candidate):
-    paths = ("core", "firmware", "data", "templates", "kace.py", "install.sh")
+    # Include the exact trees and individually selected files actually delivered.
+    installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+    sparse = re.search(r'^_SPARSE_PATTERNS="([^"]+)"$', installer, re.MULTILINE)
+    assert sparse, "installer sparse-checkout contract not found"
+    paths = ["install.sh", *(line.strip("/") for line in sparse[1].splitlines())]
     differences = subprocess.check_output(
         ["git", "diff", "--name-only", "-z", candidate, "--", *paths], cwd=root,
     )
@@ -83,11 +87,12 @@ def test_candidate_control_counts_new_and_tracked_runtime_files(tmp_path):
     assert _runtime_changes(tmp_path, "HEAD") == ["core/new"]
     (core / "changed").write_text("edited")
     (core / "removed").unlink()
+    (tmp_path / "VERSION").write_text("fixture version")
     (core / "staged").write_text("staged edit")
     git("add", "core/staged")
     (tmp_path / "scratch").write_text("outside runtime")
     assert _runtime_changes(tmp_path, "HEAD") == [
-        "core/changed", "core/new", "core/removed", "core/staged",
+        "VERSION", "core/changed", "core/new", "core/removed", "core/staged",
     ]
 
 
