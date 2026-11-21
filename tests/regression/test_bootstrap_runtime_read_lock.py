@@ -4,6 +4,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -13,7 +14,15 @@ pytestmark = pytest.mark.skipif(os.name != "posix", reason="requires real POSIX 
 
 
 @pytest.fixture
-def checkpoint_reader(tmp_path):
+def checkpoint_reader(request, tmp_path):
+    # Root-run container suites also exercise the real non-root diagnostic.
+    if os.geteuid() == 0:
+        import pwd
+        account = pwd.getpwnam("nobody")
+        area = tempfile.TemporaryDirectory()
+        request.addfinalizer(area.cleanup)
+        tmp_path = Path(area.name)
+        os.chown(tmp_path, account.pw_uid, account.pw_gid)
     home = tmp_path / "home"
     runtime = home / "kace"
     (runtime / "venv/bin").mkdir(parents=True)
@@ -46,9 +55,12 @@ def load_checkpoint(path, verify_artifact):
     lock = home / ".kace-install.lock"
     lock.write_text("")
     source = BOOTSTRAP.read_text(encoding="utf-8")
-    start = source.index('    if [ -x "$PRINTER_HOME/kace/venv/bin/python" ] && (')
-    end = source.index("    ); then", start)
-    script = source[start:end] + "    ); then\nexit 0\nfi\nexit 1\n"
+    def function(name):
+        start = source.index(name + "() {")
+        return source[start:source.index("\n}", start) + 2]
+
+    script = function("run_as_printer") + "\n" + function("has_pending_checkpoint")
+    script += '\nPRINTER_USER=${PRINTER_USER:-$(id -un)}\nhas_pending_checkpoint\n'
     script_path = tmp_path / "read-checkpoint.sh"
     script_path.write_text(script)
     env = dict(os.environ, PRINTER_HOME=str(home), READ_LOCK=str(lock),
@@ -59,7 +71,12 @@ def load_checkpoint(path, verify_artifact):
 
 def run_reader(fixture, **extra):
     _, _, script, env = fixture
-    return subprocess.run(["/bin/bash", str(script)], env={**env, **extra},
+    identity = {}
+    if os.geteuid() == 0:
+        import pwd
+        account = pwd.getpwnam("nobody")
+        identity = dict(user=account.pw_uid, group=account.pw_gid, extra_groups=[])
+    return subprocess.run(["/bin/bash", str(script)], env={**env, **extra}, **identity,
                           capture_output=True, text=True, timeout=5)
 
 
@@ -109,3 +126,20 @@ def test_complete_checkpoint_is_not_reported_as_pending(checkpoint_reader):
     result = run_reader(checkpoint_reader, CHECKPOINT_STATE="COMPLETE")
     assert result.returncode != 0
     assert Path(checkpoint_reader[3]["LOCK_MARKER"]).read_text() == "shared lock retained"
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() != 0, reason="requires disposable Linux root")
+def test_root_diagnostic_drops_uid_and_rejects_root_target(checkpoint_reader):
+    import pwd
+    home, _, script, env = checkpoint_reader
+    directory = home.parent
+    account = pwd.getpwnam("nobody")
+    reader = home / "kace/venv/bin/python"
+    # Read only the effective identity. This stand-in never imports runtime code.
+    reader.write_text("#!/bin/sh\nid -u > " + shlex.quote(str(directory / "effective-uid")) + "\n")
+    result = subprocess.run(["/bin/bash", str(script)], env={**env, "PRINTER_USER": account.pw_name})
+    assert result.returncode == 0
+    marker = directory / "effective-uid"
+    assert marker.read_text().strip() == str(account.pw_uid)
+    marker.unlink()
+    result = subprocess.run(["/bin/bash", str(script)], env={**env, "PRINTER_USER": "root"})
+    assert result.returncode != 0 and not marker.exists()

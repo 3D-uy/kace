@@ -43,7 +43,7 @@ nova configuração, não instala interfaces web. Simplificar a ajuda e retirar
 opções que prometem preservar includes antigos. Validar as dependências escolhidas
 pela nova configuração.
 
-Decisão de produto pendente: KACE realiza instalações novas. Informar quando
+Política de instalação implementada: KACE realiza instalações novas. Informar quando
 printer.cfg ou macros.cfg existir e substituí-los pelos novos arquivos, sem mesclar
 SAVE_CONFIG, calibrações, macros ou includes antigos. Isso substitui a proposta
 de preservar PID no conflito watermark/PID observado no Pi (READY_TO_DEPLOY).

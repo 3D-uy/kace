@@ -44,7 +44,7 @@ se refiere a la nueva configuración, no a instalar interfaces web. Simplificar
 la ayuda y retirar las opciones que prometen conservar includes de la instalación
 anterior. Las dependencias que el nuevo archivo seleccione sí deben validarse.
 
-Decisión de producto pendiente de implementación: KACE realiza instalaciones
+Política de instalación implementada: KACE realiza instalaciones
 nuevas. Si existen printer.cfg o macros.cfg, informar al usuario y reemplazarlos
 por los nuevos; no fusionar SAVE_CONFIG, calibraciones, macros ni includes antiguos.
 Esto sustituye la propuesta anterior de conservar el PID al resolver el conflicto

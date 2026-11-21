@@ -55,6 +55,42 @@ def _bash() -> str | None:
     return None
 
 
+def _runtime_changes(root, candidate):
+    paths = ("core", "firmware", "data", "templates", "kace.py", "install.sh")
+    differences = subprocess.check_output(
+        ["git", "diff", "--name-only", "-z", candidate, "--", *paths], cwd=root,
+    )
+    additions = subprocess.check_output(
+        ["git", "ls-files", "-z", "--others", "--exclude-standard", "--", *paths], cwd=root,
+    )
+    return sorted(os.fsdecode(name) for name in (differences + additions).split(b"\0") if name)
+
+
+def test_candidate_control_counts_new_and_tracked_runtime_files(tmp_path):
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "--quiet")
+    core = tmp_path / "core"
+    core.mkdir()
+    for name in ("changed", "removed", "staged"):
+        (core / name).write_text("original")
+    git("add", "core")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "fixture")
+    assert _runtime_changes(tmp_path, "HEAD") == []
+    (core / "new").write_text("new module")
+    assert _runtime_changes(tmp_path, "HEAD") == ["core/new"]
+    (core / "changed").write_text("edited")
+    (core / "removed").unlink()
+    (core / "staged").write_text("staged edit")
+    git("add", "core/staged")
+    (tmp_path / "scratch").write_text("outside runtime")
+    assert _runtime_changes(tmp_path, "HEAD") == [
+        "core/changed", "core/new", "core/removed", "core/staged",
+    ]
+
+
 class TestImmutableCandidateDistribution(unittest.TestCase):
     def test_every_public_installer_delivers_the_declared_candidate(self):
         script = BOOTSTRAP.read_text(encoding="utf-8")
@@ -76,21 +112,10 @@ class TestImmutableCandidateDistribution(unittest.TestCase):
             self.assertIn(f"KACE_COMMIT='{candidate}'", content, relative)
             self.assertIn(f"KACE_INSTALL_SHA256='{installer_hash}'", content, relative)
 
-        # Include staged and unstaged runtime edits so local pre-commit checks
-        # cannot pass against an old HEAD and then fail only after publication.
-        changed_runtime = subprocess.run(
-            [
-                "git", "diff", "--name-only", candidate, "--",
-                "core", "firmware", "data", "templates", "kace.py", "install.sh",
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
+        changed_runtime = _runtime_changes(ROOT, candidate)
         self.assertEqual(
             changed_runtime,
-            "",
+            [],
             f"declared candidate does not contain current runtime files: {changed_runtime}",
         )
 

@@ -43,7 +43,7 @@ the new configuration, not web interface installation. Simplify help and remove
 choices promising preservation of old installation includes. Validate dependencies
 selected by the new configuration.
 
-Product decision pending implementation: KACE performs fresh installations.
+Implemented installation policy: KACE performs fresh installations.
 Inform users when printer.cfg or macros.cfg exists and replace it with the new
 files; do not merge old SAVE_CONFIG, calibration, macros or includes. This supersedes
 the proposed PID-preserving resolution of the observed watermark/PID conflict
