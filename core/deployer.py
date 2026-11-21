@@ -420,14 +420,13 @@ def _run_config_transaction(
         from core.moonraker_deployer import JsonEventSink
 
         event_output = JsonEventSink()
-        runtime_id = f"{checkpoint['workflow_id']}-config"
         sequence = [0]
 
         def state_sink(state, detail):
             sequence[0] += 1
             event_output({
                 "schema": 1,
-                "workflow_id": runtime_id,
+                "workflow_id": f"{checkpoint['workflow_id']}-config-{transaction.transaction_id}",
                 "sequence": sequence[0],
                 "state": state,
                 "detail": detail,

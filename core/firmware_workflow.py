@@ -192,6 +192,12 @@ def checkpoint_revision(path: Optional[str] = None) -> tuple[str, Optional[str]]
     return destination, digest
 
 
+def require_current_revision(checkpoint):
+    expected = checkpoint.get(_STORAGE_REVISION)
+    if not expected or checkpoint_revision(expected[0]) != tuple(expected):
+        raise CheckpointConflict("Installation checkpoint changed; reload it before continuing.")
+
+
 def discard_checkpoint(checkpoint):
     """Archive only the revision explicitly discarded by the operator."""
     expected = checkpoint.get(_STORAGE_REVISION)

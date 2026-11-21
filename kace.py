@@ -922,7 +922,10 @@ def main():
     except (WizardExit, EOFError, KeyboardInterrupt):
         _finish(cancelled("Printable-area review cancelled."))
     except (GenerationError, ValueError, OSError) as exc:
-        _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc)))
+        detail = str(exc)
+        if existing_state is FirmwareWorkflowState.DEPLOYING:
+            detail += " Inspect the original snapshot and destination or explicitly start a new installation."
+        _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, detail))
     generated_serial = extract_mcu_serial(cfg_path)
     if not generated_serial:
         _finish(failed(

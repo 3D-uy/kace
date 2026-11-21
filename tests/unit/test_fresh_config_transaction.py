@@ -187,7 +187,8 @@ def test_exclusive_export_preserves_concurrent_winner_and_failed_copy(tmp_path, 
     assert list(tmp_path.iterdir()) == [target]
 
 
-def test_interrupted_initial_installation_resumes_only_approved_remaining_files(fresh_destination, tmp_path, monkeypatch):
+@pytest.mark.parametrize("replace_checkpoint", [False, True])
+def test_interrupted_initial_installation_resumes_only_approved_remaining_files(fresh_destination, tmp_path, monkeypatch, replace_checkpoint):
     from core.firmware_workflow import (
         FirmwareWorkflowState as State, create_checkpoint, transition_checkpoint, write_checkpoint, load_checkpoint,
     )
@@ -223,6 +224,55 @@ def test_interrupted_initial_installation_resumes_only_approved_remaining_files(
     changed_macros = MACROS + b"\n# Different generation\n"
     assert run(changed_macros, installation_checkpoint=saved).state is config_transaction.ConfigTransactionState.PRECONDITION_FAILED
     assert not any(call[0] == "upload" for call in transport.calls)
+    if replace_checkpoint:
+        def supersede(_):
+            write_checkpoint(transition_checkpoint(load_checkpoint(), State.DEPLOYING, last_error="another recovery"))
+            return True
+        rejected = run(review=supersede, installation_checkpoint=saved)
+        assert rejected.state is config_transaction.ConfigTransactionState.PRECONDITION_FAILED
+        assert "checkpoint changed" in rejected.detail
+        assert not any(call[0] == "upload" for call in transport.calls)
+        saved = load_checkpoint()
     assert run(installation_checkpoint=saved).pending
     assert [call for call in transport.calls if call[0] == "upload"] == [("upload", "printer.cfg")]
     assert load_checkpoint()["installation_publication"] == record
+
+
+def test_local_export_creates_new_destination_and_publishes_through_normal_entry(tmp_path, monkeypatch):
+    from core.deployer import deploy_local
+    from tests.unit.test_config_transaction import GENERATED
+    generated_dir = tmp_path / "home" / "kace"
+    generated_dir.mkdir(parents=True)
+    (generated_dir / "printer.cfg").write_bytes(GENERATED)
+    destination = tmp_path / "new" / "export"
+    monkeypatch.setenv("HOME", str(generated_dir.parent))
+    monkeypatch.setenv("USERPROFILE", str(generated_dir.parent))
+    monkeypatch.setattr("core.menu.simple_input", lambda *a, **kw: str(destination))
+    monkeypatch.setattr("core.menu.yes_no", lambda *a, **kw: True)
+    monkeypatch.setattr(klipper_preflight, "validate_plan", lambda plan:
+        klipper_preflight.PreflightResult("valid", "explicit unit loader double", klipper_preflight.plan_digest(plan)))
+    assert not destination.exists()
+    result = deploy_local({"macros_generated": False}, artifact_type="config")
+    assert result.ok, result.detail
+    assert b"/dev/serial/by-id/test" in (destination / "printer.cfg").read_bytes()
+
+
+def test_retried_runtime_progress_starts_a_distinct_event_stream(tmp_path, monkeypatch):
+    from core.deployer import _run_config_transaction
+    from tests.unit.test_config_transaction import GENERATED
+    emitted = []
+    monkeypatch.setattr("core.moonraker_deployer.JsonEventSink", lambda: emitted.append)
+    monkeypatch.setattr("core.deployer._preflight_check", lambda *args: True)
+    def run(transaction):
+        transaction._emit("BACKUP", "checking")
+        transaction._emit("VERIFYING_CONFIG", "verifying")
+        return config_transaction.ConfigTransactionResult(config_transaction.ConfigTransactionState.CANCELLED, "test")
+    monkeypatch.setattr(config_transaction.ConfigDeploymentTransaction, "run", run)
+    checkpoint = {"workflow_id": "firmware-example", "wizard_data": {"board_raw_config": GENERATED.decode()}}
+    for _ in range(2):
+        outcome = _run_config_transaction(FakeTransport(), {"workflow_checkpoint": checkpoint},
+                                          "none", (str(tmp_path / "printer.cfg"), GENERATED, None))
+        assert outcome.detail == "test", outcome.detail
+    first, second = emitted[:2], emitted[2:]
+    assert [e["sequence"] for e in first] == [e["sequence"] for e in second] == [1, 2]
+    assert first[0]["workflow_id"] == first[1]["workflow_id"] != second[0]["workflow_id"] == second[1]["workflow_id"]

@@ -283,6 +283,8 @@ class ConfigDeploymentTransaction:
             "geometry": asdict(self.geometry_context) if self.geometry_context is not None else None,
             "target": target,
         }
+        if isinstance(transport, MoonrakerConfigTransport):
+            identity["activation_endpoint"] = list(transport.activation_destination_key)
         if saved is None:
             if commit:
                 from core.firmware_workflow import FirmwareWorkflowState, transition_checkpoint, write_checkpoint
@@ -314,6 +316,14 @@ class ConfigDeploymentTransaction:
                         raise ConfigConflictError("Original installation snapshot is incomplete.")
                 elif digest((backup / name.replace("/", "__")).read_bytes()) != baseline[name]:
                     raise ConfigConflictError("Original installation snapshot bytes differ.")
+
+    def _require_installation_revision(self):
+        if self.installation_checkpoint is not None:
+            from core.firmware_workflow import CheckpointConflict, require_current_revision
+            try:
+                require_current_revision(self.installation_checkpoint)
+            except (OSError, CheckpointConflict) as exc:
+                raise ConfigConflictError(f"Installation publication stopped: {exc}") from exc
 
     def _emit(self, state: str, detail: str) -> None:
         if self.state_sink is None:
@@ -454,10 +464,12 @@ class ConfigDeploymentTransaction:
             verify_restoration()
             if self.activation == "none":
                 return True, "rollback restored byte-identical inactive files"
+            self._require_installation_revision()
             if MOONRAKER_REMOTE in self.snapshot.config_files or MOONRAKER_REMOTE in self.snapshot.missing_files:
                 self.transport.restart_moonraker()
                 if not self._wait_moonraker():
                     return False, "Moonraker did not recover after rollback"
+                self._require_installation_revision()
             self.transport.restart(self.activation)
             ready, state = self._wait_ready()
             if not ready:
@@ -590,6 +602,7 @@ class ConfigDeploymentTransaction:
             validated_digest = preflight.tree_digest
             self._installation_plan(remote, validated_digest)
             def check_preflight_plan():
+                self._require_installation_revision()
                 if self.publication_guard is not None:
                     self.publication_guard()
                 try:
@@ -709,6 +722,7 @@ class ConfigDeploymentTransaction:
         try:
             for artifact in self._ordered_artifacts():
                 revalidate_config_state(self.transport, {artifact.remote_name: current[artifact.remote_name]})
+                self._require_installation_revision()
                 try:
                     self.transport.upload_if_unchanged(artifact.remote_name, artifact.content, current[artifact.remote_name])
                     self._written_names.add(artifact.remote_name)
@@ -736,6 +750,7 @@ class ConfigDeploymentTransaction:
                     raise self._readiness_failure(state)
                 if existing_verified:
                     self._verify_plan()
+                    self._require_installation_revision()
                     self._emit("DONE", "configuration already installed; Klipper Ready")
                     return ConfigTransactionResult(
                         ConfigTransactionState.COMMITTED,
@@ -761,11 +776,13 @@ class ConfigDeploymentTransaction:
                 )
 
             self.transport.validate_activation_target()
+            self._require_installation_revision()
             if any(item.remote_name == MOONRAKER_REMOTE for item in self.plan.changed_artifacts):
                 self._emit("WAITING_MOONRAKER", "restarting Moonraker before Klipper activation")
                 self.transport.restart_moonraker()
                 if not self._wait_moonraker():
                     raise RuntimeError("Moonraker did not recover after restart")
+                self._require_installation_revision()
             # Preserve the historical wire phase; identify the actual request.
             command = "RESTART" if self.activation == "firmware" else "SERVICE_RESTART"
             self._emit("FIRMWARE_RESTART", f"{command}: activating Klipper configuration")
@@ -777,6 +794,7 @@ class ConfigDeploymentTransaction:
             self._verify_firmware()
             self._verify_active_configuration()
             self._verify_plan()
+            self._require_installation_revision()
             self._emit("DONE", "configuration activated and Klipper Ready")
             return ConfigTransactionResult(
                 ConfigTransactionState.COMMITTED,
@@ -904,15 +922,18 @@ class MoonrakerConfigTransport:
 
     @property
     def destination_key(self) -> tuple:
+        # Serialize writes to the same printer regardless of transport or TLS.
+        return ("moonraker", *self.activation_destination_key[1:])
+
+    @property
+    def activation_destination_key(self) -> tuple:
         from core.moonraker import _base_url
 
         endpoint = urlsplit(_base_url(self.host, self.port))
         if not endpoint.hostname or endpoint.port is None:
             raise ValueError("Moonraker configuration destination is invalid")
-        # SFTP shares this activation endpoint and therefore the same lock.
-        # Credentials and transport objects must not split one printer's lock.
         return (
-            "moonraker", endpoint.hostname.casefold().rstrip("."), endpoint.port,
+            endpoint.scheme, endpoint.hostname.casefold().rstrip("."), endpoint.port,
             endpoint.path.rstrip("/"),
         )
 

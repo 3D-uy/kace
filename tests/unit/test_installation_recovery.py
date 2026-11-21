@@ -218,6 +218,8 @@ gcode:
                 saved_config.unlink()
             elif tamper == 'snapshot':
                 Path(checkpoint['installation_publication']['snapshot'], 'printer.cfg').write_bytes(b'# damaged backup')
+            elif tamper == 'endpoint':
+                self.transport.port += 1
             # This checkpoint belongs to the synthetic MCU above. An attached
             # printer must not reject it and divert the fixture into a new wizard.
             stack.enter_context(patch('firmware.detector.discover_mcu_hardware', return_value={}))
@@ -357,6 +359,14 @@ gcode:
         self.assertNotEqual(code, 0)
         self.assertEqual(state, 'DEPLOYING')
         self.assertIn('Original installation snapshot bytes differ', output)
+        self.transport.restart.assert_not_called()
+
+    def test_same_directory_different_activation_endpoint_cannot_resume(self):
+        code, state, output = self._run_cli_installation(interrupted_deployment=True,
+                                                         interruption='before-write', tamper='endpoint')
+        self.assertNotEqual(code, 0)
+        self.assertEqual(state, 'DEPLOYING')
+        self.assertIn('Destination or artifacts differ', output)
         self.transport.restart.assert_not_called()
 
     def test_cli_generated_and_exported_configs_never_render_completed_banner(self):
