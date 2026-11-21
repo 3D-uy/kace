@@ -147,8 +147,10 @@ or the isolated loader is unavailable, preflight is **unverified** and the
 publication gate stops before writes; it must not be treated as a CFG rejection.
 
 The image runs without network, with a read-only root and configuration input,
-dropped capabilities and resource limits. A temporary executable filesystem is
-needed to compile Klipper's helper. On POSIX hosts, the temporary parent remains
+dropped capabilities and resource limits. Provisioning builds and loads the
+pinned Klipper C helper with the image's target interpreter. Every validation
+copies that helper and the pinned sources to the temporary executable filesystem.
+On POSIX hosts, the temporary parent remains
 private (0700); only its `input` child is mounted read-only. Copied input
 directories use 0755 and files use 0644 so a capability-stripped container can
 read them without assuming host/container UID mappings, even with a restrictive
