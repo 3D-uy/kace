@@ -30,7 +30,7 @@ class LocalInstallationTests(unittest.TestCase):
 
     def transaction(self, **kwargs):
         return ConfigDeploymentTransaction(
-            self.transport, GENERATED, None, activation='firmware',
+            self.transport, kwargs.pop('generated', GENERATED), None, activation='firmware',
             verify_existing_ready=True, poll_interval=0,
             snapshot_root=str(self.root / 'snapshots'), **kwargs,
         ).run()
@@ -41,7 +41,7 @@ class LocalInstallationTests(unittest.TestCase):
         publications = []
 
         def atomic(source, destination):
-            if str(destination) == str(self.live):
+            if Path(destination).resolve() == self.live.resolve():
                 self.assertEqual(Path(source).parent, self.live.parent)
                 self.assertEqual(self.live.read_bytes(), original)
                 publications.append(Path(source).read_bytes())
@@ -153,11 +153,19 @@ gcode:
     def _run_cli_installation(self, *, deploy_choice='moonraker', outcome=None, fail_complete=False,
                               interrupted_deployment=False, verify_firmware=None):
         import hashlib
+        import json
+        from dataclasses import asdict
+        from core.config_geometry import GeometryContext
+        from core.motion_model import confirm_printable_xy
         import kace
         from core.deployer import _config_result_to_workflow
         from core.firmware_workflow import create_checkpoint, transition_checkpoint, write_checkpoint, load_checkpoint, FirmwareWorkflowState as State
         from tests.regression.test_main_integration import _WIZARD_USER_DATA_WITH_PARSED
         user = {**_WIZARD_USER_DATA_WITH_PARSED, 'mcu_type': 'lpc1769', 'mcu_path': '/dev/serial/by-id/test', 'language': 'Español'}
+        for axis in ('x', 'y'):
+            user.update({f'{axis}_position_min': 0, f'{axis}_position_max': 235,
+                         f'printable_{axis}_min': 0, f'printable_{axis}_max': 235})
+        confirm_printable_xy(user)
         run_root = Path(tempfile.mkdtemp(dir=self.root))
         artifact = run_root / 'firmware.bin'
         artifact.write_bytes(b'firmware')
@@ -178,10 +186,20 @@ gcode:
         self.addCleanup(set_lang, get_lang())
         set_lang('Español')
         saved_config = self.root / 'saved-printer.cfg'
-        saved_config.write_bytes(GENERATED)
+        hardware = GENERATED + b'position_endstop: 0\nposition_max: 235\n[stepper_y]\nposition_endstop: 0\nposition_max: 235\n'
+        saved_config.write_bytes(hardware)
+        geometry = GeometryContext(hashlib.sha256(hardware).hexdigest(), 0, 235, 0, 235)
+        Path(str(saved_config) + '.provenance.json').write_text(json.dumps({
+            'schema': 'kace-config-provenance/v1', 'geometry': asdict(geometry)}), encoding='utf-8')
         expanduser = os.path.expanduser
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.dict(os.environ, {'KACE_AUTO': '1', 'KACE_FIRMWARE_WORKFLOW_PATH': checkpoint_path, 'KACE_MACHINE_OUTPUT': '1'}))
+            if interrupted_deployment:
+                # A process disappears after publication and before recording COMPLETE.
+                with patch.object(self.transport, 'restart', side_effect=SystemExit(99)):
+                    with self.assertRaises(SystemExit):
+                        self.transaction(installation_checkpoint=checkpoint, fresh_install=True,
+                                         generated=hardware, geometry_context=geometry)
             # This checkpoint belongs to the synthetic MCU above. An attached
             # printer must not reject it and divert the fixture into a new wizard.
             stack.enter_context(patch('firmware.detector.discover_mcu_hardware', return_value={}))
@@ -193,9 +211,11 @@ gcode:
             stack.enter_context(patch('kace.os.path.expanduser', side_effect=lambda p:
                 str(saved_config) if p == '~/kace/printer.cfg' else expanduser(p)))
             stack.enter_context(patch('kace.numbered_select', return_value=deploy_choice))
-            def deploy(_, **kwargs):
+            def deploy(data, **kwargs):
                 return outcome if outcome is not None else _config_result_to_workflow(
-                    self.transaction(verify_firmware=verify_firmware))
+                    self.transaction(verify_firmware=verify_firmware, fresh_install=True,
+                                     installation_checkpoint=data['workflow_checkpoint'],
+                                     generated=hardware, geometry_context=geometry))
             stack.enter_context(patch('kace.deploy_moonraker', side_effect=deploy))
             stack.enter_context(patch('kace.deploy_local', side_effect=deploy))
             if fail_complete:
@@ -228,9 +248,6 @@ gcode:
 
     def test_cli_resumes_interrupted_deploy_with_matching_active_files(self):
         # Simulate a previous successful upload followed by a lost CLI/SSH.
-        self.assertTrue(self.transaction().ok)
-        self.transport.restart.reset_mock()
-        self.transport.verify_active_configuration.reset_mock()
         firmware = Mock()
         code, state, output = self._run_cli_installation(
             interrupted_deployment=True, verify_firmware=firmware)
@@ -242,23 +259,19 @@ gcode:
         firmware.assert_called_once()
 
     def test_cli_interrupted_deploy_does_not_complete_on_active_mismatch(self):
-        self.assertTrue(self.transaction().ok)
-        self.transport.restart.reset_mock()
         self.transport.verify_active_configuration.side_effect = RuntimeError('active settings mismatch')
         code, state, output = self._run_cli_installation(interrupted_deployment=True)
         self.assertNotEqual(code, 0)
-        self.assertEqual(state, 'READY_TO_DEPLOY')
+        self.assertEqual(state, 'DEPLOYING')
         self.assertNotIn('Instalación de KACE completada', output)
         self.transport.restart.assert_not_called()
 
     def test_cli_interrupted_deploy_does_not_complete_on_firmware_mismatch(self):
-        self.assertTrue(self.transaction().ok)
-        self.transport.restart.reset_mock()
         firmware = Mock(side_effect=RuntimeError('firmware identity mismatch'))
         code, state, output = self._run_cli_installation(
             interrupted_deployment=True, verify_firmware=firmware)
         self.assertNotEqual(code, 0)
-        self.assertEqual(state, 'READY_TO_DEPLOY')
+        self.assertEqual(state, 'DEPLOYING')
         self.assertNotIn('Instalación de KACE completada', output)
         self.transport.restart.assert_not_called()
         firmware.assert_called_once()

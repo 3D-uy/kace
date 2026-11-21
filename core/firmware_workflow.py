@@ -476,6 +476,10 @@ def create_checkpoint(
     return _with_integrity(checkpoint)
 
 
+def can_transition(current, target):
+    return target == current or target in _TRANSITIONS[current]
+
+
 def transition_checkpoint(
     checkpoint: Mapping[str, Any],
     state: FirmwareWorkflowState,
@@ -485,17 +489,22 @@ def transition_checkpoint(
     verified_serial_path: Optional[str] = None,
     flash_evidence_recorded_at: Optional[int] = None,
     last_error: str = "",
+    installation_publication: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     validate_checkpoint(checkpoint, verify_artifact=False)
     current = FirmwareWorkflowState(checkpoint["state"])
     target = FirmwareWorkflowState(state)
-    if target is not current and target not in _TRANSITIONS[current]:
+    if not can_transition(current, target):
         raise FirmwareWorkflowError(f"illegal firmware workflow transition {current.value} -> {target.value}")
     updated = dict(checkpoint)
     updated["state"] = target.value
     updated["sequence"] = int(checkpoint["sequence"]) + 1
     updated["updated_at"] = int(time.time())
     updated["last_error"] = str(last_error or "")
+    if installation_publication is not None:
+        if current is not FirmwareWorkflowState.DEPLOYING or target is not current or "installation_publication" in updated:
+            raise FirmwareWorkflowError("Installation publication evidence must be committed once during deployment.")
+        updated["installation_publication"] = _jsonable(installation_publication)
     if user_data is not None:
         updated["wizard_data"] = persistable_wizard_data(user_data)
     if artifact is not None:

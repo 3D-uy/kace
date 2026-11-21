@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from weakref import WeakValueDictionary
 
 from core.configuration_review import ConfigurationReview, build_configuration_review, validate_configuration_plan
+from core.exceptions import WizardExit
 
 from core.managed_config import (
     HARDWARE_REMOTE,
@@ -115,6 +116,8 @@ def read_config_state(transport, generated_hardware: bytes = b"", generated_macr
 
 def require_conditional_writes(transport, plan, *, persist_root=None):
     """Reject a whole unsafe plan before any live write or firmware action."""
+    if isinstance(transport, LocalConfigTransport) and any(item.previous is None for item in plan.changed_artifacts):
+        transport.check_exclusive_create()
     unsupported = [item for item in plan.changed_artifacts
                    if not transport.supports_conditional_write(item.previous)]
     if unsupported:
@@ -223,6 +226,7 @@ class ConfigDeploymentTransaction:
         resolve_preserved_homing: Optional[Callable] = None,
         geometry_context=None,
         fresh_install: bool = False,
+        installation_checkpoint=None,
     ):
         if activation not in {"firmware", "service", "none"}:
             raise ValueError(f"Unsupported activation mode: {activation}")
@@ -255,6 +259,61 @@ class ConfigDeploymentTransaction:
         self.resolve_preserved_homing = resolve_preserved_homing
         self.geometry_context = geometry_context
         self.fresh_install = fresh_install
+        self.installation_checkpoint = installation_checkpoint
+
+    def _installation_plan(self, remote, validated_digest, *, commit=False):
+        """Bind an installation retry to its first approved bytes and destination."""
+        checkpoint = self.installation_checkpoint
+        if checkpoint is None:
+            return
+        from dataclasses import asdict
+        def digest(data):
+            return self._sha256(data) if data is not None else None
+
+        saved = checkpoint.get("installation_publication")
+        before = {name: digest(data) for name, data in remote.items()}
+        target = dict(before)
+        target.update({item.remote_name: digest(item.content) for item in self.plan.artifacts})
+        transport = self.transport
+        identity = {
+            "destination": [type(transport).__name__, *transport.destination_key,
+                            getattr(transport, "config_dir", None)],
+            "tree": validated_digest, "hardware": digest(self.generated_hardware),
+            "macros": digest(self.generated_macros),
+            "geometry": asdict(self.geometry_context) if self.geometry_context is not None else None,
+            "target": target,
+        }
+        if saved is None:
+            if commit:
+                from core.firmware_workflow import FirmwareWorkflowState, transition_checkpoint, write_checkpoint
+                record = dict(identity, before=before, transaction=self.transaction_id,
+                              snapshot=self.snapshot.storage_path if self.snapshot else None)
+                updated = transition_checkpoint(checkpoint, FirmwareWorkflowState.DEPLOYING,
+                                                installation_publication=record)
+                write_checkpoint(updated)
+                checkpoint.update(updated)
+            return
+        if not isinstance(saved, dict) or any(saved.get(key) != value for key, value in identity.items()):
+            raise ConfigConflictError("Destination or artifacts differ from the approved installation. "
+                                      "Inspect the original snapshot or explicitly start a new installation.")
+        baseline = saved.get("before")
+        if not isinstance(baseline, dict) or set(baseline) != set(before) or any(
+                value not in (baseline[name], target[name]) for name, value in before.items()):
+            raise ConfigConflictError("Destination changed outside the interrupted installation; inspect the original snapshot.")
+        changed = [name for name in baseline if baseline[name] != target[name]]
+        if changed:
+            from pathlib import Path
+            import json
+            backup = Path(saved["snapshot"])
+            metadata = json.loads((backup / "snapshot.json").read_text(encoding="utf-8"))
+            if metadata.get("deployment_id") != saved.get("transaction"):
+                raise ConfigConflictError("Original installation snapshot identity differs.")
+            for name in changed:
+                if baseline[name] is None:
+                    if name not in metadata["missing_files"]:
+                        raise ConfigConflictError("Original installation snapshot is incomplete.")
+                elif digest((backup / name.replace("/", "__")).read_bytes()) != baseline[name]:
+                    raise ConfigConflictError("Original installation snapshot bytes differ.")
 
     def _emit(self, state: str, detail: str) -> None:
         if self.state_sink is None:
@@ -443,7 +502,7 @@ class ConfigDeploymentTransaction:
             try:
                 with (self.transport.destination_lock() if hasattr(self.transport, "destination_lock") else nullcontext()):
                     return self._run_locked()
-            except KeyboardInterrupt:
+            except (WizardExit, EOFError, KeyboardInterrupt):
                 rollback_ok, rollback_detail = None, "no configuration files were written"
                 if self._written_names:
                     try:
@@ -518,6 +577,7 @@ class ConfigDeploymentTransaction:
             configuration_review = build_configuration_review(
                 self.plan, firmware_reservation_reader=self.firmware_reservation_reader,
                 selected_board=self.selected_board,
+                snapshot_path=os.path.join(self.snapshot_root or "~/kace/snapshots", self.transaction_id),
             )
             from core.klipper_preflight import plan_digest, validate_plan
             preflight = validate_plan(self.plan)
@@ -528,6 +588,7 @@ class ConfigDeploymentTransaction:
                     self.transaction_id,
                 )
             validated_digest = preflight.tree_digest
+            self._installation_plan(remote, validated_digest)
             def check_preflight_plan():
                 if self.publication_guard is not None:
                     self.publication_guard()
@@ -547,6 +608,8 @@ class ConfigDeploymentTransaction:
                     self.output(f"ERROR: {error.message}")
             else:
                 accepted = self.review(configuration_review)
+        except (WizardExit, EOFError):
+            raise
         except Exception as exc:
             return ConfigTransactionResult(
                 ConfigTransactionState.PRECONDITION_FAILED,
@@ -595,6 +658,9 @@ class ConfigDeploymentTransaction:
                 kace_version=self.kace_version,
                 persist_root=self.snapshot_root,
             ) if originals else None
+            self._installation_plan(remote, validated_digest, commit=True)
+        except (WizardExit, EOFError):
+            raise
         except ConfigConflictError as exc:
             proposal_detail = self._preserve_proposal()
             return ConfigTransactionResult(
@@ -718,6 +784,8 @@ class ConfigDeploymentTransaction:
                 self.transaction_id,
                 self.snapshot,
             )
+        except (WizardExit, EOFError):
+            raise
         except Exception as exc:
             proposal_detail = self._preserve_proposal()
             self._emit("CONFIG_ERROR", str(exc))
@@ -1039,6 +1107,29 @@ class LocalConfigTransport:
     def validate_activation_target(self):
         pass  # Offline export has no activation endpoint.
 
+    @staticmethod
+    def _publish_new(staged, target):
+        if os.name == "nt":
+            # Windows rename is exclusive even on removable FAT filesystems.
+            os.rename(staged, target)
+        else:
+            os.link(staged, target)
+            os.unlink(staged)
+
+    def check_exclusive_create(self):
+        # Confirm support before snapshotting or publishing a multi-file export.
+        with tempfile.TemporaryDirectory(prefix=".kace-check-", dir=self.config_dir) as probe:
+            staged = os.path.join(probe, "staged")
+            with open(staged, "xb"):
+                pass
+            try:
+                self._publish_new(staged, os.path.join(probe, "published"))
+            except OSError as exc:
+                raise ConfigConflictError(
+                    "destination does not support exclusive atomic publication; "
+                    "select another filesystem for configuration export"
+                ) from exc
+
     def supports_conditional_write(self, previous):
         return previous is None
 
@@ -1103,8 +1194,7 @@ class LocalConfigTransport:
                 if current != expected:
                     raise ConfigConflictError(f"concurrent configuration modification detected: {name}")
             if exclusive:
-                os.link(temporary, path)  # Atomic create-if-absent, never replace.
-                os.unlink(temporary)
+                self._publish_new(temporary, path)
             else:
                 os.replace(temporary, path)
             if os.name == "posix":

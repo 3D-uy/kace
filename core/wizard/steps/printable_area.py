@@ -40,6 +40,24 @@ def _bounds(data):
         raise GenerationError(t('geometry.invalid')) from exc
 
 
+def frozen_printable_geometry(path, content):
+    """Review the rectangle in the provenance bound to these specific CFG bytes."""
+    from core.config_geometry import load_geometry_context
+    from core.pin_validator import _read_pin_config
+    context = load_geometry_context(path, content)
+    if context is None:
+        raise GenerationError("Generated printable geometry is missing; start a new installation or configuration.")
+    sections, _ = _read_pin_config(content.decode("utf-8"))
+    review = {}
+    for axis in ("x", "y"):
+        options = sections.get(f"stepper_{axis}", {})
+        for bound in ("min", "max"):
+            review[f"printable_{axis}_{bound}"] = getattr(context, f"printable_{axis}_{bound}")
+            review[f"{axis}_position_{bound}"] = options.get(f"position_{bound}", 0 if bound == "min" else None)
+        review[f"{axis}_position_endstop"] = options.get("position_endstop")
+    return review
+
+
 def _step_printable_area(user_data, *, allow_edit=True):
     staged = copy.deepcopy(user_data)
     if os.environ.get('KACE_AUTO') == '1':

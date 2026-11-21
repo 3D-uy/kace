@@ -229,7 +229,8 @@ def _resume_firmware_workflow():
         choices.append({"name": t("firmware.resume.verify"), "value": "verify"})
     if state is FirmwareWorkflowState.MCU_VERIFIED:
         choices.append({"name": t("firmware.resume.review_z"), "value": "review_z"})
-    if get_mode() == "Advanced":
+    from core.firmware_workflow import can_transition
+    if get_mode() == "Advanced" and can_transition(state, FirmwareWorkflowState.COMPILE_REQUIRED):
         choices.append({"name": t("firmware.resume.compile"), "value": "compile"})
     choices.append({"name": t("firmware.resume.new"), "value": "new"})
     viewed_artifact = False
@@ -521,19 +522,6 @@ def main():
                 workflow_checkpoint,
                 FirmwareWorkflowState.COMPILE_REQUIRED,
                 user_data=user_data,
-            )
-            _persist_workflow(workflow_checkpoint, user_data)
-        elif resume_action == "continue" and FirmwareWorkflowState(
-            workflow_checkpoint["state"]
-        ) is FirmwareWorkflowState.DEPLOYING:
-            # A process/SSH loss during deploy leaves the remote result
-            # uncertain.  Re-enter READY and let the idempotent transaction
-            # verify existing files, Klipper Ready, and the firmware identity.
-            workflow_checkpoint = transition_checkpoint(
-                workflow_checkpoint,
-                FirmwareWorkflowState.READY_TO_DEPLOY,
-                user_data=user_data,
-                last_error="resuming verification after an interrupted deployment",
             )
             _persist_workflow(workflow_checkpoint, user_data)
         elif resume_action == "verify" and FirmwareWorkflowState(
@@ -881,15 +869,21 @@ def main():
         FirmwareWorkflowState.CONFIG_GENERATED,
         FirmwareWorkflowState.READY_TO_DEPLOY,
         FirmwareWorkflowState.DEPLOYING,
-    } or not os.path.isfile(os.path.expanduser("~/kace/printer.cfg"))
+    }
     if needs_generation:
         print(f"\033[91m[*]\033[0m {t('kace.generating_cfg')}", end="", flush=True)
         try:
+            if workflow_checkpoint is not None and resume_action != "new":
+                from core.motion_model import printable_xy_confirmation_matches
+                from core.wizard.steps.printable_area import _step_printable_area
+                if not printable_xy_confirmation_matches(user_data):
+                    if _step_printable_area(user_data) != "confirmed":
+                        raise WizardExit()
             from core.wizard.steps.thermal import review_thermal_policy
             review_thermal_policy(parsed_data, user_data, include_macros=generate_macros)
             generate_config(parsed_data, user_data, include_macros=generate_macros)
-        except (WizardExit, KeyboardInterrupt):
-            _finish(cancelled(t("wizard.thermal.declined")))
+        except (WizardExit, EOFError, KeyboardInterrupt):
+            _finish(cancelled("Configuration review cancelled before generation."))
         except GenerationError as gen_err:
             print(f"\r\033[91m[!]\033[0m {t('kace.generating_cfg')} FAILED")
             print(f"\n\033[91mERROR:\033[0m {gen_err}")
@@ -908,7 +902,26 @@ def main():
         from core.deployer import _generated_config_bytes
         _, hardware, _ = _generated_config_bytes(user_data)
         validate_board_electrical_artifact(selected_board_electrical_source(user_data), hardware)
-    except (GenerationError, OSError) as exc:
+        if not needs_generation:
+            if existing_state is FirmwareWorkflowState.DEPLOYING and not workflow_checkpoint.get("installation_publication"):
+                _finish(failed(WorkflowOutcome.PRECONDITION_FAILED,
+                               "Interrupted installation has no approved publication record. Inspect the original backup "
+                               "and destination, then explicitly select a new installation."))
+            from core.motion_model import printable_xy_confirmation_matches
+            from core.wizard.steps.printable_area import _step_printable_area, frozen_printable_geometry
+            geometry = frozen_printable_geometry(cfg_path, hardware)
+            geometry["_printable_xy_confirmation"] = user_data.get("_printable_xy_confirmation")
+            if not printable_xy_confirmation_matches(geometry):
+                if _step_printable_area(geometry, allow_edit=False) != "confirmed":
+                    raise WizardExit()
+                decision = geometry["_printable_xy_confirmation"]
+                user_data.update({key: geometry[key] for key in decision})
+                user_data["_printable_xy_confirmation"] = decision
+                workflow_checkpoint = transition_checkpoint(workflow_checkpoint, existing_state, user_data=user_data)
+                _persist_workflow(workflow_checkpoint, user_data)
+    except (WizardExit, EOFError, KeyboardInterrupt):
+        _finish(cancelled("Printable-area review cancelled."))
+    except (GenerationError, ValueError, OSError) as exc:
         _finish(failed(WorkflowOutcome.PRECONDITION_FAILED, str(exc)))
     generated_serial = extract_mcu_serial(cfg_path)
     if not generated_serial:
@@ -954,9 +967,11 @@ def main():
 
     deployment_result = None
     live_deployment = deploy_cfg in {"ssh", "moonraker"}
+    if existing_state is FirmwareWorkflowState.DEPLOYING and not live_deployment:
+        _finish(cancelled("Recovery requires the original live installation destination."))
     if live_deployment and workflow_checkpoint is not None and FirmwareWorkflowState(
         workflow_checkpoint["state"]
-    ) is not FirmwareWorkflowState.READY_TO_DEPLOY:
+    ) not in {FirmwareWorkflowState.READY_TO_DEPLOY, FirmwareWorkflowState.DEPLOYING}:
         _finish(failed(
             WorkflowOutcome.PRECONDITION_FAILED,
             f"Firmware workflow is {workflow_checkpoint['state']}; live deployment is blocked.",
@@ -989,7 +1004,7 @@ def main():
         user_data['password'] = password
         user_data['dest_path'] = dest_path
         if host and user and dest_path:
-            if workflow_checkpoint is not None:
+            if workflow_checkpoint is not None and workflow_checkpoint["state"] != FirmwareWorkflowState.DEPLOYING.value:
                 workflow_checkpoint = transition_checkpoint(
                     workflow_checkpoint, FirmwareWorkflowState.DEPLOYING
                 )
@@ -1000,7 +1015,7 @@ def main():
             password = None
     elif deploy_cfg == "moonraker":
         user_data["moonraker_host"] = "127.0.0.1"
-        if workflow_checkpoint is not None:
+        if workflow_checkpoint is not None and workflow_checkpoint["state"] != FirmwareWorkflowState.DEPLOYING.value:
             workflow_checkpoint = transition_checkpoint(
                 workflow_checkpoint, FirmwareWorkflowState.DEPLOYING
             )
@@ -1023,7 +1038,7 @@ def main():
         else:
             workflow_checkpoint = transition_checkpoint(
                 workflow_checkpoint,
-                FirmwareWorkflowState.READY_TO_DEPLOY,
+                FirmwareWorkflowState.DEPLOYING if workflow_checkpoint.get("installation_publication") else FirmwareWorkflowState.READY_TO_DEPLOY,
                 last_error=deployment_result.detail,
             )
         _persist_workflow(workflow_checkpoint, user_data)

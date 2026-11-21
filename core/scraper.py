@@ -3,6 +3,7 @@ import json
 import re
 import os
 import time
+import tempfile
 
 from firmware.boards.upstream import load_klipper_source_contract
 from core.config_sections import section_identity
@@ -197,39 +198,45 @@ def fetch_raw_config(filename):
         
     cache_file = os.path.join(cache_dir, os.path.basename(filename))
     
-    # 1. Check cache first (valid for CACHE_EXPIRY_SECONDS)
+    # A recent mtime is not evidence that a previous transfer finished.
+    cached = ""
     try:
-        if os.path.exists(cache_file):
+        with open(cache_file, encoding="utf-8") as source:
+            previous = source.read()
+        if re.search(r"(?m)^\s*\[[^\]\r\n]+\]", previous):
+            cached = previous
             if time.time() - os.path.getmtime(cache_file) < CACHE_EXPIRY_SECONDS:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    return f.read()
-    except Exception:
+                return cached
+    except (OSError, UnicodeError):
         pass
 
     url = f"https://raw.githubusercontent.com/Klipper3d/klipper/{KLIPPER_REF}/config/{filename}"
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 KACE-App'})
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
-            content = response.read().decode('utf-8', errors='ignore')
-            # Save to cache
-            # S2-02: Enforce 0o600 (owner-only) so raw board configs are not
-            # world-readable on shared/multi-user systems.
+            content = response.read().decode('utf-8')
+            if not re.search(r"(?m)^\s*\[[^\]\r\n]+\]", content):
+                raise ValueError("download contains no Klipper configuration sections")
+            temporary = None
             try:
-                _fd = os.open(cache_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(_fd, 'w', encoding='utf-8') as f:
-                    f.write(content)
-            except Exception as _cw_err:
+                with tempfile.NamedTemporaryFile(dir=cache_dir, delete=False, mode="w",
+                                                 encoding="utf-8", newline="") as staged:
+                    temporary = staged.name
+                    staged.write(content)
+                    staged.flush()
+                    os.fsync(staged.fileno())
+                os.replace(temporary, cache_file)
+                temporary = None
+            except OSError as _cw_err:
                 if os.environ.get("KACE_DEBUG") == "1":
                     print(f"[DEBUG] Raw config cache write failed: {_cw_err}")
+            finally:
+                if temporary is not None:
+                    os.unlink(temporary)
             return content
     except Exception as e:
-        # Fallback to expired cache
-        try:
-            if os.path.exists(cache_file):
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    return f.read()
-        except Exception:
-            pass
+        if cached:
+            return cached
         print(f"\n\033[93mWarning: Failed to fetch {filename} ({e}).\033[0m")
         return ""
 

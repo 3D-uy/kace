@@ -25,6 +25,7 @@ MACROS_REMOTE = "kace/generated-macros.cfg"
 ROOT_MACROS_REMOTE = "macros.cfg"
 LEGACY_MACROS_REMOTE = ROOT_MACROS_REMOTE
 ROOT_MACROS_MARKER = b"# KACE managed macros: root-v1\n"
+RETIRED_MACROS = b"# KACE: previous starter macros retired after backup; no macros selected.\n"
 ROOT_REMOTE = "printer.cfg"
 MOONRAKER_REMOTE = "moonraker.conf"
 MANAGED_BEGIN = "# BEGIN KACE MANAGED: generated-includes"
@@ -100,6 +101,7 @@ class ManagedConfigPlan:
     warnings: tuple[str, ...] = ()
     source_files: tuple[tuple[str, Optional[bytes]], ...] = ()
     geometry_context: GeometryContext | None = None
+    fresh_install: bool = False
 
     @property
     def remote_names(self) -> tuple[str, ...]:
@@ -716,7 +718,7 @@ def build_fresh_config_plan(
     if generated_macros is None and remote_files.get(ROOT_MACROS_REMOTE) is not None:
         artifacts.append(PlannedConfigArtifact(
             ROOT_MACROS_REMOTE,
-            b"# KACE: previous starter macros retired after backup; no macros selected.\n",
+            RETIRED_MACROS,
             remote_files[ROOT_MACROS_REMOTE],
         ))
         if artifacts[-1].changed:
@@ -725,7 +727,19 @@ def build_fresh_config_plan(
         item.remote_name == ROOT_MACROS_REMOTE and item.changed for item in artifacts
     ):
         warnings.append("Existing macros.cfg will be replaced by the newly selected starter macros after backup.")
+    for item in artifacts:
+        if not item.existed or not item.changed or item.remote_name not in {ROOT_REMOTE, ROOT_MACROS_REMOTE}:
+            continue
+        before = item.previous.decode("utf-8", errors="replace")
+        after = item.content.decode("utf-8")
+        warnings.extend(_setting_loss_warnings(item.remote_name, before, after))
+        if item.remote_name == ROOT_REMOTE:
+            warnings.extend(_setting_loss_warnings("printer.cfg (SAVE_CONFIG)", _autosave_text(before), after))
+            new_sections = _section_options(after)
+            for section in _section_options(before):
+                if section.startswith("include ") and section not in new_sections:
+                    warnings.append(f"printer.cfg: [{section}] will be removed.")
     return ManagedConfigPlan(
         tuple(artifacts), warnings=tuple(warnings), source_files=tuple(clean.items()),
-        geometry_context=geometry_context,
+        geometry_context=geometry_context, fresh_install=True,
     )

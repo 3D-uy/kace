@@ -148,20 +148,8 @@ def run_configuration_operation(operation_id, checkpoint_sha256, *, resume=False
                 # A COMPLETE legacy checkpoint does not prove that its printable
                 # rectangle was explicitly confirmed. Review the exact frozen
                 # artifact on every attempt, without modifying saved decisions.
-                from core.config_geometry import load_geometry_context
-                from core.pin_validator import _read_pin_config
-                from core.wizard.steps.printable_area import _step_printable_area
-                geometry = load_geometry_context(generated_path, generated_bytes["printer.cfg"])
-                if geometry is None:
-                    raise FirmwareWorkflowError("Generated printable geometry is missing; use the configuration wizard.")
-                sections, _ = _read_pin_config(generated_bytes["printer.cfg"].decode("utf-8"))
-                geometry_review = {}
-                for axis in ("x", "y"):
-                    options = sections.get(f"stepper_{axis}", {})
-                    for bound in ("min", "max"):
-                        geometry_review[f"printable_{axis}_{bound}"] = getattr(geometry, f"printable_{axis}_{bound}")
-                        geometry_review[f"{axis}_position_{bound}"] = options.get(f"position_{bound}", 0 if bound == "min" else None)
-                    geometry_review[f"{axis}_position_endstop"] = options.get("position_endstop")
+                from core.wizard.steps.printable_area import _step_printable_area, frozen_printable_geometry
+                geometry_review = frozen_printable_geometry(generated_path, generated_bytes["printer.cfg"])
                 guard_operation_inputs()
                 if _step_printable_area(geometry_review, allow_edit=False) != "confirmed":
                     raise WizardExit()

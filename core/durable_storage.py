@@ -21,7 +21,7 @@ def fsync_directory(directory: Path | str) -> None:
         os.close(descriptor)
 
 
-def ensure_durable_directory(directory: Path | str, *, exist_ok: bool = True) -> None:
+def ensure_durable_directory(directory: Path | str, *, exist_ok: bool = True, mode: int = 0o777) -> None:
     """Create parents in order, committing each name before creating its child.
 
     Sync the existing ancestor's parent as well: a previous attempt may have
@@ -39,6 +39,6 @@ def ensure_durable_directory(directory: Path | str, *, exist_ok: bool = True) ->
         raise FileExistsError(str(path))
     fsync_directory(ancestor.parent)
     for child in reversed(missing):
-        child.mkdir(exist_ok=exist_ok if child == path else True)
+        child.mkdir(mode=mode, exist_ok=exist_ok if child == path else True)
         fsync_directory(child)
         fsync_directory(child.parent)

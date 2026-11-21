@@ -310,10 +310,10 @@ class TestFetchRawConfig(unittest.TestCase):
         legacy = os.path.join(legacy_dir, 'generic-board.cfg')
         with open(legacy, 'w', encoding='utf-8') as f:
             f.write('unreviewed master content')
-        mock_urlopen.return_value = _fake_response(b'pinned content')
+        mock_urlopen.return_value = _fake_response(b'[printer]\n# pinned content')
 
         from core.scraper import fetch_raw_config
-        self.assertEqual(fetch_raw_config('generic-board.cfg'), 'pinned content')
+        self.assertEqual(fetch_raw_config('generic-board.cfg'), '[printer]\n# pinned content')
         self.assertEqual(
             mock_urlopen.call_args.args[0].full_url,
             f'https://raw.githubusercontent.com/Klipper3d/klipper/{KLIPPER_REF}/config/generic-board.cfg',

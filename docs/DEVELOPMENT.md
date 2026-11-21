@@ -24,6 +24,24 @@ installation merges the previous printer configuration. Recovery uses the saved
 operation and its original publication policy; it does not regenerate a new plan
 over a partially applied operation.
 
+During initial installation the first approved live plan is recorded in the
+DEPLOYING checkpoint after snapshot persistence and before live writes. A retry
+checks the original target, generated hardware/macros and geometry, preflight
+tree, destination bytes and original snapshot. Each destination file must
+match its original or approved bytes. A conflicting edit, missing artifact or
+legacy interrupted checkpoint without a publication record requires inspection
+of the backup and an explicit new installation if recovery is impossible. A
+verified unchanged tree can finish without another activation. The Advanced
+menu offers recompilation only from allowed states. Recovery of an older
+geometry decision requires explicit printable XY approval, bound to the frozen
+CFG and its provenance when generation has already finished.
+
+The normal fresh-install review identifies retired includes, macro definitions,
+old calibration values (including SAVE_CONFIG) and the backup location. An
+offline export verifies exclusive file creation before proceeding. Local
+Windows export publishes new files with exclusive rename. POSIX export uses
+hard links and reports unsupported destinations before publishing a config.
+
 | Responsibility | Source |
 | --- | --- |
 | CLI, wizard and localized outcomes | [kace.py](../kace.py), [core/wizard/](../core/wizard/), [core/translations/](../core/translations/), [core/workflow_outcome.py](../core/workflow_outcome.py) |

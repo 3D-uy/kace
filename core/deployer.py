@@ -441,12 +441,14 @@ def _run_config_transaction(
                 from core.config_transaction import ConfigConflictError
                 raise ConfigConflictError("Configuration-only operation cannot change moonraker.conf; review service and energy changes separately.")
 
+    initial_installation = checkpoint if isinstance(checkpoint, dict) and checkpoint.get("state") == "DEPLOYING" else None
     transaction = ConfigDeploymentTransaction(
         transport,
         hardware,
         macros,
         activation=activation,
         fresh_install=True,
+        installation_checkpoint=initial_installation,
         review=_review_configuration,
         resolve_preserved_homing=_interactive_preserved_homing_resolution,
         activation_selector=activation_selector,
@@ -455,7 +457,7 @@ def _run_config_transaction(
         state_sink=state_sink,
         snapshot_root=snapshot_root,
         publication_guard=guard_publication if checkpoint_guard is not None or preserve_moonraker else None,
-        allow_existing_activation=allow_existing_activation,
+        allow_existing_activation=allow_existing_activation or bool((initial_installation or {}).get("installation_publication")),
         verify_existing_ready=True,
         geometry_context=geometry_context,
         selected_board=selected_board,

@@ -48,6 +48,7 @@ class ConfigurationReview:
     changed_files: tuple[str, ...]
     important_changes: tuple[str, ...]
     diff: str
+    fresh_install: bool = False
 
 
 _SECTION_RE = re.compile(r"(?m)^\s*\[([^\]\r\n]+)\]\s*(?:[#;].*)?$")
@@ -513,7 +514,7 @@ def validate_configuration_plan(
 
 def build_configuration_review(
     plan: ManagedConfigPlan, *, firmware_reservation_reader: Callable[[str], dict] | None = None,
-    selected_board: dict | None = None,
+    selected_board: dict | None = None, snapshot_path: str = "~/kace/snapshots",
 ) -> ConfigurationReview:
     hardware = effective_hardware_text(plan)
     sections = _sections(hardware)
@@ -548,12 +549,18 @@ def build_configuration_review(
     changed = tuple(item.remote_name for item in plan.changed_artifacts)
     changes: list[str] = []
     if "printer.cfg" in changed:
-        changes.append("printer.cfg will load the files managed by KACE while preserving unmanaged sections.")
+        changes.append("printer.cfg will use the newly generated configuration." if plan.fresh_install else
+                       "printer.cfg will load the files managed by KACE while preserving unmanaged sections.")
     if HARDWARE_REMOTE in changed:
         changes.append("KACE will publish the generated hardware configuration.")
     if MACROS_REMOTE in changed or ROOT_MACROS_REMOTE in changed:
-        changes.append("KACE will publish starter macros compatible with the selected hardware.")
-    return ConfigurationReview(validation, tuple(summary), changed, tuple(changes), plan.dry_run_diff())
+        from core.managed_config import RETIRED_MACROS
+        retired = any(item.content == RETIRED_MACROS for item in plan.changed_artifacts if item.remote_name == ROOT_MACROS_REMOTE)
+        changes.append("Previous starter macros will be replaced with a comment." if retired else
+                       "KACE will publish starter macros compatible with the selected hardware.")
+    if plan.fresh_install and any(item.existed for item in plan.changed_artifacts):
+        changes.append("Backup before replacement: " + snapshot_path)
+    return ConfigurationReview(validation, tuple(summary), changed, tuple(changes), plan.dry_run_diff(), plan.fresh_install)
 
 
 _TEXT = {
@@ -641,7 +648,7 @@ def _localize_setting_change(text, language):
     return text
 
 
-def _setting_change_summary(items, language, color):
+def _setting_change_summary(items, language, color, *, fresh_install=False):
     labels = _CHANGE_TEXT.get(language, _CHANGE_TEXT["English"])
     groups = {}
     for item in items:
@@ -658,7 +665,8 @@ def _setting_change_summary(items, language, color):
         if all(new is None for _, _, new in changes):
             text = labels["remove"].format(section=f"[{section}]", count=len(changes))
             lines.extend(textwrap.wrap(text, width=_change_width(), initial_indent="    ", subsequent_indent="    "))
-            continue
+            if not fresh_install:
+                continue
         by_option = {option: (old, new) for option, old, new in changes}
         range_changed = section in {"stepper_x", "stepper_y", "stepper_z"} and all(
             key in by_option and by_option[key][1] is not None for key in ("position_min", "position_max"))
@@ -670,7 +678,9 @@ def _setting_change_summary(items, language, color):
             if range_changed and option in {"position_min", "position_max"}:
                 continue
             if new is None:
-                rows.append((option or section, labels["remove"].format(section=f"[{section}] {option or ''}".strip(), count=1)))
+                if old is not None:
+                    removed = {"Español": "retirado", "Português": "removido"}.get(language, "removed")
+                    rows.append((f"[{section}] {option}", f"{old} → {removed}"))
             else:
                 unit = " mm" if option in {"position_min", "position_max", "position_endstop", "z_offset"} else ""
                 if option == "homing_positive_dir":
@@ -745,6 +755,8 @@ def render_configuration_review(
         exact = {
             "Español": {
                 "MCU connection configured": "Conexión MCU configurada",
+                "printer.cfg will use the newly generated configuration.": "printer.cfg usará la configuración recién generada.",
+                "Previous starter macros will be replaced with a comment.": "Las macros anteriores se reemplazarán por un comentario.",
                 "MCU connection missing": "Falta la conexión MCU",
                 "Hotend configured": "Hotend configurado",
                 "Heated bed configured": "Cama caliente configurada",
@@ -755,6 +767,8 @@ def render_configuration_review(
             },
             "Português": {
                 "MCU connection configured": "Conexão da MCU configurada",
+                "printer.cfg will use the newly generated configuration.": "printer.cfg usará a configuração recém-gerada.",
+                "Previous starter macros will be replaced with a comment.": "As macros anteriores serão substituídas por um comentário.",
                 "MCU connection missing": "Conexão da MCU ausente",
                 "Hotend configured": "Hotend configurado",
                 "Heated bed configured": "Mesa aquecida configurada",
@@ -769,11 +783,13 @@ def render_configuration_review(
         prefixes = {
             "Español": {
                 "MCU/board: ": "MCU/placa: ", "Kinematics: ": "Cinemática: ",
+                "Backup before replacement: ": "Respaldo antes del reemplazo: ",
                 "Z motors/drivers: ": "Motores/drivers Z: ", "Stepper drivers: ": "Drivers de motores: ",
                 "Calibration after installation: ": "Calibración tras la instalación: ",
             },
             "Português": {
                 "MCU/board: ": "MCU/placa: ", "Kinematics: ": "Cinemática: ",
+                "Backup before replacement: ": "Backup antes da substituição: ",
                 "Z motors/drivers: ": "Motores/drivers Z: ", "Stepper drivers: ": "Drivers dos motores: ",
                 "Calibration after installation: ": "Calibração após a instalação: ",
             },
@@ -858,7 +874,7 @@ def render_configuration_review(
         lines.extend(f"  - {localize(change)}" for change in review.important_changes)
     elif not setting_changes:
         lines.append("  - " + {"Español": "Sin cambios", "Português": "Sem alterações"}.get(language, "No changes"))
-    lines.extend(_setting_change_summary(setting_changes, language, color))
+    lines.extend(_setting_change_summary(setting_changes, language, color, fresh_install=review.fresh_install))
     commissioning = [item for item in review.validation.warnings if "inferred" in item.code]
     warnings = [item for item in review.validation.warnings if item not in commissioning and item not in setting_changes]
     if warnings:

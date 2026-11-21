@@ -23,6 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
+from core.durable_storage import ensure_durable_directory, fsync_directory
 from core.moonraker import (
     delete_config_file,
     download_printer_cfg,
@@ -106,18 +107,9 @@ def create_snapshot(
     root = os.path.expanduser(persist_root or "~/kace/snapshots")
     transaction_dir = os.path.join(root, transaction_id)
     staging_dir = os.path.join(root, f".{transaction_id}.tmp-{uuid.uuid4().hex}")
-    os.makedirs(root, mode=0o700, exist_ok=True)
+    ensure_durable_directory(root, mode=0o700)
     os.makedirs(staging_dir, mode=0o700, exist_ok=False)
     os.chmod(staging_dir, stat.S_IRWXU)
-
-    def _fsync_directory(path: str) -> None:
-        if os.name != "posix":
-            return
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
 
     def _publish(name: str, payload: bytes) -> None:
         path = os.path.join(staging_dir, name)
@@ -155,9 +147,9 @@ def create_snapshot(
         _publish("snapshot.json", metadata)
         # Publishing the directory is the commit point. A failed snapshot is
         # never exposed under its final transaction ID.
-        _fsync_directory(staging_dir)
+        fsync_directory(staging_dir)
         os.replace(staging_dir, transaction_dir)
-        _fsync_directory(root)
+        fsync_directory(root)
     except BaseException:
         shutil.rmtree(staging_dir, ignore_errors=True)
         raise
