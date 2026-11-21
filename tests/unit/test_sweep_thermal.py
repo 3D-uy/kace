@@ -1,11 +1,22 @@
 """Thermal review class, real guards and adversarial official-result checks."""
 import copy
+import os
 from unittest.mock import patch
 
 import pytest
 
 from core.exceptions import GenerationError
 from tests.sweep import thermal_contract as contract
+
+
+def test_thermal_mode_restores_only_its_own_environment_flag(monkeypatch):
+    monkeypatch.delenv("KACE_AUTO", raising=False)
+    monkeypatch.setenv("KACE_SWEEP_TEST_MARKER", "original")
+    with contract.automatic_mode("1"):
+        assert os.environ["KACE_AUTO"] == "1"
+        os.environ["KACE_SWEEP_TEST_MARKER"] = "changed"
+    assert "KACE_AUTO" not in os.environ
+    assert os.environ["KACE_SWEEP_TEST_MARKER"] == "changed"
 
 
 @pytest.fixture(scope='module')

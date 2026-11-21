@@ -9,6 +9,7 @@ import copy
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 from unittest.mock import patch
@@ -37,6 +38,21 @@ CONTROLS = {
 }
 
 
+@contextlib.contextmanager
+def automatic_mode(value):
+    # Restore only the flag under test. Replacing the entire native Windows
+    # environment can discard inherited empty values used by Git subprocesses.
+    previous = os.environ.get("KACE_AUTO")
+    os.environ["KACE_AUTO"] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("KACE_AUTO", None)
+        else:
+            os.environ["KACE_AUTO"] = previous
+
+
 def replay_thermal(previous, source, folder):
     name = previous['filename']
     raw = (source / 'config' / name).read_text(encoding='utf-8')
@@ -54,16 +70,16 @@ def replay_thermal(previous, source, folder):
         target = Path(kwargs['output_path'])
         row['guards']['unreviewed'] = reject(lambda: generate_config(board, user, **kwargs), 'explicit review')
         assert not target.exists() and not Path(str(target) + '.provenance.json').exists()
-        with patch.dict('os.environ', {'KACE_AUTO': '1'}), \
+        with automatic_mode('1'), \
              patch('core.wizard.steps.thermal.yes_no', side_effect=AssertionError('Auto cannot ask or consent')):
             row['guards']['automatic'] = reject(lambda: review_thermal_policy(board, user), 'automatic mode')
-        with patch.dict('os.environ', {'KACE_AUTO': '0'}), \
+        with automatic_mode('0'), \
              patch('core.wizard.steps.thermal.yes_no', return_value=False) as declined:
             row['guards']['declined'] = reject(lambda: review_thermal_policy(board, user), 'Thermal')
             declined.assert_called_once()
         assert user == original and not target.exists()
         # Simulated test answer only. The actual UI still asks the user.
-        with patch.dict('os.environ', {'KACE_AUTO': '0'}), \
+        with automatic_mode('0'), \
              patch('core.wizard.steps.thermal.yes_no', return_value=True) as accepted, \
              patch('core.reconciler.write_text_atomically', side_effect=AssertionError('Preview must not write')):
             review_thermal_policy(board, user)
