@@ -190,6 +190,17 @@ _WIZARD_USER_DATA_NO_PARSED = {
 
 # ── Context manager helpers ───────────────────────────────────────────────────
 
+def _reviewed_xy(data):
+    """Represent the operator's confirmed printable rectangle in recovery fixtures."""
+    from core.motion_model import confirm_printable_xy
+    for axis in ('x', 'y'):
+        limit = data[f'{axis}_size']
+        data.update({f'{axis}_position_min': 0, f'{axis}_position_max': limit,
+                     f'printable_{axis}_min': 0, f'printable_{axis}_max': limit})
+    confirm_printable_xy(data)
+    return data
+
+
 def _write_mock_generated_config(parsed_data, user_data, **kwargs):
     """Model the generator's file boundary without reading the developer's home."""
     target = Path(os.path.expanduser('~/kace/printer.cfg'))
@@ -198,6 +209,14 @@ def _write_mock_generated_config(parsed_data, user_data, **kwargs):
     # This module's SKR 1.4/LPC fixture uses command restart, including resumes.
     content = f'[mcu]\nserial: {serial}\nrestart_method: command\n\n' + _RAW_BOARD_CFG
     target.write_text(content, encoding='utf-8')
+    if '_printable_xy_confirmation' in user_data:
+        import hashlib
+        import json
+        geometry = {key: float(user_data[key]) for key in
+                    ('printable_x_min', 'printable_x_max', 'printable_y_min', 'printable_y_max')}
+        geometry['source_sha256'] = hashlib.sha256(target.read_bytes()).hexdigest()
+        Path(str(target) + '.provenance.json').write_text(json.dumps({
+            'schema': 'kace-config-provenance/v1', 'geometry': geometry}), encoding='utf-8')
     if kwargs.get("include_macros") or user_data.get("macros_generated"):
         target.with_name("macros.cfg").write_text(
             "[gcode_macro KACE_TEST]\ngcode: M117 fixture\n", encoding="utf-8",
@@ -769,7 +788,7 @@ class TestPreparedFirmwareView(_HeadlessMixin, unittest.TestCase):
             transition_checkpoint, write_checkpoint,
         )
 
-        data = {**_WIZARD_USER_DATA_WITH_PARSED, "mcu_type": "lpc1769", "mcu_hint": "usb"}
+        data = _reviewed_xy({**_WIZARD_USER_DATA_WITH_PARSED, "mcu_type": "lpc1769", "mcu_hint": "usb"})
         path = os.path.join(self._workflow_tmp.name, "firmware.bin")
         payload = b"prepared firmware for viewing"
         with open(path, "wb") as output:
@@ -1278,12 +1297,12 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         with patch.object(sys, "argv", ["test_main_integration"]):
             import kace
         serial = "/dev/serial/by-id/usb-Klipper_lpc1769_RESUMED-if00"
-        user_data = {
+        user_data = _reviewed_xy({
             **_WIZARD_USER_DATA_WITH_PARSED,
             "mcu_type": "lpc1769",
             "mcu_hint": "usb",
             "mcu_path": serial,
-        }
+        })
         firmware_path = os.path.join(self._workflow_tmp.name, "firmware.bin")
         with open(firmware_path, "wb") as output:
             output.write(b"resume firmware")
@@ -1331,7 +1350,7 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         self.assertEqual(ctx.exception.code, 0)
         wizard.assert_not_called()
 
-    def test_interrupted_deploy_checkpoint_resumes_without_repeating_wizard(self):
+    def test_interrupted_legacy_deploy_without_original_plan_requires_explicit_recovery(self):
         import hashlib
         from core.firmware_workflow import (
             FirmwareWorkflowState,
@@ -1381,6 +1400,8 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
         checkpoint = transition_checkpoint(checkpoint, FirmwareWorkflowState.DEPLOYING)
         write_checkpoint(checkpoint, os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
         _write_mock_generated_config(user_data['board_parsed'], user_data)
+        checkpoint_path = Path(os.environ["KACE_FIRMWARE_WORKFLOW_PATH"])
+        previous = checkpoint_path.read_bytes()
 
         with patch("kace.print_kace_banner"), \
              patch("kace.run_wizard") as wizard, \
@@ -1393,7 +1414,8 @@ class TestMainCLIFirmwareTransactionResult(_HeadlessMixin, unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 kace.main()
 
-        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(ctx.exception.code, 10)
+        self.assertEqual(checkpoint_path.read_bytes(), previous)
         wizard.assert_not_called()
         generate.assert_not_called()
 

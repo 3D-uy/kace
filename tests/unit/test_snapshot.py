@@ -143,5 +143,24 @@ class TestSnapshot(unittest.TestCase):
         self.assertFalse(mock_restart.called)
 
 
+def test_first_snapshot_parent_must_be_durable_before_publication(tmp_path, monkeypatch):
+    from core import durable_storage, snapshot
+    import pytest
+
+    root = tmp_path / "snapshots"
+    def fail_parent(path):
+        if path == tmp_path and root.exists():
+            raise OSError("snapshot parent sync failed")
+    monkeypatch.setattr(durable_storage, "fsync_directory", fail_parent)
+    with pytest.raises(OSError, match="parent sync"):
+        snapshot.create_snapshot({"printer.cfg": b"previous"}, persist_root=str(root),
+                                 deployment_id="test")
+    assert not (root / "test").exists()
+    monkeypatch.setattr(durable_storage, "fsync_directory", lambda path: None)
+    committed = snapshot.create_snapshot({"printer.cfg": b"previous"}, persist_root=str(root),
+                                         deployment_id="test")
+    assert committed.config_files == {"printer.cfg": b"previous"}
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -424,6 +424,29 @@ class TestFetchRawConfig(unittest.TestCase):
 
         self.assertEqual(result, '')
 
+    @patch('urllib.request.urlopen')
+    def test_recent_truncated_cache_is_replaced_from_pinned_source(self, mock_urlopen):
+        from core.scraper import fetch_raw_config
+        name = 'generic-board.cfg'
+        path = self._write_cache(name, '')
+        mock_urlopen.return_value = _fake_response(b'[printer]\nkinematics: cartesian\n')
+        result = fetch_raw_config(name)
+        mock_urlopen.assert_called_once()
+        with open(path, encoding='utf-8') as stream:
+            self.assertEqual(stream.read(), result)
+        self.assertIn('[printer]', result)
+
+    @patch('urllib.request.urlopen')
+    def test_interrupted_refresh_preserves_previous_valid_cache(self, mock_urlopen):
+        from core.scraper import fetch_raw_config
+        name = 'generic-board.cfg'
+        previous = '[printer]\nkinematics: cartesian\n'
+        path = self._write_cache(name, previous, age_seconds=CACHE_EXPIRY_SECONDS + 1)
+        mock_urlopen.return_value.__enter__.return_value.read.side_effect = OSError('transfer interrupted')
+        self.assertEqual(fetch_raw_config(name), previous)
+        with open(path, encoding='utf-8') as stream:
+            self.assertEqual(stream.read(), previous)
+
     # ── 7. Cache directory auto-created on first use ─────────────────────────
 
     @patch('urllib.request.urlopen')

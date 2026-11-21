@@ -151,7 +151,8 @@ gcode:
         self.assertEqual(build_managed_config_plan(generated, None, files).changed_artifacts, ())
 
     def _run_cli_installation(self, *, deploy_choice='moonraker', outcome=None, fail_complete=False,
-                              interrupted_deployment=False, verify_firmware=None):
+                              interrupted_deployment=False, verify_firmware=None, interruption=None,
+                              tamper=None, confirm_geometry=True, pre_generation=False, stale_geometry=False):
         import hashlib
         import json
         from dataclasses import asdict
@@ -165,7 +166,11 @@ gcode:
         for axis in ('x', 'y'):
             user.update({f'{axis}_position_min': 0, f'{axis}_position_max': 235,
                          f'printable_{axis}_min': 0, f'printable_{axis}_max': 235})
-        confirm_printable_xy(user)
+        if confirm_geometry:
+            confirm_printable_xy(user)
+        if stale_geometry:
+            user['x_position_max'] = 240
+        user['macros_generated'] = False
         run_root = Path(tempfile.mkdtemp(dir=self.root))
         artifact = run_root / 'firmware.bin'
         artifact.write_bytes(b'firmware')
@@ -176,8 +181,9 @@ gcode:
         })
         checkpoint = transition_checkpoint(checkpoint, State.VERIFYING_MCU)
         checkpoint = transition_checkpoint(checkpoint, State.MCU_VERIFIED, verified_serial_path=user['mcu_path'], flash_evidence_recorded_at=1)
-        checkpoint = transition_checkpoint(checkpoint, State.CONFIG_GENERATED)
-        checkpoint = transition_checkpoint(checkpoint, State.READY_TO_DEPLOY)
+        if not pre_generation:
+            checkpoint = transition_checkpoint(checkpoint, State.CONFIG_GENERATED)
+            checkpoint = transition_checkpoint(checkpoint, State.READY_TO_DEPLOY)
         if interrupted_deployment:
             checkpoint = transition_checkpoint(checkpoint, State.DEPLOYING)
         checkpoint_path = str(run_root / 'firmware-workflow.json')
@@ -194,12 +200,24 @@ gcode:
         expanduser = os.path.expanduser
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.dict(os.environ, {'KACE_AUTO': '1', 'KACE_FIRMWARE_WORKFLOW_PATH': checkpoint_path, 'KACE_MACHINE_OUTPUT': '1'}))
-            if interrupted_deployment:
-                # A process disappears after publication and before recording COMPLETE.
-                with patch.object(self.transport, 'restart', side_effect=SystemExit(99)):
+            if interrupted_deployment and interruption != 'legacy':
+                # Exit without transaction cleanup, like a lost CLI process.
+                method = 'upload_if_unchanged' if interruption in ('before-write', 'after-write') else 'restart'
+                publish = self.transport.upload_if_unchanged
+                def interrupt(*args):
+                    if interruption == 'after-write':
+                        publish(*args)
+                    raise SystemExit(99)
+                with patch.object(self.transport, method, side_effect=interrupt):
                     with self.assertRaises(SystemExit):
                         self.transaction(installation_checkpoint=checkpoint, fresh_install=True,
                                          generated=hardware, geometry_context=geometry)
+            if tamper == 'destination':
+                self.live.write_bytes(b'# changed by another editor')
+            elif tamper == 'generated':
+                saved_config.unlink()
+            elif tamper == 'snapshot':
+                Path(checkpoint['installation_publication']['snapshot'], 'printer.cfg').write_bytes(b'# damaged backup')
             # This checkpoint belongs to the synthetic MCU above. An attached
             # printer must not reject it and divert the fixture into a new wizard.
             stack.enter_context(patch('firmware.detector.discover_mcu_hardware', return_value={}))
@@ -230,10 +248,17 @@ gcode:
                 render()
             stack.enter_context(patch('kace.print_installation_complete', side_effect=completed))
             wizard = stack.enter_context(patch('kace.run_wizard', side_effect=AssertionError('must resume')))
+            from core.exceptions import GenerationError
+            stack.enter_context(patch('core.wizard.steps.thermal.review_thermal_policy'))
+            generator = stack.enter_context(patch('kace.generate_config', side_effect=GenerationError('generation reached with reviewed XY')))
             output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             with self.assertRaises(SystemExit) as exited:
                 kace.main()
         wizard.assert_not_called()
+        if pre_generation and confirm_geometry and not stale_geometry:
+            generator.assert_called_once()
+        else:
+            generator.assert_not_called()
         return exited.exception.code, load_checkpoint(checkpoint_path)['state'], output.getvalue()
 
     def test_cli_local_installation_reaches_complete_and_renders_success(self):
@@ -287,6 +312,53 @@ gcode:
                 self.assertNotIn('HAPPY PRINTING!', output)
                 self.assertNotIn('Instalación de KACE completada', output)
 
+    def test_legacy_interrupted_plan_must_not_adopt_current_files(self):
+        code, state, output = self._run_cli_installation(interrupted_deployment=True, interruption='legacy')
+        self.assertEqual(code, 10)
+        self.assertEqual(state, 'DEPLOYING')
+        self.assertIn('no approved publication record', output)
+        self.transport.restart.assert_not_called()
+
+    def test_frozen_checkpoint_without_geometry_approval_blocks_automatic_publication(self):
+        code, state, output = self._run_cli_installation(confirm_geometry=False)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(state, 'READY_TO_DEPLOY')
+        self.assertIn('explicit printable XY confirmation', output)
+        self.transport.restart.assert_not_called()
+
+    def test_mcu_verified_requires_current_xy_consent_before_generation(self):
+        for approved, stale in [(False, False), (True, True), (True, False)]:
+            with self.subTest(approved=approved, stale=stale):
+                code, state, output = self._run_cli_installation(pre_generation=True,
+                    confirm_geometry=approved, stale_geometry=stale)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(state, 'MCU_VERIFIED')
+                self.assertIn('generation reached with reviewed XY' if approved and not stale
+                              else 'explicit printable XY confirmation', output)
+
+    def test_interrupted_destination_edit_is_preserved(self):
+        code, state, _ = self._run_cli_installation(interrupted_deployment=True,
+                                                    interruption='before-write', tamper='destination')
+        self.assertNotEqual(code, 0)
+        self.assertEqual(state, 'DEPLOYING')
+        self.assertEqual(self.live.read_bytes(), b'# changed by another editor')
+        self.transport.restart.assert_not_called()
+
+    def test_missing_generated_file_after_partial_publication_stops_recovery(self):
+        code, state, _ = self._run_cli_installation(interrupted_deployment=True,
+                                                    interruption='after-write', tamper='generated')
+        self.assertEqual(code, 10)
+        self.assertEqual(state, 'DEPLOYING')
+        self.transport.restart.assert_not_called()
+
+    def test_original_backup_must_survive_partial_publication(self):
+        code, state, output = self._run_cli_installation(interrupted_deployment=True,
+                                                         interruption='after-write', tamper='snapshot')
+        self.assertNotEqual(code, 0)
+        self.assertEqual(state, 'DEPLOYING')
+        self.assertIn('Original installation snapshot bytes differ', output)
+        self.transport.restart.assert_not_called()
+
     def test_cli_generated_and_exported_configs_never_render_completed_banner(self):
         from core.workflow_outcome import success
         for choice in ('none', 'local'):
@@ -328,6 +400,17 @@ class RecoveryPresentationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'checked first'):
                 kace.main()
             dashboard.assert_not_called()
+
+    def test_advanced_recompile_only_appears_for_legal_transitions(self):
+        import kace
+        for state, expected in [('DEPLOYING', False), ('READY_TO_DEPLOY', True)]:
+            checkpoint = {'state': state, 'wizard_data': {'mode': 'Advanced', 'language': 'English'}}
+            with patch('kace.load_checkpoint', return_value=checkpoint), \
+                 patch('firmware.detector.discover_mcu_hardware', return_value={}), \
+                 patch('kace.numbered_select', return_value='continue') as select, \
+                 patch.dict(os.environ, {'KACE_AUTO': '0'}):
+                kace._resume_firmware_workflow()
+            self.assertEqual('compile' in [item['value'] for item in select.call_args.kwargs['choices']], expected)
 
     def test_interrupted_resume_menu_exits_cleanly_without_writing_checkpoint(self):
         import copy
