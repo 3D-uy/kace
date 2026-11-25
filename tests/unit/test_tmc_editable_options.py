@@ -53,8 +53,8 @@ def test_explicit_settings_are_not_duplicated_or_replaced(tmp_path, interpolate)
 
 @pytest.mark.parametrize("language,expected", [
     ("English", ("interpolate to 256", "Standstill current", "torque/accuracy", "quieter")),
-    ("Español", ("interpolación", "Corriente en reposo", "par/precisión", "silencioso")),
-    ("Português", ("interpolação", "Corrente em repouso", "torque/precisão", "silencioso")),
+    ("Español", ("interpolacion", "Corriente en reposo", "par/precision", "silencioso")),
+    ("Português", ("interpolacao", "Corrente em repouso", "torque/precisao", "silencioso")),
 ])
 @pytest.mark.parametrize("model", ["TMC2209", "TMC2225"])
 def test_socket_options_and_explanations_are_available_in_each_language(tmp_path, monkeypatch, language, expected, model):

@@ -20,9 +20,9 @@ def section(text, axis):
 @pytest.mark.parametrize('axis', 'xyz')
 @pytest.mark.parametrize('endstop,expected', [('0', 'false'), ('320', 'true')])
 @pytest.mark.parametrize('language,guidance', [
-    ('English', 'Automatic homing:'),
-    ('Español', 'Homing automático:'),
-    ('Português', 'Homing automático:'),
+    ('English', '# Automatic homing: Klipper infers direction from the endstop and travel limits.'),
+    ('Español', '# Homing automatico: Klipper deduce la direccion del endstop y los limites de recorrido.'),
+    ('Português', '# Homing automatico: Klipper deduz a direcao pelo endstop e pelos limites de curso.'),
 ])
 def test_automatic_direction_is_localized_and_commented(tmp_path, axis, endstop, expected, language, guidance):
     user = _user(**{f'{axis}_position_min': '0', f'{axis}_position_max': '320',
