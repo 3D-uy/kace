@@ -66,7 +66,9 @@ def test_existing_include_comment_user_content_and_save_config_survive_relocatio
 
 
 def test_without_selected_dashboard_preserved_mainsail_uses_empty_components_section():
-    hardware = generated('Português', '\n').replace(b'[include mainsail.cfg]\n', b'')
+    # A saved Portuguese artifact from before ASCII headings were introduced.
+    hardware = generated('Português', '\n').replace(b'Componentes Incluidos', 'Componentes Incluídos'.encode())
+    hardware = hardware.replace(b'[include mainsail.cfg]\n', b'')
     old = b'# KACE layout: root-v1\n[include mainsail.cfg]\n'
     plan = build_managed_config_plan(hardware, None, {ROOT_REMOTE: old, 'mainsail.cfg': b''})
     root = plan.artifacts[0].content

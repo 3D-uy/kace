@@ -1,6 +1,8 @@
 # core/translations/_t.py
 # t() lookup function and translate_comment() translation layer.
 
+import unicodedata
+
 import core.translations._state as _state
 from core.translations._strings import UI_STRINGS
 
@@ -22,13 +24,38 @@ def t(key: str, **kwargs) -> str:
     return text.format(**kwargs) if kwargs else text
 
 
-# ── Comment translation layer (unchanged) ─────────────────────
+_CFG_SYMBOLS = str.maketrans({
+    "—": "-", "–": "-", "−": "-", "→": "->", "≥": ">=", "≤": "<=", "≈": "~",
+    "’": "'", "“": '"', "”": '"', "°": " deg ", "µ": "u",
+})
+
+
+def cfg_text(text: str) -> str:
+    """Format KACE-authored prose for CFG files, preserving technical comparisons."""
+    if text.isascii():
+        return text
+    decomposed = unicodedata.normalize("NFKD", text.translate(_CFG_SYMBOLS))
+    plain = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return plain.encode("ascii", errors="backslashreplace").decode("ascii")
 
 def translate_comment(comment, lang):
+    """Translate generated prose. Unknown text can contain source configuration."""
+    localized = _localized_comment(comment, lang)
+    header_prefixes = ("Board:", "Kinematics:", "Stepper Drivers:", "Probe:", "Z Drivers:", "Z Motors:")
+    if localized != comment or comment.startswith(header_prefixes):
+        return cfg_text(localized)
+    return comment
+
+
+def _localized_comment(comment, lang):
     if lang == "English":
         return comment
 
     translations = {
+        "KACE Starter Macros": {
+            "Español": "Macros iniciales de KACE",
+            "Português": "Macros iniciais do KACE",
+        },
         "Value provenance (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | INFERRED | UNRESOLVED):": {
             "Español": "Origen de valores (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | INFERRED | UNRESOLVED):",
             "Português": "Origem dos valores (PROFILE | USER_OVERRIDE | SAFE_DEFAULT | INFERRED | UNRESOLVED):",
@@ -372,33 +399,33 @@ def translate_comment(comment, lang):
             "Español": "Define los alias para los pines de la placa (ej., conectores EXP1 y EXP2)",
             "Português": "Define os aliases para os pinos da placa (ex., conectores EXP1 e EXP2)"
         },
-        "filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)": {
-            "Español": "filamento por revolución del motor (mm) --- configuración manual --- (calibrar extruyendo 100mm)",
-            "Português": "filamento por revolução do motor (mm) --- configuração manual --- (calibrar extrusando 100mm)"
+        "filament per motor revolution (mm), manual configuration (calibrate by extruding 100mm)": {
+            "Español": "filamento por revolución del motor (mm), configuración manual (calibrar extruyendo 100mm)",
+            "Português": "filamento por revolução do motor (mm), configuração manual (calibrar extrusando 100mm)"
         },
-        "PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=extruder TARGET=200)": {
-            "Español": "PID proporcional --- configuración manual --- (ejecutar PID_CALIBRATE HEATER=extruder TARGET=200)",
-            "Português": "PID proporcional --- configuração manual --- (executar PID_CALIBRATE HEATER=extruder TARGET=200)"
+        "PID proportional, manual configuration (run PID_CALIBRATE HEATER=extruder TARGET=200)": {
+            "Español": "PID proporcional, configuración manual (ejecutar PID_CALIBRATE HEATER=extruder TARGET=200)",
+            "Português": "PID proporcional, configuração manual (executar PID_CALIBRATE HEATER=extruder TARGET=200)"
         },
-        "PID integral --- manual configuration --- (run PID_CALIBRATE)": {
-            "Español": "PID integral --- configuración manual --- (ejecutar PID_CALIBRATE)",
-            "Português": "PID integral --- configuração manual --- (executar PID_CALIBRATE)"
+        "PID integral, manual configuration (run PID_CALIBRATE)": {
+            "Español": "PID integral, configuración manual (ejecutar PID_CALIBRATE)",
+            "Português": "PID integral, configuração manual (executar PID_CALIBRATE)"
         },
-        "PID derivative --- manual configuration --- (run PID_CALIBRATE)": {
-            "Español": "PID derivativo --- configuración manual --- (ejecutar PID_CALIBRATE)",
-            "Português": "PID derivativo --- configuração manual --- (executar PID_CALIBRATE)"
+        "PID derivative, manual configuration (run PID_CALIBRATE)": {
+            "Español": "PID derivativo, configuración manual (ejecutar PID_CALIBRATE)",
+            "Português": "PID derivativo, configuração manual (executar PID_CALIBRATE)"
         },
-        "distance from nozzle to probe in X (mm) --- manual configuration --- (measure physically from nozzle to probe tip)": {
-            "Español": "distancia de la boquilla al sensor en X (mm) --- configuración manual --- (medir físicamente desde la boquilla hasta la punta del sensor)",
-            "Português": "distância do bico ao sensor em X (mm) --- configuração manual --- (medir fisicamente do bico até a ponta do sensor)"
+        "distance from nozzle to probe in X (mm), manual configuration (measure physically from nozzle to probe tip)": {
+            "Español": "distancia de la boquilla al sensor en X (mm), configuración manual (medir físicamente desde la boquilla hasta la punta del sensor)",
+            "Português": "distância do bico ao sensor em X (mm), configuração manual (medir fisicamente do bico até a ponta do sensor)"
         },
-        "distance from nozzle to probe in Y (mm) --- manual configuration --- (measure physically from nozzle to probe tip)": {
-            "Español": "distancia de la boquilla al sensor en Y (mm) --- configuración manual --- (medir físicamente desde la boquilla hasta la punta del sensor)",
-            "Português": "distância do bico ao sensor em Y (mm) --- configuração manual --- (medir fisicamente do bico até a ponta do sensor)"
+        "distance from nozzle to probe in Y (mm), manual configuration (measure physically from nozzle to probe tip)": {
+            "Español": "distancia de la boquilla al sensor en Y (mm), configuración manual (medir físicamente desde la boquilla hasta la punta del sensor)",
+            "Português": "distância do bico ao sensor em Y (mm), configuração manual (medir fisicamente do bico até a ponta do sensor)"
         },
-        "nozzle to bed distance (mm) --- manual configuration --- (set using PROBE_CALIBRATE)": {
-            "Español": "distancia de la boquilla a la cama (mm) --- configuración manual --- (configurar usando PROBE_CALIBRATE)",
-            "Português": "distância do bico à mesa (mm) --- configuração manual --- (configurar usando PROBE_CALIBRATE)"
+        "nozzle to bed distance (mm), manual configuration (set using PROBE_CALIBRATE)": {
+            "Español": "distancia de la boquilla a la cama (mm), configuración manual (configurar usando PROBE_CALIBRATE)",
+            "Português": "distância do bico à mesa (mm), configuração manual (configurar usando PROBE_CALIBRATE)"
         },
         "Probe speed in mm/s": {
             "Español": "Velocidad de prueba en mm/s",
@@ -408,21 +435,21 @@ def translate_comment(comment, lang):
             "Español": "Altura de Z antes de moverse al siguiente punto",
             "Português": "Altura de Z antes de mover para o próximo ponto"
         },
-        "probing area start (mm) --- manual configuration --- (must be inside bed limits)": {
-            "Español": "inicio del área de prueba (mm) --- configuración manual --- (debe estar dentro de los límites de la cama)",
-            "Português": "início da área de teste (mm) --- configuração manual --- (deve estar dentro dos limites da mesa)"
+        "probing area start (mm), manual configuration (must be inside bed limits)": {
+            "Español": "inicio del área de prueba (mm), configuración manual (debe estar dentro de los límites de la cama)",
+            "Português": "início da área de teste (mm), configuração manual (deve estar dentro dos limites da mesa)"
         },
-        "probing area end (mm) --- manual configuration --- (must be inside bed limits)": {
-            "Español": "fin del área de prueba (mm) --- configuración manual --- (debe estar dentro de los límites de la cama)",
-            "Português": "fim da área de teste (mm) --- configuração manual --- (deve estar dentro dos limites da mesa)"
+        "probing area end (mm), manual configuration (must be inside bed limits)": {
+            "Español": "fin del área de prueba (mm), configuración manual (debe estar dentro de los límites de la cama)",
+            "Português": "fim da área de teste (mm), configuração manual (deve estar dentro dos limites da mesa)"
         },
         "Probe grid size": {
             "Español": "Tamaño de la cuadrícula de prueba",
             "Português": "Tamanho da grade de teste"
         },
-        "--- optional --- (automatic Z leveling for multiple motors)": {
-            "Español": "--- opcional --- (nivelación automática de Z para múltiples motores)",
-            "Português": "--- opcional --- (nivelamento automático de Z para múltiplos motores)"
+        "Optional (automatic Z leveling for multiple motors)": {
+            "Español": "Opcional (nivelación automática de Z para múltiples motores)",
+            "Português": "Opcional (nivelamento automático de Z para múltiplos motores)"
         },
         "Locations of the bed pivot points": {
             "Español": "Ubicaciones de los puntos de pivote de la cama",
@@ -440,9 +467,9 @@ def translate_comment(comment, lang):
             "Español": "Altura Z para despejar la cama al moverse",
             "Português": "Altura Z para limpar a mesa ao se mover"
         },
-        "--- optional --- (for CoreXY gantry leveling)": {
-            "Español": "--- opcional --- (para nivelación de pórtico CoreXY)",
-            "Português": "--- opcional --- (para nivelamento de pórtico CoreXY)"
+        "Optional (for CoreXY gantry leveling)": {
+            "Español": "Opcional (para nivelación de pórtico CoreXY)",
+            "Português": "Opcional (para nivelamento de pórtico CoreXY)"
         },
         "Locations of the gantry pivot points": {
             "Español": "Ubicaciones de los puntos de pivote del pórtico",
@@ -452,21 +479,21 @@ def translate_comment(comment, lang):
             "Español": "Puntos de prueba para la nivelación del pórtico",
             "Português": "Pontos de teste para o nivelamento do pórtico"
         },
-        "bed PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=heater_bed TARGET=60)": {
-            "Español": "PID proporcional de la cama --- configuración manual --- (ejecutar PID_CALIBRATE HEATER=heater_bed TARGET=60)",
-            "Português": "PID proporcional da mesa --- configuração manual --- (executar PID_CALIBRATE HEATER=heater_bed TARGET=60)"
+        "bed PID proportional, manual configuration (run PID_CALIBRATE HEATER=heater_bed TARGET=60)": {
+            "Español": "PID proporcional de la cama, configuración manual (ejecutar PID_CALIBRATE HEATER=heater_bed TARGET=60)",
+            "Português": "PID proporcional da mesa, configuração manual (executar PID_CALIBRATE HEATER=heater_bed TARGET=60)"
         },
-        "bed PID integral --- manual configuration --- (run PID_CALIBRATE)": {
-            "Español": "PID integral de la cama --- configuración manual --- (ejecutar PID_CALIBRATE)",
-            "Português": "PID integral da mesa --- configuração manual --- (executar PID_CALIBRATE)"
+        "bed PID integral, manual configuration (run PID_CALIBRATE)": {
+            "Español": "PID integral de la cama, configuración manual (ejecutar PID_CALIBRATE)",
+            "Português": "PID integral da mesa, configuração manual (executar PID_CALIBRATE)"
         },
-        "bed PID derivative --- manual configuration --- (run PID_CALIBRATE)": {
-            "Español": "PID derivativo de la cama --- configuración manual --- (ejecutar PID_CALIBRATE)",
-            "Português": "PID derivativo da mesa --- configuração manual --- (executar PID_CALIBRATE)"
+        "bed PID derivative, manual configuration (run PID_CALIBRATE)": {
+            "Español": "PID derivativo de la cama, configuración manual (ejecutar PID_CALIBRATE)",
+            "Português": "PID derivativo da mesa, configuração manual (executar PID_CALIBRATE)"
         },
-        "motor current (A) --- manual configuration --- (check motor specs)": {
-            "Español": "corriente del motor (A) --- configuración manual --- (verificar especificaciones)",
-            "Português": "corrente do motor (A) --- configuração manual --- (verificar especificações)"
+        "motor current (A), manual configuration (check motor specs)": {
+            "Español": "corriente del motor (A), configuración manual (verificar especificaciones)",
+            "Português": "corrente do motor (A), configuração manual (verificar especificações)"
         },
         "Includes": {
             "Español": "Componentes Incluidos",
@@ -548,7 +575,7 @@ def translate_comment(comment, lang):
             "Español": "descomente y ajuste según sea necesario. NO descomente sin leer",
             "Português": "descomente e ajuste conforme necessário. NÃO descomente sem ler"
         },
-        "the note above each block — some require physical calibration.": {
+        "the note above each block - some require physical calibration.": {
             "Español": "la nota sobre cada bloque — algunos requieren calibración física.",
             "Português": "a nota acima de cada bloco — alguns requerem calibração física."
         },
@@ -560,13 +587,13 @@ def translate_comment(comment, lang):
             "Español": "Relación de transmisión del extrusor",
             "Português": "Relação de transmissão da extrusora"
         },
-        "distance from nozzle to probe in X (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)": {
-            "Español": "distancia de la boquilla al sensor en X (mm) --- configurado en el asistente de KACE --- (volver a medir físicamente si se mueve el sensor)",
-            "Português": "distância do bico ao sensor em X (mm) --- configurado no assistente do KACE --- (medir fisicamente novamente se o sensor for movido)"
+        "distance from nozzle to probe in X (mm), set in KACE wizard (re-measure physically if probe is moved)": {
+            "Español": "distancia de la boquilla al sensor en X (mm), configurado en el asistente de KACE (volver a medir físicamente si se mueve el sensor)",
+            "Português": "distância do bico ao sensor em X (mm), configurado no assistente do KACE (medir fisicamente novamente se o sensor for movido)"
         },
-        "distance from nozzle to probe in Y (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)": {
-            "Español": "distancia de la boquilla al sensor en Y (mm) --- configurado en el asistente de KACE --- (volver a medir físicamente si se mueve el sensor)",
-            "Português": "distância do bico ao sensor em Y (mm) --- configurado no assistente do KACE --- (medir fisicamente novamente se o sensor for movido)"
+        "distance from nozzle to probe in Y (mm), set in KACE wizard (re-measure physically if probe is moved)": {
+            "Español": "distancia de la boquilla al sensor en Y (mm), configurado en el asistente de KACE (volver a medir físicamente si se mueve el sensor)",
+            "Português": "distância do bico ao sensor em Y (mm), configurado no assistente do KACE (medir fisicamente novamente se o sensor for movido)"
         },
         "Tension of the bicubic curve": {
             "Español": "Tensión de la curva bicúbica",
@@ -644,9 +671,9 @@ def translate_comment(comment, lang):
             "Español": "conector EXP2",
             "Português": "conector EXP2"
         },
-        "--- optional ---": {
-            "Español": "--- opcional ---",
-            "Português": "--- opcional ---"
+        "Optional": {
+            "Español": "Opcional",
+            "Português": "Opcional"
         },
         "Automatic gantry leveling when 2 or more independent Z motors are present.": {
             "Español": "Nivelación automática del gantry cuando hay 2 o más motores Z independientes.",
@@ -660,7 +687,7 @@ def translate_comment(comment, lang):
             "Español": "Descomenta esta sección y ejecuta Z_TILT_ADJUST desde la consola de Klipper para usarla.",
             "Português": "Descomente esta seção e execute Z_TILT_ADJUST no console do Klipper para usá-la."
         },
-        "IMPORTANT — z_positions are NOT nozzle travel coordinates.": {
+        "IMPORTANT - z_positions are NOT nozzle travel coordinates.": {
             "Español": "IMPORTANTE — z_positions NO son coordenadas de movimiento del nozzle.",
             "Português": "IMPORTANTE — z_positions NÃO são coordenadas de movimento do bico."
         },

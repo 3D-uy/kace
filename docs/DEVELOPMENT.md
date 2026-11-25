@@ -704,6 +704,12 @@ the existing column 49 (one-based), or one space after longer values; imported
 custom probe blocks remain verbatim. `tests/unit/test_generated_pin_comments.py`
 covers generation, translation, alignment and preservation of pin values.
 
+KACE writes its own CFG comments and starter macro descriptions in the selected
+language using ASCII. Use plain section titles and spell out safety warnings.
+Apply `cfg_text` to generated prose, keeping pin syntax, G-code and imported
+configuration values intact. Electrical comparisons such as `>=` and `<=`
+must retain their meaning.
+
 Sensorless homing uses the existing TMC virtual-endstop validator in generation
 and effective review. An active sensorless rail requires explicit
 `homing_retract_dist=0` on its primary stepper section (Klipper defaults to 5).

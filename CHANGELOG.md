@@ -9,6 +9,9 @@ uncommitted changes or current CI, packaging or physical qualification.
 
 ## [0.10.0-rc.1] - 2026-11-16 (preparation; unpublished)
 
+- Generate plain ASCII section headings, comments, display warnings and starter
+  macro descriptions in English, Spanish and Portuguese. Preserve custom probe
+  blocks, source values and G-code.
 - Add explicit configuration-only generation and recovery from a completed
   installation, with separate operation receipts and fresh validation. Preserve
   the installation checkpoint and frozen recovery artifacts.

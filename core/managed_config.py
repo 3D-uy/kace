@@ -310,7 +310,7 @@ def _inline_default_includes(generated: str, directives: list[str], newline: str
     """Put defaults under the generated Includes heading, before hardware options."""
     if not directives:
         return generated
-    from core.translations import translate_comment
+    from core.translations import cfg_text, translate_comment
 
     headings = {"# " + translate_comment("Includes", language)
                 for language in ("English", "Español", "Português")}
@@ -318,7 +318,8 @@ def _inline_default_includes(generated: str, directives: list[str], newline: str
     for index, line in enumerate(lines):
         if _SECTION_RE.match(line):
             break  # A later comment must never move defaults after active options.
-        if line.strip() in headings:
+        # Previously generated Portuguese headings can still contain accents.
+        if cfg_text(line.strip()) in headings:
             insertion = index + 1
             if insertion < len(lines) and re.fullmatch(r"\s*#\s*[-=─]+\s*", lines[insertion]):
                 insertion += 1

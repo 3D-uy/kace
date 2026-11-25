@@ -95,7 +95,7 @@ def test_virtual_endstop_comments_do_not_suggest_gpio_prefixes(tmp_path, languag
 @pytest.mark.parametrize('language', ['English', 'Español', 'Português'])
 def test_comments_preserve_long_names_option_examples_and_custom_bytes(language):
     set_lang(language)
-    custom = '[probe]\r\npin: ^!tool:STOP # original\r\nz_offset: 1.25\r\n'
+    custom = '[probe]\r\npin: ^!tool:STOP # medición → posição\r\nz_offset: 1.25\r\n'
     pin = '!' + 'controller_'*6 + ':PA1'
     source = (f'dir_pin: {pin} # Direction signal; ! reverses motor rotation (e.g. !PA1)\n'
               '# homing_speed: 20 # Maximum velocity (in mm/s) of the stepper when homing\n'
@@ -108,6 +108,29 @@ def test_comments_preserve_long_names_option_examples_and_custom_bytes(language)
     assert first.index('#') == len(f'dir_pin: {pin}') + 1
     assert second.startswith('# homing_speed: 20')
     assert second.index('#', 1) == 48
+
+
+@pytest.mark.parametrize('language,macro_title,pid_description', [
+    ('English', 'KACE Starter Macros', 'PID Calibration for the hotend'),
+    ('Español', 'Macros iniciales de KACE', 'Calibracion PID para el hotend'),
+    ('Português', 'Macros iniciais do KACE', 'Calibracao PID para o hotend'),
+])
+def test_generated_files_use_plain_localized_prose(tmp_path, language, macro_title, pid_description):
+    set_lang(language)
+    user = data(4)
+    path = tmp_path / 'printer.cfg'
+    generate_config(user['board_parsed'], user, output_path=str(path), include_macros=True, verbose=False)
+    printer = path.read_text(encoding='utf-8')
+    macros = path.with_name('macros.cfg').read_text(encoding='utf-8')
+    for text in (printer, macros):
+        for line in text.splitlines():
+            if '#' in line:
+                comment = line.partition('#')[2]
+                assert comment.isascii(), line
+                assert not re.fullmatch(r'\s*[-=]{5,}\s*', comment), line
+    assert macros.startswith(f'# {macro_title}\n')
+    assert f'# {pid_description}\n[gcode_macro PID_HOTEND]\ndescription: {pid_description}\n' in macros
+    assert all(line.isascii() for line in macros.splitlines() if line.startswith('description:'))
 
 
 def test_endstop_helper_emits_only_one_comment_line():

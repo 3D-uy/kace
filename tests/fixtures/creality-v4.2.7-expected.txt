@@ -5,21 +5,15 @@
 # Probe: BLTouch
 # Z Drivers: 1
 
-# --------------------------------------------------
 # Includes
-# --------------------------------------------------
 
 
 
-# --------------------------------------------------
 # MCU
-# --------------------------------------------------
 [mcu]
 serial: /dev/serial/by-id/usb-Klipper_stm32f103xe_mock-if00 # Serial connection to the printer controller board. Auto-detected by KACE. Verify in /dev/serial/by-id/ if connection fails.
 
-# --------------------------------------------------
 # Printer
-# --------------------------------------------------
 
 [printer]
 kinematics: cartesian                           # Printer kinematics type (cartesian, corexy)
@@ -28,9 +22,7 @@ max_accel: 500                                  # Maximum acceleration (in mm/s^
 max_z_velocity: 5                               # Maximum velocity (in mm/s) of movement along the z axis
 max_z_accel: 100                                # Maximum acceleration (in mm/s^2) of movement along the z axis
 
-# --------------------------------------------------
 # Native utility features
-# --------------------------------------------------
 
 [exclude_object]
 
@@ -38,9 +30,7 @@ max_z_accel: 100                                # Maximum acceleration (in mm/s^
 enable_force_move: False
 
 
-# --------------------------------------------------
 # Steppers
-# --------------------------------------------------
 
 [stepper_x]
 step_pin: PC2                                   # Step signal; ! inverts pulse polarity (e.g. !PA1), only if required by the driver
@@ -91,26 +81,24 @@ enable_pin: !PC3                                # Driver enable; ! means active-
 heater_pin: PA1                                 # Pin connected to the hotend heater cartridge
 sensor_pin: PC5                                 # Pin connected to the hotend thermistor
 microsteps: 16                                  # Number of microsteps per full step
-rotation_distance: 33.500                       # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
+rotation_distance: 33.500                       # filament per motor revolution (mm), manual configuration (calibrate by extruding 100mm)
 nozzle_diameter: 0.400                          # Diameter of the installed nozzle in mm
 filament_diameter: 1.750                        # Diameter of the filament being used
 sensor_type: EPCOS 100K B57560G104F             # Type of thermistor used for the hotend
 control: pid                                    # Temperature control algorithm
-pid_Kp: 21.527                                  # PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=extruder TARGET=200)
-pid_Ki: 1.063                                   # PID integral --- manual configuration --- (run PID_CALIBRATE)
-pid_Kd: 108.982                                 # PID derivative --- manual configuration --- (run PID_CALIBRATE)
+pid_Kp: 21.527                                  # PID proportional, manual configuration (run PID_CALIBRATE HEATER=extruder TARGET=200)
+pid_Ki: 1.063                                   # PID integral, manual configuration (run PID_CALIBRATE)
+pid_Kd: 108.982                                 # PID derivative, manual configuration (run PID_CALIBRATE)
 min_temp: 0                                     # Minimum safe temperature
 max_temp: 250                                   # Maximum safe temperature
-# --------------------------------------------------
 # Probe & Bed Leveling
-# --------------------------------------------------
 
 [bltouch]
 sensor_pin: ^PB1                                # Pin connected to the probe sensor
 control_pin: PB0                                # Pin connected to the probe control
-x_offset: 0                                     # distance from nozzle to probe in X (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
-y_offset: 0                                     # distance from nozzle to probe in Y (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
-z_offset: 0                                     # nozzle to bed distance (mm) --- manual configuration --- (set using PROBE_CALIBRATE)
+x_offset: 0                                     # distance from nozzle to probe in X (mm), set in KACE wizard (re-measure physically if probe is moved)
+y_offset: 0                                     # distance from nozzle to probe in Y (mm), set in KACE wizard (re-measure physically if probe is moved)
+z_offset: 0                                     # nozzle to bed distance (mm), manual configuration (set using PROBE_CALIBRATE)
 
 [safe_z_home]
 home_xy_position: 117.5, 117.5                  # Nozzle coordinate that centers the probe within its reachable bed area
@@ -131,24 +119,20 @@ fade_start: 1                                   # Z height at which to start fad
 fade_end: 10                                    # Z height at which mesh leveling is completely disabled
 fade_target: 0                                  # Target Z offset to fade towards
 
-# --------------------------------------------------
 # Heated Bed
-# --------------------------------------------------
 
 [heater_bed]
 heater_pin: PA2                                 # Pin connected to the heated bed solid state relay or MOSFET
 sensor_pin: PC4                                 # Pin connected to the heated bed thermistor
 sensor_type: EPCOS 100K B57560G104F             # Type of thermistor used for the heated bed
 control: pid                                    # Temperature control algorithm
-pid_Kp: 54.027                                  # bed PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=heater_bed TARGET=60)
-pid_Ki: 0.770                                   # bed PID integral --- manual configuration --- (run PID_CALIBRATE)
-pid_Kd: 948.182                                 # bed PID derivative --- manual configuration --- (run PID_CALIBRATE)
+pid_Kp: 54.027                                  # bed PID proportional, manual configuration (run PID_CALIBRATE HEATER=heater_bed TARGET=60)
+pid_Ki: 0.770                                   # bed PID integral, manual configuration (run PID_CALIBRATE)
+pid_Kd: 948.182                                 # bed PID derivative, manual configuration (run PID_CALIBRATE)
 min_temp: 0                                     # Minimum safe temperature
 max_temp: 130                                   # Maximum safe temperature
 
-# --------------------------------------------------
 # EXP1 / EXP2 Pinout
-# --------------------------------------------------
 # [board_pins]
 # aliases:
 # EXP1 header
@@ -158,9 +142,7 @@ max_temp: 130                                   # Maximum safe temperature
 #     EXP2_1=TODO, EXP2_3=TODO, EXP2_5=TODO, EXP2_7=TODO, EXP2_9=<GND>,
 #     EXP2_2=TODO, EXP2_4=TODO, EXP2_6=TODO, EXP2_8=TODO, EXP2_10=<5V>
 
-# ==============================
 # REQUIRED CALIBRATION STEPS
-# ==============================
 # 1. Calibrate extruder (rotation_distance)
 # 2. Run PID_CALIBRATE for hotend
 # 3. Run PID_CALIBRATE for heater bed

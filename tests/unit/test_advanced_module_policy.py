@@ -3,6 +3,7 @@ import pytest
 
 from core.advanced_module_handler import get_advanced_sections, is_unsupported_section
 from core.loader import load_advanced_modules_yaml, load_displays_yaml
+from core.translations import get_lang, set_lang
 
 
 @pytest.mark.parametrize("module, emits, unsupported", [
@@ -31,6 +32,27 @@ def test_pca9685_reference_explicitly_forbids_activation_and_replication_guess()
     entry = load_displays_yaml()["display_configs"]["pca9685"]
     assert entry["status"] == "unsupported"
     assert entry["compatibility_class"] != "fully_compatible"
+
+
+@pytest.mark.parametrize("language, reference, warning", [
+    ("English", "Reference only", "Do not uncomment"),
+    ("Español", "Solo como referencia", "No la descomentes"),
+    ("Português", "Apenas para referencia", "Nao a descomente"),
+])
+def test_rendered_module_notes_are_plain_and_fields_keep_source_text(language, reference, warning):
+    previous = get_lang()
+    try:
+        set_lang(language)
+        for module in ("neopixel", "dotstar", "adxl345", "sx1509", "pca9685"):
+            name = f"{module} señal"
+            block, = get_advanced_sections({name: {"description": "Potência ≥ 1"}})
+            prose, source = block.split(f"# [{name}]\n")
+            assert prose.isascii()
+            assert "-----" not in prose
+            assert (warning if module == "pca9685" else reference) in prose
+            assert source == "# description: Potência ≥ 1\n"
+    finally:
+        set_lang(previous)
 
 
 @pytest.mark.parametrize("module", ["neopixel", "dotstar", "adxl345", "sx1509", "pca9685"])

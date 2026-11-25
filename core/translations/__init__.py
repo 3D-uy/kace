@@ -36,4 +36,4 @@ UI_STRINGS.update(CATALOG_REVIEW_STRINGS)
 UI_STRINGS.update(SOFTWARE_PRESENTATION_STRINGS)
 UI_STRINGS.update(MOTOR_DIRECTION_STRINGS)
 
-from core.translations._t import t, translate_comment  # noqa: F401
+from core.translations._t import cfg_text, t, translate_comment  # noqa: F401

@@ -18,6 +18,7 @@
 #    upstream_section: false → no native section; UNSUPPORTED even if preserved
 #    banner         : human-readable label for the comment header
 #    note           : one-line note shown above the commented block
+#    translations   : localized banner and note for generated comments
 #    fields         : ordered field names to emit. Use ["*"] to emit all.
 # ============================================================
 
@@ -31,6 +32,19 @@ advanced_modules:
       Reference only. Neopixel fields preserved as comments.
       A manual configuration requires verified module wiring, pin, chain_count,
       color_order and any dependent sections; this block is not validated for activation.
+    translations:
+      Español:
+        banner: "LED Neopixel / WS2812"
+        note: >
+          Solo como referencia. Los campos de Neopixel se conservan como comentarios.
+          Para configurarlo a mano, verifica el cableado del módulo, pin, chain_count,
+          color_order y las secciones dependientes. Este bloque no está validado para su activación.
+      Português:
+        banner: "LED Neopixel / WS2812"
+        note: >
+          Apenas para referência. Os campos de Neopixel são mantidos como comentários.
+          Para configurar o módulo manualmente, verifique a ligação elétrica, pin, chain_count,
+          color_order e as seções dependentes. Este bloco não foi validado para ativação.
     fields:
       - pin
       - chain_count
@@ -49,6 +63,19 @@ advanced_modules:
       Reference only. DotStar fields preserved as comments.
       A manual configuration requires verified wiring, data_pin, clock_pin,
       chain_count and dependent sections; this block is not validated for activation.
+    translations:
+      Español:
+        banner: "LED DotStar / APA102"
+        note: >
+          Solo como referencia. Los campos de DotStar se conservan como comentarios.
+          Para configurarlo a mano, verifica el cableado, data_pin, clock_pin, chain_count
+          y las secciones dependientes. Este bloque no está validado para su activación.
+      Português:
+        banner: "LED DotStar / APA102"
+        note: >
+          Apenas para referência. Os campos de DotStar são mantidos como comentários.
+          Para configurar o módulo manualmente, verifique a ligação elétrica, data_pin, clock_pin,
+          chain_count e as seções dependentes. Este bloco não foi validado para ativação.
     fields:
       - data_pin
       - clock_pin
@@ -66,6 +93,19 @@ advanced_modules:
       Reference only. ADXL345 fields preserved as comments.
       Verify the sensor, MCU and SPI configuration independently. Resonance testing
       requires additional configuration and calibration outside this passthrough.
+    translations:
+      Español:
+        banner: "Acelerómetro ADXL345 (Input Shaper)"
+        note: >
+          Solo como referencia. Los campos del ADXL345 se conservan como comentarios.
+          Verifica por separado el sensor, la MCU y la configuración SPI. La prueba de
+          resonancias requiere configuración y calibración adicionales.
+      Português:
+        banner: "Acelerômetro ADXL345 (Input Shaper)"
+        note: >
+          Apenas para referência. Os campos do ADXL345 são mantidos como comentários.
+          Verifique separadamente o sensor, a MCU e a configuração SPI. O teste de
+          ressonância exige configuração e calibração adicionais.
     fields:
       - cs_pin
       - spi_bus
@@ -84,6 +124,19 @@ advanced_modules:
       This is not a valid standalone Klipper section. Do not uncomment.
       Source fields are retained only as an inactive reference. PCA9685 support
       is internal to Replicape; KACE does not convert this block into Replicape.
+    translations:
+      Español:
+        banner: "PCA9685 - Sección independiente no admitida"
+        note: >
+          Klipper no admite esta sección por sí sola. No la descomentes.
+          Los campos de origen se conservan como referencia inactiva. El soporte de
+          PCA9685 es interno a Replicape. KACE no convierte este bloque en una sección Replicape.
+      Português:
+        banner: "PCA9685 - Seção independente sem suporte"
+        note: >
+          O Klipper não aceita esta seção isoladamente. Não a descomente.
+          Os campos de origem são mantidos como referência inativa. O suporte a PCA9685
+          é interno ao Replicape. O KACE não converte este bloco em uma seção Replicape.
     fields:
       - i2c_bus
       - i2c_address
@@ -99,6 +152,19 @@ advanced_modules:
       Reference only. SX1509 fields preserved as comments.
       A manual configuration requires verified I2C MCU, bus, address and all
       consuming GPIO sections; this block is not validated for activation.
+    translations:
+      Español:
+        banner: "Expansor GPIO SX1509"
+        note: >
+          Solo como referencia. Los campos del SX1509 se conservan como comentarios.
+          Para configurarlo a mano, verifica la MCU, el bus y la dirección I2C, así como las
+          secciones que usan sus pines GPIO. Este bloque no está validado para su activación.
+      Português:
+        banner: "Expansor GPIO SX1509"
+        note: >
+          Apenas para referência. Os campos do SX1509 são mantidos como comentários.
+          Para configurar o módulo manualmente, verifique a MCU, o barramento e o endereço I2C,
+          além das seções que usam seus pinos GPIO. Este bloco não foi validado para ativação.
     fields:
       - i2c_bus
       - i2c_address

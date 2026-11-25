@@ -6,6 +6,8 @@ database is missing, malformed, or empty instead of selecting shadow defaults.
 
 import textwrap
 
+from core.translations import cfg_text, get_lang
+
 
 def _load_schemas() -> list:
     """Load and validate the authoritative advanced-module schemas."""
@@ -46,17 +48,14 @@ def _schema_for(section_name: str) -> dict | None:
 
 def _render_block(section_name: str, fields: dict, schema: dict) -> str:
     """Render one advanced section as a commented-out cfg block string."""
-    lines = []
-    banner = schema.get("banner", section_name)
-    note = schema.get("note", "").strip()
+    localized = schema.get("translations", {}).get(get_lang(), {})
+    banner = localized.get("banner", schema.get("banner", section_name))
+    note = localized.get("note", schema.get("note", ""))
     field_order = schema.get("fields", ["*"])
 
-    lines.append("# " + "-" * 50)
-    lines.append(f"# {banner}")
-    if note:
-        for wrapped_line in textwrap.wrap(note, width=70):
-            lines.append(f"# {wrapped_line}")
-    lines.append("# " + "-" * 50)
+    lines = [f"# {cfg_text(banner)}"]
+    for wrapped_line in textwrap.wrap(cfg_text(note.strip()), width=70):
+        lines.append(f"# {wrapped_line}")
     lines.append(f"# [{section_name}]")
 
     if "*" in field_order:

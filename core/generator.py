@@ -117,129 +117,66 @@ def _render_display_blocks(user_ctx, pins_ctx, parsed_data) -> str:
                 del pins_ctx[strip_key]
         return ""
 
-    if display_choice and display_choice not in (None,) and not display_choice.startswith("__"):
-        # Extract the section key from the wizard choice prefix
-        # e.g. "recommended:uc1701" → "uc1701"
-        colon_idx = display_choice.find(":")
-        wizard_display_key = display_choice[colon_idx + 1:] if colon_idx != -1 else None
+    from core.translations._display_comments import display_comment
 
-        if wizard_display_key:
-            # Build a display block for the wizard-chosen section.
-            # We don't require that section to exist in parsed_data —
-            # for manual/override picks the user is explicitly requesting it.
-            hw_info   = classify_hardware_combination(wizard_display_key, board_filename, parsed_data, user_ctx.get("mcu_type", ""))
-            comp_class = hw_info.get("compatibility_class", "experimental")
-
-            # Pull existing fields from parsed_data if the section exists there,
-            # otherwise generate a minimal commented block.
-            existing_key = None
-            for k in parsed_data:
-                if k.split()[0].lower() == wizard_display_key:
-                    existing_key = k
-                    break
-
-            fields = parsed_data.get(existing_key, {}) if existing_key else {}
-
-            lines = []
-            lines.append("# " + "=" * 60)
-            lines.append(f"# DISPLAY: {wizard_display_key.upper()}")
-            lines.append(f"# Compatibility: {comp_class.upper()}")
-            lines.append(f"# Selected by user during KACE display setup wizard")
-
-            if comp_class == "unsafe":
-                lines.append("# 🔴 DANGER: THIS COMBINATION IS UNSAFE / HIGH RISK!")
-                for risk in hw_info.get("damage_risks", []):
-                    lines.append(f"#    RISK: {risk}")
-                for mod in hw_info.get("required_modifications", []):
-                    lines.append(f"#    REQUIRED MODIFICATION: {mod}")
-            elif comp_class == "compatible_with_adapter":
-                lines.append("# 🟡 WARNING: ADAPTER OR WIRING MODIFICATION REQUIRED.")
-                for mod in hw_info.get("required_modifications", []):
-                    lines.append(f"#    REQUIRED: {mod}")
-            elif comp_class == "experimental":
-                lines.append("# 🟠 EXPERIMENTAL: Community reports only — outcome uncertain.")
-
-            for note in hw_info.get("notes", []):
-                lines.append(f"# Note: {note}")
-            lines.append("# " + "=" * 60)
-
-            if comp_class in ("unsafe", "compatible_with_adapter"):
-                lines.append(f"# [{wizard_display_key}]")
-                if fields:
-                    for k, v in fields.items():
-                        if "pin" in k.lower():
-                            lines.append(f"# {k}: TODO # WAS: {v}")
-                        else:
-                            lines.append(f"# {k}: {v}")
-                else:
-                    lines.append(f"# TODO: Configure [{wizard_display_key}] section manually")
-                    lines.append(f"# Refer to Klipper docs: Config_Reference.md#[display]")
-            else:
-                lines.append(f"[{wizard_display_key}]")
-                if fields:
-                    for k, v in fields.items():
-                        lines.append(f"{k}: {v}")
-                else:
-                    lines.append(f"# TODO: Add pin configuration for [{wizard_display_key}]")
-                    lines.append(f"# Refer to Klipper docs: Config_Reference.md#[display]")
-
-            display_blocks.append("\n".join(lines))
-
+    from_wizard = bool(display_choice and not display_choice.startswith("__"))
+    if from_wizard:
+        section = display_choice.partition(":")[2]
+        if not section:
+            return ""
+        fields = next((value for key, value in parsed_data.items()
+                       if key.split()[0].lower() == section), {})
+        displays = [(section, section, fields)]
     else:
-        # Fallback / auto mode: existing detection-based logic (no wizard choice)
-        detected_displays = detect_display_sections(parsed_data)
+        displays = [
+            (section, key, fields)
+            for section in detect_display_sections(parsed_data)
+            if section not in _WIZARD_SKIP_SECTIONS
+            for key, fields in parsed_data.items()
+            if key.split()[0].lower() == section and isinstance(fields, dict)
+        ]
 
-        for section in detected_displays:
-            if section in _WIZARD_SKIP_SECTIONS:
-                continue
-            matching_keys = [k for k in parsed_data if k.split()[0].lower() == section]
-            for full_key in matching_keys:
-                fields = parsed_data[full_key]
-                if not isinstance(fields, dict):
-                    continue
+    for section, full_key, fields in displays:
+        hw_info = classify_hardware_combination(section, board_filename, parsed_data, user_ctx.get("mcu_type", ""))
+        if not from_wizard and hw_info.get("hardware_evidence") == "unknown":
+            raise GenerationError("Unknown display hardware compatibility: board identity, interface and electrical evidence are required.")
+        comp_class = hw_info.get("compatibility_class", "experimental")
+        lines = ["# " + display_comment("DISPLAY: {section}", section=full_key.upper()),
+                 "# " + display_comment("Compatibility: {status}", status=display_comment(comp_class.upper()))]
+        if from_wizard:
+            lines.append("# " + display_comment("Selected by user during KACE display setup wizard"))
 
-                hw_info = classify_hardware_combination(section, board_filename, parsed_data, user_ctx.get("mcu_type", ""))
-                if hw_info.get("hardware_evidence") == "unknown":
-                    raise GenerationError("Unknown display hardware compatibility: board identity, interface and electrical evidence are required.")
-                comp_class = hw_info.get("compatibility_class", "experimental")
+        if comp_class == "unsafe":
+            lines.append("# " + display_comment("DANGER: THIS COMBINATION IS UNSAFE / HIGH RISK!"))
+            for risk in hw_info.get("damage_risks", []):
+                lines.append("#    " + display_comment("RISK: {detail}", detail=display_comment(risk)))
+        elif comp_class == "compatible_with_adapter":
+            lines.append("# " + display_comment("WARNING: ADAPTER OR WIRING MODIFICATION REQUIRED."))
+        elif comp_class == "experimental" and from_wizard:
+            lines.append("# " + display_comment("EXPERIMENTAL: Community reports only - outcome uncertain."))
 
-                lines = []
-                lines.append("# " + "=" * 60)
-                lines.append(f"# DISPLAY: {full_key.upper()}")
-                lines.append(f"# Compatibility: {comp_class.upper()}")
+        inactive = comp_class in ("unsafe", "compatible_with_adapter")
+        if inactive:
+            label = "REQUIRED MODIFICATION: {detail}" if comp_class == "unsafe" else "REQUIRED: {detail}"
+            for mod in hw_info.get("required_modifications", []):
+                lines.append("#    " + display_comment(label, detail=display_comment(mod)))
+        for note in hw_info.get("notes", []):
+            lines.append("# " + display_comment("Note: {detail}", detail=display_comment(note)))
 
-                if comp_class == "unsafe":
-                    lines.append("# 🔴 DANGER: THIS COMBINATION IS UNSAFE / HIGH RISK!")
-                    for risk in hw_info.get("damage_risks", []):
-                        lines.append(f"#    RISK: {risk}")
-                    for mod in hw_info.get("required_modifications", []):
-                        lines.append(f"#    REQUIRED MODIFICATION: {mod}")
-                elif comp_class == "compatible_with_adapter":
-                    lines.append("# 🟡 WARNING: ADAPTER OR WIRING MODIFICATION REQUIRED.")
-                    for mod in hw_info.get("required_modifications", []):
-                        lines.append(f"#    REQUIRED: {mod}")
+        prefix = "# " if inactive else ""
+        lines.append(f"{prefix}[{full_key}]")
+        for key, value in fields.items():
+            if inactive and "pin" in key.lower():
+                lines.append(f"# {key}: TODO # " + display_comment("WAS: {value}", value=value))
+            else:
+                lines.append(f"{prefix}{key}: {value}")
+        if from_wizard and not fields:
+            hint = "TODO: Configure [{section}] section manually" if inactive else "TODO: Add pin configuration for [{section}]"
+            lines.append("# " + display_comment(hint, section=full_key))
+            lines.append("# " + display_comment("Refer to Klipper docs: Config_Reference.md#[display]"))
+        display_blocks.append("\n".join(lines))
 
-                for note in hw_info.get("notes", []):
-                    lines.append(f"# Note: {note}")
-                lines.append("# " + "=" * 60)
-
-                if comp_class in ("unsafe", "compatible_with_adapter"):
-                    lines.append(f"# [{full_key}]")
-                    for k, v in fields.items():
-                        if "pin" in k.lower():
-                            lines.append(f"# {k}: TODO # WAS: {v}")
-                        else:
-                            lines.append(f"# {k}: {v}")
-                else:
-                    lines.append(f"[{full_key}]")
-                    for k, v in fields.items():
-                        lines.append(f"{k}: {v}")
-
-                display_blocks.append("\n".join(lines))
-
-    if display_blocks:
-        return "\n\n# ==================================================\n# DISPLAY HARDWARE SECTIONS\n# ==================================================\n" + "\n\n".join(display_blocks) + "\n"
-    return ""
+    return "\n\n" + "\n\n".join(display_blocks) + "\n" if display_blocks else ""
 
 def generate_config(parsed_data, user_data, output_path=None, include_macros=False, verbose=True, *, thermal_review_only=False):
     """Generate printer.cfg from parsed config and user data using Jinja2."""

@@ -19,9 +19,7 @@ Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both
 #   {{ key }}={{ source }}
 {% endfor %}
 {% endif %}
-# --------------------------------------------------
 # Includes
-# --------------------------------------------------
 {% if user.web_interface == 'Mainsail' -%}
 [include mainsail.cfg]
 {% elif user.web_interface == 'Fluidd' -%}
@@ -29,9 +27,7 @@ Endstop; ^PA1: internal pull-up; !PA1: inverted logic; ^!PA1: both
 {%- endif %}
 {# Generated macros are included by the deployment-managed root block. #}
 
-# --------------------------------------------------
 # MCU
-# --------------------------------------------------
 {%- for name, options in pins['_custom_thermistors'].items() %}
 [{{ name }}]
 {% for option, value in options.items() %}{{ option }}: {{ value }}
@@ -58,9 +54,7 @@ serial: {{ user.mcu_path | default('/dev/serial/by-id/TODO') }} # Serial connect
 {% endfor %}
 {% endfor %}
 
-# --------------------------------------------------
 # Printer
-# --------------------------------------------------
 
 [printer]
 kinematics: {{ user.kinematics }} # Printer kinematics type (cartesian, corexy)
@@ -72,9 +66,7 @@ minimum_cruise_ratio: {{ user.minimum_cruise_ratio }}
 max_z_velocity: {{ user.max_z_velocity }} # Maximum velocity (in mm/s) of movement along the z axis
 max_z_accel: {{ user.max_z_accel }} # Maximum acceleration (in mm/s^2) of movement along the z axis
 
-# --------------------------------------------------
 # Native utility features
-# --------------------------------------------------
 
 [exclude_object]
 {% for key, value in pins['_native_features']['exclude_object'].items() %}{{ key }}: {{ value }}
@@ -83,9 +75,7 @@ max_z_accel: {{ user.max_z_accel }} # Maximum acceleration (in mm/s^2) of moveme
 {% for key, value in pins['_native_features']['force_move'].items() %}{{ key }}: {{ value }}
 {% endfor %}
 
-# --------------------------------------------------
 # Steppers
-# --------------------------------------------------
 
 [stepper_x]
 {%- if 'stepper_x' in pins %}
@@ -309,7 +299,7 @@ microsteps: {{ user.microsteps_e }} # Number of microsteps per full step
 {%- if user.value_provenance.get('full_steps_per_rotation_e') != 'SAFE_DEFAULT' %}
 full_steps_per_rotation: {{ user.full_steps_per_rotation_e }}
 {%- endif %}
-rotation_distance: {{ user.rotation_distance_e | default(33.5, true) }} # filament per motor revolution (mm) --- manual configuration --- (calibrate by extruding 100mm)
+rotation_distance: {{ user.rotation_distance_e | default(33.5, true) }} # filament per motor revolution (mm), manual configuration (calibrate by extruding 100mm)
 {%- if user.gear_ratio_e %}
 gear_ratio: {{ user.gear_ratio_e }} # Gear ratio of the extruder
 {%- endif %}
@@ -323,9 +313,9 @@ sensor_type: {{ user.hotend_thermistor | default('EPCOS 100K B57560G104F') }} # 
 {%- endfor %}
 control: {{ user.hotend_control }} # Temperature control algorithm
 {%- if user.hotend_control | lower == 'pid' %}
-pid_Kp: {{ user.hotend_pid_kp }} # PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=extruder TARGET=200)
-pid_Ki: {{ user.hotend_pid_ki }} # PID integral --- manual configuration --- (run PID_CALIBRATE)
-pid_Kd: {{ user.hotend_pid_kd }} # PID derivative --- manual configuration --- (run PID_CALIBRATE)
+pid_Kp: {{ user.hotend_pid_kp }} # PID proportional, manual configuration (run PID_CALIBRATE HEATER=extruder TARGET=200)
+pid_Ki: {{ user.hotend_pid_ki }} # PID integral, manual configuration (run PID_CALIBRATE)
+pid_Kd: {{ user.hotend_pid_kd }} # PID derivative, manual configuration (run PID_CALIBRATE)
 {%- endif %}
 min_temp: {{ user.hotend_min_temp }} # Minimum safe temperature
 max_temp: {{ user.hotend_max_temp }} # Maximum safe temperature
@@ -335,9 +325,7 @@ max_temp: {{ user.hotend_max_temp }} # Maximum safe temperature
 
 
 {%- if user.probe_configuration.generates_safe_z_home or user.probe_configuration.generates_bed_mesh or user.probe_configuration.render_block() %}
-# --------------------------------------------------
 # Probe & Bed Leveling
-# --------------------------------------------------
 {% if user.probe_configuration.render_block() %}
 __KACE_VERBATIM_CUSTOM_PROBE_BEGIN__
 {{ user.probe_configuration.render_block() }}
@@ -363,9 +351,9 @@ pin: {{ probe_sec.get('pin', probe_sec.get('sensor_pin', '^TODO')) }} # Pin conn
 sensor_pin: {{ probe_sec.get('sensor_pin', '^TODO') }} # Pin connected to the probe sensor
 control_pin: {{ probe_sec.get('control_pin', 'TODO') }} # Pin connected to the probe control
 {%- endif %}
-x_offset: {{ user.probe_x_offset | default(0) }} # distance from nozzle to probe in X (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
-y_offset: {{ user.probe_y_offset | default(0) }} # distance from nozzle to probe in Y (mm) --- set in KACE wizard --- (re-measure physically if probe is moved)
-z_offset: 0 # nozzle to bed distance (mm) --- manual configuration --- (set using PROBE_CALIBRATE)
+x_offset: {{ user.probe_x_offset | default(0) }} # distance from nozzle to probe in X (mm), set in KACE wizard (re-measure physically if probe is moved)
+y_offset: {{ user.probe_y_offset | default(0) }} # distance from nozzle to probe in Y (mm), set in KACE wizard (re-measure physically if probe is moved)
+z_offset: 0 # nozzle to bed distance (mm), manual configuration (set using PROBE_CALIBRATE)
 {% endif %}
 {%- if user.probe_configuration.generates_safe_z_home %}
 [safe_z_home]
@@ -401,12 +389,12 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 {%- set bx = user.x_size | int %}
 {%- set by = user.y_size | int %}
 
-# [z_tilt]                                      # --- optional ---
+# [z_tilt]                                      # Optional
 # Automatic gantry leveling when 2 or more independent Z motors are present.
 # Klipper adjusts each Z motor individually to tilt the gantry parallel to the bed.
 # Uncomment this section and run Z_TILT_ADJUST from the Klipper console to use it.
 #
-# IMPORTANT — z_positions are NOT nozzle travel coordinates.
+# IMPORTANT - z_positions are NOT nozzle travel coordinates.
 # They are the physical XY location of each Z screw or Z motor on the printer frame.
 # Measure with a ruler where the screws are relative to the axis origin.
 # Values may fall outside the print area (negative numbers or > max position).
@@ -439,7 +427,7 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 {%- set bx = user.x_size | int %}
 {%- set by = user.y_size | int %}
 
-# [quad_gantry_level]                           # --- optional ---
+# [quad_gantry_level]                           # Optional
 # Gantry leveling for CoreXY printers with 4 independent Z motors (e.g. Voron).
 # Klipper adjusts all 4 corner motors to keep the gantry perfectly level.
 # Uncomment this section and run QUAD_GANTRY_LEVEL from the Klipper console.
@@ -464,9 +452,7 @@ fade_target: {{ user.bed_mesh.fade_target | default(0) }} # Target Z offset to f
 {%- endif %}
 
 {%- if 'fan' in pins %}
-# --------------------------------------------------
 # Part Cooling Fan
-# --------------------------------------------------
 [fan]
 pin: {{ pins['fan'].get('pin', 'TODO') }} # Pin connected to the part cooling fan
 {%- for option in pins['_part_fan_scalar_options'] if option in pins['fan'] %}
@@ -475,9 +461,7 @@ pin: {{ pins['fan'].get('pin', 'TODO') }} # Pin connected to the part cooling fa
 {%- endif %}
 
 {%- for name, fields in pins['_selected_hotend_fans'].items() %}
-# --------------------------------------------------
 # Hotend Heatsink Fan
-# --------------------------------------------------
 [{{ name }}]
 pin: {{ fields.get('pin', 'TODO') }} # Pin connected to the hotend heatsink fan
 {%- if 'heater' in fields %}
@@ -499,9 +483,7 @@ heater_temp: {{ fields['heater_temp'] }} # Temperature above which the fan is en
 {%- endfor %}
 {%- endfor %}
 
-# --------------------------------------------------
 # Heated Bed
-# --------------------------------------------------
 
 [heater_bed]
 {%- if 'heater_bed' in pins %}
@@ -516,17 +498,15 @@ sensor_type: {{ user.bed_thermistor | default('EPCOS 100K B57560G104F') }} # Typ
 {%- endfor %}
 control: {{ user.bed_control }} # Temperature control algorithm
 {%- if user.bed_control | lower == 'pid' %}
-pid_Kp: {{ user.bed_pid_kp }} # bed PID proportional --- manual configuration --- (run PID_CALIBRATE HEATER=heater_bed TARGET=60)
-pid_Ki: {{ user.bed_pid_ki }} # bed PID integral --- manual configuration --- (run PID_CALIBRATE)
-pid_Kd: {{ user.bed_pid_kd }} # bed PID derivative --- manual configuration --- (run PID_CALIBRATE)
+pid_Kp: {{ user.bed_pid_kp }} # bed PID proportional, manual configuration (run PID_CALIBRATE HEATER=heater_bed TARGET=60)
+pid_Ki: {{ user.bed_pid_ki }} # bed PID integral, manual configuration (run PID_CALIBRATE)
+pid_Kd: {{ user.bed_pid_kd }} # bed PID derivative, manual configuration (run PID_CALIBRATE)
 {%- endif %}
 min_temp: {{ user.bed_min_temp }} # Minimum safe temperature
 max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 
 {%- if user.driver_type != 'None (Standard)' and user.driver_type != 'A4988' and user.driver_type != 'DRV8825' and user.driver_mode != 'Standalone' %}
-# --------------------------------------------------
 # TMC Drivers
-# --------------------------------------------------
 
 {%- set d_type = 'tmc2208' if user.driver_type == 'TMC2225' else user.driver_type | lower %}
 {%- set editable_tmc = d_type in ['tmc2208', 'tmc2209', 'tmc2130', 'tmc5160'] %}
@@ -563,7 +543,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- for key, value in tmc_x.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
 {{ prefix_x }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
-{{ prefix_x }}run_current: {{ user.run_current_x }} # motor current (A) --- manual configuration --- (check motor specs)
+{{ prefix_x }}run_current: {{ user.run_current_x }} # motor current (A), manual configuration (check motor specs)
 {%- if editable_tmc and 'interpolate' not in tmc_x %}
 # interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
 {%- endif %}
@@ -605,7 +585,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- for key, value in tmc_y.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
 {{ prefix_y }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
-{{ prefix_y }}run_current: {{ user.run_current_y }} # motor current (A) --- manual configuration --- (check motor specs)
+{{ prefix_y }}run_current: {{ user.run_current_y }} # motor current (A), manual configuration (check motor specs)
 {%- if editable_tmc and 'interpolate' not in tmc_y %}
 # interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
 {%- endif %}
@@ -647,7 +627,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- for key, value in tmc_z.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
 {{ prefix_z }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
-{{ prefix_z }}run_current: {{ user.run_current_z }} # motor current (A) --- manual configuration --- (check motor specs)
+{{ prefix_z }}run_current: {{ user.run_current_z }} # motor current (A), manual configuration (check motor specs)
 {%- if editable_tmc and 'interpolate' not in tmc_z %}
 # interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
 {%- endif %}
@@ -691,7 +671,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- for key, value in tmc_z1.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
 {{ prefix_z1 }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
-{{ prefix_z1 }}run_current: {{ user.run_current_z1 }} # motor current (A) --- manual configuration --- (check motor specs)
+{{ prefix_z1 }}run_current: {{ user.run_current_z1 }} # motor current (A), manual configuration (check motor specs)
 {%- if editable_tmc and 'interpolate' not in tmc_z1 %}
 # interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
 {%- endif %}
@@ -736,7 +716,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- for key, value in tmc_z2.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
 {{ prefix_z2 }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
-{{ prefix_z2 }}run_current: {{ user.run_current_z2 }} # motor current (A) --- manual configuration --- (check motor specs)
+{{ prefix_z2 }}run_current: {{ user.run_current_z2 }} # motor current (A), manual configuration (check motor specs)
 {%- if editable_tmc and 'interpolate' not in tmc_z2 %}
 # interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
 {%- endif %}
@@ -781,7 +761,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- for key, value in tmc_z3.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
 {{ prefix_z3 }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
-{{ prefix_z3 }}run_current: {{ user.run_current_z3 }} # motor current (A) --- manual configuration --- (check motor specs)
+{{ prefix_z3 }}run_current: {{ user.run_current_z3 }} # motor current (A), manual configuration (check motor specs)
 {%- if editable_tmc and 'interpolate' not in tmc_z3 %}
 # interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
 {%- endif %}
@@ -824,7 +804,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 {%- for key, value in tmc_e.items() if key not in ['uart_pin', 'tx_pin', 'cs_pin', 'spi_software_sclk_pin', 'spi_software_mosi_pin', 'spi_software_miso_pin', 'spi_bus', 'run_current', 'hold_current', 'stealthchop_threshold'] %}
 {{ prefix_e }}{{ key }}: {{ value }}{% if key == 'interpolate' %} # True: interpolate to 256 microsteps; False: use configured microsteps{% endif %}
 {%- endfor %}
-{{ prefix_e }}run_current: {{ user.run_current_e }} # motor current (A) --- manual configuration --- (check motor specs)
+{{ prefix_e }}run_current: {{ user.run_current_e }} # motor current (A), manual configuration (check motor specs)
 {%- if editable_tmc and 'interpolate' not in tmc_e %}
 # interpolate: True # True: interpolate to 256 microsteps; False: use configured microsteps
 {%- endif %}
@@ -841,9 +821,7 @@ max_temp: {{ user.bed_max_temp }} # Maximum safe temperature
 
 {%- endif %}
 
-# --------------------------------------------------
 # EXP1 / EXP2 Pinout
-# --------------------------------------------------
 {%- if pins._board_pin_sections %}
 {%- for section, options in pins._board_pin_sections.items() %}
 [{{ section }}]
@@ -863,9 +841,7 @@ aliases: {{ options.get('aliases', '\\n    EXP1_1=TODO, EXP1_2=TODO') }} # Defin
 #     EXP2_2=TODO, EXP2_4=TODO, EXP2_6=TODO, EXP2_8=TODO, EXP2_10=<5V>
 {%- endif %}
 
-# ==============================
 # REQUIRED CALIBRATION STEPS
-# ==============================
 # 1. Calibrate extruder (rotation_distance)
 {%- if user.hotend_control | lower == 'pid' %}
 # 2. Run PID_CALIBRATE for hotend
@@ -881,15 +857,12 @@ aliases: {{ options.get('aliases', '\\n    EXP1_1=TODO, EXP1_2=TODO') }} # Defin
 # 5. Verify endstops and axis directions
 {% if pins._advanced_sections %}
 
-# ==================================================
 # ADVANCED HARDWARE SECTIONS
-# ==================================================
 # The sections below were detected in your board's source config.
 # They are preserved here as commented-out blocks so you retain
 # the original pin data. Review each section carefully, then
 # uncomment and adjust as needed. Do NOT uncomment without reading
-# the note above each block — some require physical calibration.
-# ==================================================
+# the note above each block - some require physical calibration.
 
 {% for block in pins._advanced_sections %}
 {{ block }}

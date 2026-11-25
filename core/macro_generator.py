@@ -3,11 +3,16 @@
 #
 import os
 from core.reconciler import write_text_atomically
-from core.translations import t
+from core.translations import cfg_text, get_lang, t, translate_comment
 
 
 def _format_coordinate(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _macro_header(name: str) -> str:
+    description = cfg_text(t(f"macro.{name.lower()}.desc"))
+    return f"# {description}\n[gcode_macro {name}]\ndescription: {description}"
 
 
 def _extrusion_gcode(name: str, distance: int, feed: int) -> str:
@@ -88,75 +93,53 @@ def generate_starter_macros(
     test_x, test_y, test_z = positions["test"]
     calibration_macros = ""
     if str(hotend_control).strip().casefold() == "pid":
-        calibration_macros += f"""# {t('macro.pid_hotend.desc')}
-[gcode_macro PID_HOTEND]
-description: {t('macro.pid_hotend.desc')}
+        calibration_macros += f"""{_macro_header('PID_HOTEND')}
 gcode:
     PID_CALIBRATE HEATER=extruder TARGET=200
 
 """
     if str(bed_control).strip().casefold() == "pid":
-        calibration_macros += f"""# {t('macro.pid_bed.desc')}
-[gcode_macro PID_BED]
-description: {t('macro.pid_bed.desc')}
+        calibration_macros += f"""{_macro_header('PID_BED')}
 gcode:
     PID_CALIBRATE HEATER=heater_bed TARGET=60
 
 """
-    macros_content = f"""# ==============================================================================
-# KACE Starter Macros
-# ==============================================================================
+    macros_content = f"""# {translate_comment('KACE Starter Macros', get_lang())}
 {calibration_macros}
-# {t('macro.test_movement.desc')}
-[gcode_macro TEST_MOVEMENT]
-description: {t('macro.test_movement.desc')}
+{_macro_header('TEST_MOVEMENT')}
 gcode:
     G90
     G1 X{_format_coordinate(test_x)} Y{_format_coordinate(test_y)} Z{_format_coordinate(test_z)} F3000
 
-# {t('macro.test_extruder.desc')}
-[gcode_macro TEST_EXTRUDER]
-description: {t('macro.test_extruder.desc')}
+{_macro_header('TEST_EXTRUDER')}
 gcode:
 {_extrusion_gcode('TEST_EXTRUDER', 50, 100)}
 
-# {t('macro.preheat_pla.desc')}
-[gcode_macro PREHEAT_PLA]
-description: {t('macro.preheat_pla.desc')}
+{_macro_header('PREHEAT_PLA')}
 gcode:
     M140 S60
     M104 S200
 
-# {t('macro.preheat_petg.desc')}
-[gcode_macro PREHEAT_PETG]
-description: {t('macro.preheat_petg.desc')}
+{_macro_header('PREHEAT_PETG')}
 gcode:
     M140 S80
     M104 S240
 
-# {t('macro.home_and_center.desc')}
-[gcode_macro HOME_AND_CENTER]
-description: {t('macro.home_and_center.desc')}
+{_macro_header('HOME_AND_CENTER')}
 gcode:
     G28
     G90
     G1 X{_format_coordinate(center_x)} Y{_format_coordinate(center_y)} Z{_format_coordinate(center_z)} F3000
 
-# {t('macro.park_head.desc')}
-[gcode_macro PARK_HEAD]
-description: {t('macro.park_head.desc')}
+{_macro_header('PARK_HEAD')}
 gcode:
 {_park_gcode(park_x, park_y)}
 
-# {t('macro.load_filament.desc')}
-[gcode_macro LOAD_FILAMENT]
-description: {t('macro.load_filament.desc')}
+{_macro_header('LOAD_FILAMENT')}
 gcode:
 {_extrusion_gcode('LOAD_FILAMENT', 50, 300)}
 
-# {t('macro.unload_filament.desc')}
-[gcode_macro UNLOAD_FILAMENT]
-description: {t('macro.unload_filament.desc')}
+{_macro_header('UNLOAD_FILAMENT')}
 gcode:
 {_extrusion_gcode('UNLOAD_FILAMENT', -50, 300)}
 

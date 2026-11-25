@@ -1020,7 +1020,7 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
             # Let's verify that comments like "# Printer kinematics type (cartesian, corexy, delta)" are translated
             # and replaced correctly in the output.
             output = _generate(parsed, user)
-            self.assertIn("# Tipo de cinemática da impressora (cartesiana, corexy)", output)
+            self.assertIn("# Tipo de cinematica da impressora (cartesiana, corexy)", output)
         finally:
             set_lang(orig_lang)
 
@@ -1035,17 +1035,17 @@ class TestGenerateConfigDisplayBranch(unittest.TestCase):
         try:
             set_lang("Español")
             output = _generate(parsed, user)
-            self.assertIn("# Nivelación automática del gantry cuando hay 2 o más motores Z independientes.", output)
+            self.assertIn("# Nivelacion automatica del gantry cuando hay 2 o mas motores Z independientes.", output)
             self.assertIn("-30, 117", output)
-            self.assertIn("Motor Z izquierdo (ajustar según tu impresora)", output)
-            self.assertIn("Velocidad de desplazamiento entre puntos de medición (mm/s)", output)
+            self.assertIn("Motor Z izquierdo (ajustar segun tu impresora)", output)
+            self.assertIn("Velocidad de desplazamiento entre puntos de medicion (mm/s)", output)
 
             set_lang("Português")
             output = _generate(parsed, user)
-            self.assertIn("# Nivelamento automático do gantry quando há 2 ou mais motores Z independentes.", output)
+            self.assertIn("# Nivelamento automatico do gantry quando ha 2 ou mais motores Z independentes.", output)
             self.assertIn("-30, 117", output)
             self.assertIn("Motor Z esquerdo (ajuste conforme sua impressora)", output)
-            self.assertIn("Velocidade de deslocamento entre pontos de medição (mm/s)", output)
+            self.assertIn("Velocidade de deslocamento entre pontos de medicao (mm/s)", output)
         finally:
             set_lang(orig_lang)
 
